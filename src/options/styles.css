@@ -1,0 +1,62 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  color: #132844;
+}
+
+.options {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+h2 {
+  margin: 18px 0 10px;
+  font-size: 1rem;
+  color: #325476;
+}
+
+p {
+  margin-top: 6px;
+  color: #516a84;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.checkbox-row,
+.inline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+select {
+  min-width: 280px;
+  padding: 8px;
+  border: 1px solid #c3d2e5;
+  border-radius: 8px;
+}
+
+button {
+  margin-top: 16px;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  background: #0f5cc0;
+  color: white;
+  cursor: pointer;
+}
