@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Across Amazon",
+  "version": "0.1.0",
+  "description": "Compare delivered costs of equivalent products across Amazon marketplaces.",
+  "action": {
+    "default_title": "Across Amazon",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": [
+    "https://www.amazon.com/*",
+    "https://www.amazon.ca/*",
+    "https://www.amazon.com.mx/*",
+    "https://www.amazon.co.uk/*",
+    "https://www.amazon.de/*",
+    "https://www.amazon.fr/*",
+    "https://www.amazon.it/*",
+    "https://www.amazon.es/*",
+    "https://www.amazon.co.jp/*",
+    "https://www.amazon.com.au/*"
+  ]
+}
