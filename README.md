@@ -1,8 +1,8 @@
-# Across Amazon MVP
+# Across Amazon
 
 Across Amazon is a Chrome MV3 extension that compares delivered product cost across Amazon marketplaces by combining item price, shipping, and import fees shown on Amazon pages.
 
-## MVP capabilities
+## Capabilities
 
 - User-triggered comparison from extension popup only
 - Top-10 marketplace support: US, CA, MX, UK, DE, FR, IT, ES, JP, AU
@@ -34,17 +34,17 @@ pnpm build
 1. Run `pnpm build`
 2. Open `chrome://extensions`
 3. Enable **Developer mode**
-4. Click **Load unpacked** and select `/Users/user/projects/dortort/across-amazon/dist`
+4. Click **Load unpacked** and select `dist`
 
 ## Project structure
 
-- `/Users/user/projects/dortort/across-amazon/src/background`: service worker, orchestration, FX service
-- `/Users/user/projects/dortort/across-amazon/src/content`: source/search/product extractors
-- `/Users/user/projects/dortort/across-amazon/src/shared`: message/types, matching, money, storage
-- `/Users/user/projects/dortort/across-amazon/src/popup`: extension popup UI
-- `/Users/user/projects/dortort/across-amazon/src/options`: options/settings page
-- `/Users/user/projects/dortort/across-amazon/tests/unit`: unit and fixture parser tests
-- `/Users/user/projects/dortort/across-amazon/tests/e2e`: Playwright popup flow tests
+- `src/background`: service worker, orchestration, FX service
+- `src/content`: source/search/product extractors
+- `src/shared`: message/types, matching, money, storage
+- `src/popup`: extension popup UI
+- `src/options`: options/settings page
+- `tests/unit`: unit and fixture parser tests
+- `tests/e2e`: Playwright popup flow tests
 
 ## Guardrails
 
