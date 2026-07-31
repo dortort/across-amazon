@@ -1679,6 +1679,7 @@
     issuesOpen: false,
     token: null,
     targets: null,
+    returnView: null,
     disabled: {}
   };
 
@@ -1881,7 +1882,12 @@
   function bindB() {
     var gear = document.getElementById("b-gear");
     if (gear) gear.onclick = function () {
-      B.view = B.view === "settings" ? (B.done.length ? "done" : "idle") : "settings";
+      if (B.view === "settings") {
+        B.view = B.returnView || (B.done.length ? "done" : "idle");
+      } else {
+        B.returnView = B.view;
+        B.view = "settings";
+      }
       renderB();
     };
 
@@ -1892,6 +1898,7 @@
         showToast("b-toast", "Pick at least one marketplace to check.");
         return;
       }
+      if (B.token) B.token.cancelled = true;
       B.view = "running";
       B.done = [];
       B.issuesOpen = false;
@@ -1907,7 +1914,8 @@
           renderB();
         },
         onDone: function () {
-          B.view = "done";
+          if (B.view === "settings") B.returnView = "done";
+          else B.view = "done";
           document.getElementById("b-ext").classList.remove("is-live");
           renderB();
         }
