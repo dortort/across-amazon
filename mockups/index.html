@@ -2126,11 +2126,12 @@
         return true;
       });
 
-      // comparable rows sort by price, everything else keeps queue order
+      // settled comparable rows sort by price; unsettled rows keep queue order
       rows.sort(function (a, b) {
-        var ua = usdTotal(a), ub = usdTotal(b);
         var sa = a === "US" || C.done.indexOf(a) !== -1;
         var sb = b === "US" || C.done.indexOf(b) !== -1;
+        var ua = sa ? usdTotal(a) : null;
+        var ub = sb ? usdTotal(b) : null;
         if (ua !== null && ub !== null) return ua - ub;
         if (ua !== null) return -1;
         if (ub !== null) return 1;
