@@ -1987,7 +1987,7 @@
           if (B.view !== "settings") renderB();
         },
         onResult: function (code, n) {
-          if (RESULTS[code].status !== "NOMATCH") B.done.push(code);
+          B.done.push(code);
           B.progress.index = n;
           if (B.view !== "settings") renderB();
         },
