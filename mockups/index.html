@@ -1363,6 +1363,45 @@
     el._t = setTimeout(function () { el.classList.remove("is-on"); }, 2200);
   }
 
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-9999px";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Writes to the clipboard, then reports success/failure honestly via a toast.
+  function copyText(text, toastId, okMsg) {
+    function done(ok) {
+      showToast(toastId, ok ? okMsg : "Couldn't reach the clipboard — the browser blocked the copy.");
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () { done(true); },
+        function () { done(fallbackCopy(text)); }
+      );
+      return;
+    }
+    done(fallbackCopy(text));
+  }
+
+  function csvCell(value) {
+    if (value === null || value === undefined) return "";
+    var s = String(value);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
   // Drives one simulated comparison; every direction consumes the same events.
   function startRun(hooks, targets) {
     targets = targets || TARGETS;
@@ -1438,6 +1477,34 @@
       if (u !== null && (best === null || u < usdTotal(best))) best = c;
     });
     return best;
+  }
+
+  function aCsv(rows) {
+    var cur = A.cur;
+    var header = ["Marketplace", "Code", "Local currency", "Item", "Shipping", "Import",
+      "Local total", "Delivered (" + cur + ")", "vs US (" + cur + ")", "Match", "Status"];
+    var lines = [header.map(csvCell).join(",")];
+    rows.forEach(function (x) {
+      var m = MARKETS[x.code];
+      var r = x.r;
+      var ok = r.status === "OK" || r.status === "BASELINE";
+      var delivered = x.usd === null ? "" : Number(convert(x.usd, cur).toFixed(2));
+      var vsUs = x.usd === null || x.code === SOURCE.market
+        ? (x.code === SOURCE.market ? 0 : "")
+        : Number((convert(x.usd, cur) - convert(BASE_USD, cur)).toFixed(2));
+      lines.push([
+        m.name, x.code, m.cur,
+        ok ? r.item : "",
+        ok ? (r.ship || 0) : "",
+        ok ? (r.imp || 0) : "",
+        ok ? Number(localTotal(r).toFixed(2)) : "",
+        delivered,
+        vsUs,
+        ok && x.code !== SOURCE.market ? Math.round(r.conf * 100) + "%" : "",
+        ok ? (x.code === SOURCE.market ? "Baseline" : "Available") : STATUS_TEXT[r.status]
+      ].map(csvCell).join(","));
+    });
+    return lines.join("\r\n");
   }
 
   function renderA() {
@@ -1632,7 +1699,10 @@
     if (omit) omit.onclick = function () { A.showOmitted = !A.showOmitted; renderA(); };
 
     var csv = document.getElementById("a-csv");
-    if (csv) csv.onclick = function () { showToast("a-toast", "Copied " + aRows().length + " rows as CSV to the clipboard."); };
+    if (csv) csv.onclick = function () {
+      var rows = aRows();
+      copyText(aCsv(rows), "a-toast", "Copied " + rows.length + " rows as CSV to the clipboard.");
+    };
 
     Array.prototype.forEach.call(A.root.querySelectorAll("th[data-sort]"), function (th) {
       function doSort() {
@@ -1661,7 +1731,12 @@
     });
 
     Array.prototype.forEach.call(A.root.querySelectorAll("[data-copy]"), function (b) {
-      b.onclick = function (e) { e.stopPropagation(); showToast("a-toast", "Row copied to the clipboard."); };
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var code = b.getAttribute("data-copy");
+        copyText(aCsv([{ code: code, r: RESULTS[code], usd: usdTotal(code) }]), "a-toast",
+          MARKETS[code].name + " row copied to the clipboard.");
+      };
     });
   }
 
