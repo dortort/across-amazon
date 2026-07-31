@@ -1907,16 +1907,19 @@
       document.getElementById("b-ext").classList.add("is-live");
       renderB();
       B.token = startRun({
-        onPhase: function (code, phase, i) { B.progress = { index: i, code: code, phase: phase }; renderB(); },
+        onPhase: function (code, phase, i) {
+          B.progress = { index: i, code: code, phase: phase };
+          if (B.view !== "settings") renderB();
+        },
         onResult: function (code, n) {
           if (RESULTS[code].status !== "NOMATCH") B.done.push(code);
           B.progress.index = n;
-          renderB();
+          if (B.view !== "settings") renderB();
         },
         onDone: function () {
-          if (B.view === "settings") B.returnView = "done";
-          else B.view = "done";
           document.getElementById("b-ext").classList.remove("is-live");
+          if (B.view === "settings") { B.returnView = "done"; return; }
+          B.view = "done";
           renderB();
         }
       }, targets);
