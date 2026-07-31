@@ -1364,18 +1364,19 @@
   }
 
   // Drives one simulated comparison; every direction consumes the same events.
-  function startRun(hooks) {
+  function startRun(hooks, targets) {
+    targets = targets || TARGETS;
     var token = { cancelled: false };
     (async function () {
-      for (var i = 0; i < TARGETS.length; i++) {
-        var code = TARGETS[i];
+      for (var i = 0; i < targets.length; i++) {
+        var code = targets[i];
         for (var p = 0; p < PHASES.length; p++) {
           if (token.cancelled) { if (hooks.onCancel) hooks.onCancel(); return; }
-          if (hooks.onPhase) hooks.onPhase(code, PHASES[p], i, TARGETS.length);
+          if (hooks.onPhase) hooks.onPhase(code, PHASES[p], i, targets.length);
           await sleep(PHASES[p].ms);
         }
         if (token.cancelled) { if (hooks.onCancel) hooks.onCancel(); return; }
-        if (hooks.onResult) hooks.onResult(code, i + 1, TARGETS.length);
+        if (hooks.onResult) hooks.onResult(code, i + 1, targets.length);
       }
       if (hooks.onDone) hooks.onDone();
     })();
@@ -1677,8 +1678,13 @@
     sheet: null,
     issuesOpen: false,
     token: null,
+    targets: null,
     disabled: {}
   };
+
+  function bTargets() {
+    return TARGETS.filter(function (c) { return !B.disabled[c]; });
+  }
 
   function bOk() {
     return B.done.filter(function (c) { return RESULTS[c].status === "OK"; })
@@ -1733,19 +1739,20 @@
             "<h3>" + esc(SOURCE.title) + "</h3>" +
             "<p>" + SOURCE.variant + " · " + fmt(399.99, "USD") + " on amazon.com</p>" +
           "</div></div>" +
-          '<button class="dB-cta" id="b-run">Check ' + (9 - Object.keys(B.disabled).length) + " other Amazons</button>" +
+          '<button class="dB-cta" id="b-run">Check ' + bTargets().length + " other Amazons</button>" +
           '<p class="dB-hint">Takes about 15 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to ' + SOURCE.shipTo + ".</p>" +
         "</div>";
     }
 
     if (B.view === "running") {
-      var p = B.progress || { index: 0, code: TARGETS[0], phase: PHASES[0] };
-      var pct = Math.round((p.index / TARGETS.length) * 100);
+      var runTargets = B.targets || TARGETS;
+      var p = B.progress || { index: 0, code: runTargets[0], phase: PHASES[0] };
+      var pct = Math.round((p.index / runTargets.length) * 100);
       html +=
         '<div class="dB-scroll"><div class="dB-run">' +
           '<div class="dB-ring">' +
             '<div class="dB-dial-wrap"><div class="dB-dial" style="--p:' + pct + '%"></div>' +
-            '<span class="dB-dial-num">' + p.index + "/" + TARGETS.length + "</span></div>" +
+            '<span class="dB-dial-num">' + p.index + "/" + runTargets.length + "</span></div>" +
           "</div>" +
           '<div><p class="dB-nowline">' + p.phase.label + " <b>" + MARKETS[p.code].name + "</b></p>" +
           '<p class="dB-nowsub">' + MARKETS[p.code].domain + "</p></div>" +
@@ -1880,10 +1887,16 @@
 
     var run = document.getElementById("b-run");
     if (run) run.onclick = function () {
+      var targets = bTargets();
+      if (!targets.length) {
+        showToast("b-toast", "Pick at least one marketplace to check.");
+        return;
+      }
       B.view = "running";
       B.done = [];
       B.issuesOpen = false;
-      B.progress = { index: 0, code: TARGETS[0], phase: PHASES[0] };
+      B.targets = targets;
+      B.progress = { index: 0, code: targets[0], phase: PHASES[0] };
       document.getElementById("b-ext").classList.add("is-live");
       renderB();
       B.token = startRun({
@@ -1898,7 +1911,7 @@
           document.getElementById("b-ext").classList.remove("is-live");
           renderB();
         }
-      });
+      }, targets);
     };
 
     var cancel = document.getElementById("b-cancel");
