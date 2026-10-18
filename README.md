@@ -1,50 +1,54 @@
 # Across Amazon
 
-Across Amazon is a Chrome MV3 extension that compares delivered product cost across Amazon marketplaces by combining item price, shipping, and import fees shown on Amazon pages.
+Across Amazon is a Chrome MV3 extension that compares delivered product cost across Amazon marketplaces. On an Amazon product page, it checks the same product on the other marketplaces and ranks them by delivered total (item price + shipping + import fees, as shown on Amazon pages) against the page you are on.
+
+<p align="center">
+  <img src="docs/screenshots/done.png" width="400" alt="Popup verdict: save $50.94 by buying the headphones from Germany for $349.05 delivered instead of $399.99 on amazon.com">
+</p>
+
+| Idle | Running | Breakdown |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/idle.png" width="260" alt="Idle popup with the product and a Check 9 other Amazons button"> | <img src="docs/screenshots/running.png" width="260" alt="Progress dial at 4 of 9 with a chip per checked marketplace"> | <img src="docs/screenshots/sheet.png" width="260" alt="Germany breakdown: item, shipping, import fees and delivered total"> |
+
+<sub>Screenshots show the real popup with illustrative fixture data, not real prices.</sub>
+
+## Documentation
+
+- [Using the popup](docs/popup.md): every popup state, and what the delivered totals, deltas and "Check match" mean
+- [Architecture](docs/architecture.md): how a comparison runs end to end, message correlation, cancellation and the module map
+- [Testing](docs/testing.md): the test layers, visual baselines per platform, and regenerating the screenshots
 
 ## Capabilities
 
-- User-triggered comparison from extension popup only
+- User-triggered comparison from the extension popup only
 - Top-10 marketplace support: US, CA, MX, UK, DE, FR, IT, ES, JP, AU
 - Conservative product matching with confidence filtering
 - Sequential cross-market extraction via temporary inactive tabs
 - Daily FX normalization (ECB primary, Frankfurter fallback)
 - Local-only short-lived caching (30 minutes)
 
-## Popup
-
-The popup follows the "Verdict" design: one answer first, detail on demand.
-
-- Idle: the product on the current page, its delivered price, and a single call to action
-- Running: a progress dial with the current phase (opening, searching, matching, reading) and a chip per finished marketplace
-- Done: a verdict card (save, stay here, cheapest, or nothing found), every marketplace ranked by delivered total with the delta against the current page, low-confidence matches flagged, and failed marketplaces folded into an accordion
-- Sheet: item, shipping, import fees, delivered total and the converted amount for any marketplace, with a confidence note
-- Settings: display currency and marketplaces to check, saved immediately and shared with the options page
-
 ## Tech stack
 
-- Vite + React + TypeScript
-- Chrome Extension Manifest V3
-- Vitest + JSDOM unit, component (React Testing Library) and orchestrator integration tests
-- Playwright functional, design and visual regression e2e tests
+- Vite + React + TypeScript, Chrome Extension Manifest V3
+- Vitest + JSDOM unit, component (React Testing Library), orchestrator and build tests
+- Playwright functional, design and visual regression tests
 - GitHub Actions CI (e2e runs in the official Playwright container)
 
-## Development setup
+## Development
 
 ```bash
 pnpm install
 pnpm lint
 pnpm typecheck
-pnpm test
-pnpm test:e2e
-pnpm build
+pnpm test                      # Vitest: unit, component, orchestrator and build tests
+pnpm test:e2e                  # Playwright against the popup served by Vite
+pnpm test:e2e:linux-snapshots  # regenerate the Linux visual baselines in Docker
+pnpm docs:screenshots          # regenerate docs/screenshots
+pnpm build                     # production build into dist/
+pnpm dev                       # rebuild dist/ on every change
 ```
 
-## Testing
-
-- `pnpm test` runs unit tests for shared helpers and parsers, component tests for every popup view, and orchestrator tests that drive the real service worker and extractors against HTML fixtures through a chrome mock
-- `pnpm test:e2e` runs Playwright against the popup served by Vite with a mocked chrome API: functional flows, computed-style design assertions, and screenshot snapshots
-- Screenshot snapshots are platform specific. macOS snapshots are generated locally; Linux snapshots used by CI are regenerated with `pnpm test:e2e:linux-snapshots`, which runs the suite inside the same Playwright Docker image as CI
+See [Testing](docs/testing.md) for first-time Playwright setup and how the baselines work.
 
 ## Load extension in Chrome
 
@@ -60,9 +64,10 @@ pnpm build
 - `src/shared`: message/types, matching, money, storage
 - `src/popup`: extension popup UI (`view-model.ts` holds the pure ranking and copy logic, `components/` the views)
 - `src/options`: options/settings page
-- `tests/unit`: unit, component and orchestrator tests with HTML fixtures under `tests/fixtures`
+- `tests/unit`: unit, component, orchestrator and build tests with HTML fixtures under `tests/fixtures`
 - `tests/e2e`: Playwright popup flows, design assertions and snapshots
-- `scripts`: maintenance scripts such as Linux snapshot regeneration
+- `scripts`: Linux snapshot regeneration and docs screenshot capture
+- `docs`: user guide, architecture, testing and screenshots
 
 ## Guardrails
 
