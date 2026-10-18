@@ -94,13 +94,21 @@ function detectCurrency(text: string): string {
   if (text.includes("€")) {
     return "EUR";
   }
-  if (text.includes("￥") || text.includes("¥")) {
+  if (text.includes("￥") || text.includes("¥") || text.includes("円")) {
     return "JPY";
   }
   return "USD";
 }
 
-function parseMoney(text: string): { amount: number; currency: string } | undefined {
+type ParsedMoney = { amount: number; currency: string };
+
+const CURRENCY_CODE = String.raw`(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD)(?![A-Za-z])`;
+const AMOUNT = String.raw`(?:\d{1,3}(?:[\u00a0\u202f]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)*)`;
+const PREFIXED_MONEY = new RegExp(String.raw`(?:(?:CA|C|MX|AU|US)?\$|£|€|￥|¥|${CURRENCY_CODE}\s*)${AMOUNT}`);
+const SUFFIXED_MONEY = new RegExp(String.raw`${AMOUNT}\s*(?:€|£|￥|¥|円|\$|${CURRENCY_CODE})`);
+const BARE_AMOUNT = /^\d[\d\s.,]*$/;
+
+function parseMoney(text: string): ParsedMoney | undefined {
   const amount = parseLocalizedNumber(text);
   if (amount === undefined) {
     return undefined;
@@ -110,6 +118,11 @@ function parseMoney(text: string): { amount: number; currency: string } | undefi
     amount,
     currency: detectCurrency(text)
   };
+}
+
+function parseCurrencyMarkedMoney(text: string): ParsedMoney | undefined {
+  const token = PREFIXED_MONEY.exec(text)?.[0] ?? SUFFIXED_MONEY.exec(text)?.[0];
+  return token ? parseMoney(token) : undefined;
 }
 
 function resolveDestinationCountryCode(documentRef: Document): string | undefined {
@@ -156,38 +169,62 @@ function findPriceText(documentRef: Document): string | undefined {
   return undefined;
 }
 
-function findChargeByKeywords(documentRef: Document, keywords: string[]): string | undefined {
-  const selectors = [
-    "#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE",
-    "#deliveryBlockMessage",
-    "#deliveryBlockMessage_feature_div",
-    "#exports_desktop_feature_div",
-    "#mir-layout-DELIVERY_BLOCK-slot-DELIVERY_MESSAGE",
-    "#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"
-  ];
+const CHARGE_BLOCK_SELECTORS = [
+  "#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE",
+  "#deliveryBlockMessage",
+  "#deliveryBlockMessage_feature_div",
+  "#exports_desktop_feature_div",
+  "#mir-layout-DELIVERY_BLOCK-slot-DELIVERY_MESSAGE",
+  "#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"
+];
 
-  for (const selector of selectors) {
+interface ChargeReading {
+  amount?: ParsedMoney;
+  isFree: boolean;
+}
+
+function findChargeBlock(documentRef: Document, keywords: string[]): Element | undefined {
+  for (const selector of CHARGE_BLOCK_SELECTORS) {
     const element = documentRef.querySelector(selector);
-    if (!element) {
-      continue;
-    }
-
-    const content = normalize(element.textContent ?? "");
-    if (!keywords.some((keyword) => content.includes(keyword))) {
-      continue;
-    }
-
-    const priceText =
-      element.querySelector(".a-color-price")?.textContent?.trim() ??
-      element.querySelector(".a-offscreen")?.textContent?.trim() ??
-      element.textContent?.trim();
-
-    if (priceText) {
-      return priceText;
+    const content = normalize(element?.textContent ?? "");
+    if (element && keywords.some((keyword) => content.includes(keyword))) {
+      return element;
     }
   }
 
   return undefined;
+}
+
+function readPriceElement(block: Element): ParsedMoney | undefined {
+  const priceElements = [...block.querySelectorAll(".a-color-price"), ...block.querySelectorAll(".a-offscreen")];
+  for (const element of priceElements) {
+    const text = element.textContent?.trim() ?? "";
+    const amount = parseCurrencyMarkedMoney(text) ?? (BARE_AMOUNT.test(text) ? parseMoney(text) : undefined);
+    if (amount) {
+      return amount;
+    }
+  }
+
+  return undefined;
+}
+
+function readCharge(documentRef: Document, keywords: string[], isFreeText: (text: string) => boolean): ChargeReading {
+  const block = findChargeBlock(documentRef, keywords);
+  if (!block) {
+    return { isFree: false };
+  }
+
+  const explicitAmount = readPriceElement(block);
+  if (explicitAmount) {
+    return { amount: explicitAmount, isFree: false };
+  }
+
+  const blockText = block.textContent ?? "";
+  if (isFreeText(blockText)) {
+    return { isFree: true };
+  }
+
+  return { amount: parseCurrencyMarkedMoney(blockText), isFree: false };
 }
 
 function hasFreeMarker(text: string | undefined): boolean {
@@ -215,14 +252,16 @@ export function extractProductData(
   const itemPriceText = findPriceText(documentRef);
   const itemPrice = itemPriceText ? parseMoney(itemPriceText) : undefined;
 
-  const shippingText = findChargeByKeywords(documentRef, ["shipping", "delivery", "envio", "livraison", "versand", "配達"]);
-  const importText = findChargeByKeywords(documentRef, ["import fee", "import fees", "deposit", "税", "duty", "aduana"]);
-
-  const shippingAmount = shippingText ? parseMoney(shippingText) : undefined;
-  const importAmount = importText ? parseMoney(importText) : undefined;
-
-  const shippingIsFree = hasFreeMarker(shippingText);
-  const importIsFree = hasFreeMarker(importText) || normalize(importText ?? "").includes("no import fee");
+  const { amount: shippingAmount, isFree: shippingIsFree } = readCharge(
+    documentRef,
+    ["shipping", "delivery", "envio", "livraison", "versand", "配達"],
+    hasFreeMarker
+  );
+  const { amount: importAmount, isFree: importIsFree } = readCharge(
+    documentRef,
+    ["import fee", "import fees", "deposit", "税", "duty", "aduana"],
+    (text) => hasFreeMarker(text) || normalize(text).includes("no import fee")
+  );
 
   const hasShippingInfo = Boolean(shippingAmount || shippingIsFree);
   const hasImportInfo = Boolean(importAmount || importIsFree);
