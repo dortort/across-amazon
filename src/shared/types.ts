@@ -13,6 +13,7 @@ export interface SourceContext {
   variationTokens: string[];
   destinationCountryCode: string;
   sourceUrl: string;
+  imageUrl?: string;
 }
 
 export interface SearchCandidate {
@@ -93,16 +94,28 @@ export interface ProductExtractionRequest {
   sourceDestinationCountryCode: string;
 }
 
+export type ComparisonPhase = "OPEN" | "SEARCH" | "MATCH" | "READ";
+
 export interface RunComparisonProgressPayload {
   completed: number;
   total: number;
   currentMarketplace?: Marketplace;
+  phase?: ComparisonPhase;
+  results?: ComparisonResult[];
 }
 
 export interface RunComparisonResultPayload {
   source?: SourceContext;
+  baseline?: ComparisonResult;
   results: ComparisonResult[];
   generatedAt: string;
+  fxTable?: FxTable;
+  error?: string;
+}
+
+export interface LoadSourcePayload {
+  source?: SourceContext;
+  baseline?: ComparisonResult;
   error?: string;
 }
 
@@ -115,5 +128,7 @@ export interface ExtensionSettings {
 export interface CachedComparisonRecord {
   createdAt: string;
   source: SourceContext;
+  baseline?: ComparisonResult;
   results: ComparisonResult[];
+  fxTable?: FxTable;
 }
