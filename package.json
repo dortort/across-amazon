@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:linux-snapshots": "scripts/update-linux-snapshots.sh",
+    "docs:screenshots": "node scripts/capture-screenshots.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
