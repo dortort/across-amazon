@@ -60,11 +60,37 @@ describe("done view verdicts", () => {
       "Germany",
       "$349.05"
     ]);
+    expect(card.querySelector(".dB-flag-pill")).toBeNull();
 
     await app.user.click(within(card).getByRole("button", { name: "Open on amazon.de" }));
 
     expect(app.create).toHaveBeenCalledWith({ url: productUrl("DE"), active: true });
     expect(screen.getByRole("status")).toHaveTextContent("Opening amazon.de — you complete the purchase on Amazon.");
+  });
+
+  it("flags a low-confidence best match on the saving verdict", async () => {
+    const app = await renderDone(resultPayload({ results: [{ ...de, confidence: 0.82 }, uk, jp] }));
+    const { card, eyebrow, lede } = verdictCard(app.container);
+
+    expect(card.querySelector(".eyebrow .dB-flag-pill")).toHaveTextContent("Check match");
+    expect(card.querySelector(".eyebrow")?.lastChild).toBe(card.querySelector(".dB-flag-pill"));
+    expect(eyebrow).toBe("Cheapest delivered to United StatesCheck match");
+    expect(lede).toBe(
+      "Buy from Germany for $349.05 delivered — 13% less than the $399.99 you would pay here. Item, shipping and import fees included. Confirm it is the same product before you buy."
+    );
+    expect(rowSummary(rowElements(app.container)[0])).toMatchObject({ name: "Germany", best: true, pill: "Check match" });
+  });
+
+  it("flags a low-confidence best match when the page price could not be read", async () => {
+    const app = await renderDone(resultPayload({ baseline: undefined, results: [{ ...de, confidence: 0.6 }, uk] }), {
+      loadSource: { source }
+    });
+    const { card, lede } = verdictCard(app.container);
+
+    expect(card.querySelector(".eyebrow .dB-flag-pill")).toHaveTextContent("Check match");
+    expect(lede).toBe(
+      "Buy from Germany for $349.05 delivered. Item, shipping and import fees included. We could not read the price on this page to compare. Confirm it is the same product before you buy."
+    );
   });
 
   it("says stay here when nothing beats the page price", async () => {
@@ -92,6 +118,7 @@ describe("done view verdicts", () => {
 
     expect(card).not.toHaveClass("is-muted");
     expect(eyebrow).toBe("Cheapest delivered to United States");
+    expect(card.querySelector(".dB-flag-pill")).toBeNull();
     expect(headline).toHaveTextContent("$349.05");
     expect(lede).toBe(
       "Buy from Germany for $349.05 delivered. Item, shipping and import fees included. We could not read the price on this page to compare."
@@ -259,18 +286,18 @@ describe("issues accordion", () => {
       {
         flag: "🇲🇽",
         title: "Mexico — No confident match",
-        note: "Closest listing scored 31% — below the confidence floor."
+        note: "No listing scored above the confidence floor."
       },
-      { flag: "🇫🇷", title: "France — Delivered total not quotable", note: "Out of stock — no delivery date offered." },
       {
-        flag: "🇪🇸",
-        title: "Spain — Could not read the page",
-        note: "Import fees are only revealed at checkout, so the delivered total cannot be quoted."
+        flag: "🇫🇷",
+        title: "France — Delivered total not quotable",
+        note: "Amazon did not show a delivered price for this destination."
       },
+      { flag: "🇪🇸", title: "Spain — Could not read the page", note: "The product page could not be read." },
       {
         flag: "🇯🇵",
         title: "Japan — Does not ship here",
-        note: "Match found, but the seller does not ship to the United States."
+        note: "Match found, but the seller does not ship to United States."
       }
     ]);
 
@@ -279,14 +306,37 @@ describe("issues accordion", () => {
     expect(body).not.toBeVisible();
   });
 
-  it("falls back to the per-status note for the destination country", async () => {
-    const app = await renderDone(resultPayload({ results: [de, { ...jp, notes: undefined }] }));
+  it("never shows the backend's internal notes", async () => {
+    const timedOut = { ...es, notes: ["Timed out waiting for tab 123 to complete"] };
+    const app = await renderDone(resultPayload({ results: [de, timedOut] }));
+
+    await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
+
+    expect(app.container.querySelector(".dB-issue p")?.textContent).toBe("The product page could not be read.");
+    expect(screen.queryByText(/Timed out/)).not.toBeInTheDocument();
+  });
+
+  it("names the destination country from the source in the shipping note", async () => {
+    const app = await renderDone(resultPayload({ source: { ...source, destinationCountryCode: "DE" }, results: [de, jp] }));
 
     await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
 
     expect(app.container.querySelector(".dB-issue p")?.textContent).toBe(
-      "Match found, but the seller does not ship to United States."
+      "Match found, but the seller does not ship to Germany."
     );
+  });
+
+  it("lists issues in canonical marketplace order whatever order they arrive in", async () => {
+    const app = await renderDone(resultPayload({ results: [jp, de, es, fr, mx] }));
+
+    await app.user.click(screen.getByRole("button", { name: "4 marketplaces could not be compared" }));
+
+    expect(Array.from(app.container.querySelectorAll(".dB-issue .flag")).map((flag) => flag.textContent)).toEqual([
+      "🇲🇽",
+      "🇫🇷",
+      "🇪🇸",
+      "🇯🇵"
+    ]);
   });
 
   it("is absent when every marketplace was compared", async () => {
@@ -303,8 +353,8 @@ describe("check again", () => {
     await app.user.click(screen.getByRole("button", { name: "Check again" }));
 
     expect(app.runRequests()).toEqual([
-      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } },
-      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } }
+      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } },
+      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } }
     ]);
     expect(app.container.querySelector(".dB-dial-num")?.textContent).toBe("0/9");
     expect(app.container.querySelectorAll(".dB-chk")).toHaveLength(1);

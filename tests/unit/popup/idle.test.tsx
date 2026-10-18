@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../../src/popup/App";
 import { LOAD_SOURCE, RUN_COMPARISON } from "../../../src/shared/messages";
@@ -93,7 +93,44 @@ describe("idle view", () => {
     ).toBeInTheDocument();
     expect(app.container.querySelector(".dB-notice")).not.toBeNull();
     expect(screen.queryByRole("heading", { level: 3 })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check 10 other Amazons" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check other Amazons" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^Check \d+ other/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a reading hint instead of an empty pane while LOAD_SOURCE is pending", async () => {
+    const app = renderApp({ pendingLoadSource: true });
+
+    await waitFor(() => expect(app.sentOfType(LOAD_SOURCE)).toHaveLength(1));
+
+    expect(screen.getByText("Reading this page…")).toHaveClass("dB-hint");
+    expect(app.container.querySelector(".dB-scroll")?.children).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /^Check/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Open an Amazon product page")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["a non-Amazon site", "https://www.google.com/search?q=sony"],
+    ["a look-alike host", "https://www.amazon.com.example.net/dp/B09XS7JWHH"],
+    ["an unsupported Amazon host", "https://www.amazon.nl/dp/B09XS7JWHH"],
+    ["a browser page", "chrome://extensions/"],
+    ["a tab without a url", undefined]
+  ])("does not read the page on %s and shows the notice directly", async (_label, url) => {
+    const app = renderApp({ tabs: [{ id: ACTIVE_TAB_ID, url }] });
+
+    expect(await screen.findByText("Open an Amazon product page")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check other Amazons" })).toBeDisabled();
+    expect(app.query).toHaveBeenCalledTimes(1);
+    expect(app.sentOfType(LOAD_SOURCE)).toEqual([]);
+  });
+
+  it.each([
+    ["a desktop host", "https://www.amazon.de/dp/B09XS7JWHH?th=1"],
+    ["a mobile host", "https://m.amazon.co.uk/dp/B09XS7JWHH"]
+  ])("reads the page on %s of a supported marketplace", async (_label, url) => {
+    const app = await renderLoaded({ tabs: [{ id: ACTIVE_TAB_ID, url }] });
+
+    expect(app.sentOfType(LOAD_SOURCE)).toEqual([{ type: LOAD_SOURCE, payload: { activeTabId: ACTIVE_TAB_ID } }]);
+    expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeEnabled();
   });
 
   it("does not ask for the source when there is no active tab", async () => {
@@ -101,7 +138,7 @@ describe("idle view", () => {
 
     expect(await screen.findByText("Open an Amazon product page")).toBeInTheDocument();
     expect(app.sentOfType(LOAD_SOURCE)).toEqual([]);
-    expect(screen.getByRole("button", { name: /^Check \d+ other Amazons$/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check other Amazons" })).toBeDisabled();
   });
 
   it("renders the not-on-Amazon state when the chrome APIs are missing", async () => {
@@ -109,7 +146,7 @@ describe("idle view", () => {
     render(<App />);
 
     expect(await screen.findByText("Open an Amazon product page")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check 10 other Amazons" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check other Amazons" })).toBeDisabled();
   });
 
   it("falls back to default settings when chrome.storage is missing", async () => {
@@ -130,7 +167,9 @@ describe("idle view", () => {
 
     await app.user.click(screen.getByRole("button", { name: "Check 9 other Amazons" }));
 
-    expect(app.runRequests()).toEqual([{ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } }]);
+    expect(app.runRequests()).toEqual([
+      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } }
+    ]);
     expect(screen.getByText("0/9")).toHaveClass("dB-dial-num");
     expect(app.container.querySelector<HTMLElement>(".dB-dial")?.style.getPropertyValue("--p")).toBe("0%");
     expect(app.container.querySelector(".dB-nowline")).toHaveTextContent("Opening tab Canada");
@@ -192,6 +231,40 @@ describe("toast", () => {
     act(() => {
       vi.advanceTimersByTime(200);
     });
-    expect(screen.getByRole("status")).not.toHaveClass("is-on");
+    expect(screen.getByRole("status", { hidden: true })).not.toHaveClass("is-on");
+  });
+
+  it("is hidden from assistive technology while it is not shown", async () => {
+    renderApp({ settings: { enabledMarketplaces: ["US"] } });
+    const cta = await screen.findByRole("button", { name: "Check 0 other Amazons" });
+    const toast = screen.getByRole("status", { hidden: true });
+    expect(toast).toHaveAttribute("aria-hidden", "true");
+    expect(toast).toBeEmptyDOMElement();
+    vi.useFakeTimers();
+
+    fireEvent.click(cta);
+    expect(screen.getByRole("status")).toBe(toast);
+    expect(toast).not.toHaveAttribute("aria-hidden");
+
+    act(() => {
+      vi.advanceTimersByTime(2200);
+    });
+    expect(toast).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("re-renders a repeated identical message so it is announced again", async () => {
+    renderApp({ settings: { enabledMarketplaces: ["US"] } });
+    const cta = await screen.findByRole("button", { name: "Check 0 other Amazons" });
+
+    fireEvent.click(cta);
+    const first = screen.getByRole("status").firstElementChild;
+    fireEvent.click(cta);
+    const second = screen.getByRole("status").firstElementChild;
+
+    expect(first).toHaveTextContent("Pick at least one marketplace to check.");
+    expect(second).toHaveTextContent("Pick at least one marketplace to check.");
+    expect(second).not.toBe(first);
+    expect(first?.isConnected).toBe(false);
   });
 });

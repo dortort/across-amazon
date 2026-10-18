@@ -2,7 +2,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { MARKETPLACE_BY_CODE, marketDisplayDomain, marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
 import type { ComparisonResult, FxTable, Marketplace, RunComparisonProgressPayload } from "../../shared/types";
-import { displayTotal, phaseLabel, progressPercent } from "../view-model";
+import { displayTotal, inCheckOrder, phaseLabel, progressPercent } from "../view-model";
 
 interface RunningViewProps {
   progress?: RunComparisonProgressPayload;
@@ -31,11 +31,11 @@ export function RunningView({ progress, runTargets, currency, fxTable, onCancel 
   const total = progress?.total ?? runTargets.length;
   const completed = progress?.completed ?? 0;
   const current = progress ? progress.currentMarketplace : runTargets[0];
-  const checked = progress?.results ?? [];
+  const checked = inCheckOrder(progress?.results ?? [], runTargets);
   const dialStyle = { "--p": `${progressPercent(completed, total)}%` } as CSSProperties;
 
   return (
-    <div className="dB-scroll">
+    <div className="dB-scroll" tabIndex={-1}>
       <div className="dB-run">
         <div className="dB-ring">
           <div className="dB-dial-wrap">
@@ -46,7 +46,7 @@ export function RunningView({ progress, runTargets, currency, fxTable, onCancel 
           </div>
         </div>
         <div>
-          <p className="dB-nowline">
+          <p className="dB-nowline" aria-live="polite">
             {current ? (
               <>
                 {phaseLabel(progress?.phase)} <b>{marketLabel(current)}</b>

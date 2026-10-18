@@ -19,11 +19,11 @@ afterEach(() => {
 });
 
 function currencyButtons(): HTMLElement[] {
-  const segment = document.getElementById("b-seg");
-  if (!segment) {
-    throw new Error("segmented control missing");
-  }
-  return within(segment).getAllByRole("button");
+  return within(screen.getByRole("group", { name: "Show prices in" })).getAllByRole("button");
+}
+
+function pressedStates(): Array<[string | null, string | null]> {
+  return currencyButtons().map((button) => [button.textContent, button.getAttribute("aria-pressed")]);
 }
 
 describe("settings toggle", () => {
@@ -66,12 +66,74 @@ describe("currency setting", () => {
     const app = await renderLoaded();
     await app.user.click(screen.getByRole("button", { name: "Settings" }));
 
-    expect(currencyButtons().map((button) => [button.textContent, button.getAttribute("aria-pressed")])).toEqual([
+    expect(pressedStates()).toEqual([
       ["USD", "true"],
       ["EUR", "false"],
       ["GBP", "false"],
       ["JPY", "false"]
     ]);
+  });
+
+  it("labels the segmented control with its heading", async () => {
+    const app = await renderLoaded();
+    await app.user.click(screen.getByRole("button", { name: "Settings" }));
+
+    const group = screen.getByRole("group", { name: "Show prices in" });
+    expect(group).toHaveClass("dB-seg");
+    expect(group).toHaveAttribute("id", "b-seg");
+    expect(document.getElementById(group.getAttribute("aria-labelledby") ?? "")).toBe(
+      screen.getByRole("heading", { name: "Show prices in" })
+    );
+  });
+
+  it("saves the follow-the-marketplace default when the source currency is chosen", async () => {
+    const app = await renderLoaded({ settings: { comparisonCurrency: "EUR" } });
+    await app.user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("button", { name: "EUR" })).toHaveAttribute("aria-pressed", "true");
+
+    await app.user.click(screen.getByRole("button", { name: "USD" }));
+
+    expect(app.set).toHaveBeenLastCalledWith({ [SETTINGS_KEY]: { ...DEFAULT_SETTINGS, comparisonCurrency: "SOURCE" } });
+    expect(screen.getByRole("button", { name: "USD" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("saves the follow-the-marketplace default from a foreign source currency", async () => {
+    const app = await renderLoaded({
+      loadSource: { source: { ...source, marketplace: "DE", destinationCountryCode: "DE" } },
+      settings: { comparisonCurrency: "GBP" }
+    });
+    await app.user.click(screen.getByRole("button", { name: "Settings" }));
+
+    await app.user.click(screen.getByRole("button", { name: "EUR" }));
+
+    expect(app.store[SETTINGS_KEY]).toMatchObject({ comparisonCurrency: "SOURCE" });
+    expect(pressedStates()).toEqual([
+      ["EUR", "true"],
+      ["USD", "false"],
+      ["GBP", "false"],
+      ["JPY", "false"]
+    ]);
+  });
+
+  it("keeps a stored currency outside the defaults selectable and pressed", async () => {
+    const app = await renderLoaded({
+      loadSource: { source: { ...source, marketplace: "DE", destinationCountryCode: "DE" } },
+      settings: { comparisonCurrency: "CAD" }
+    });
+    await app.user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(pressedStates()).toEqual([
+      ["EUR", "false"],
+      ["USD", "false"],
+      ["GBP", "false"],
+      ["JPY", "false"],
+      ["CAD", "true"]
+    ]);
+
+    await app.user.click(screen.getByRole("button", { name: "JPY" }));
+    expect(app.store[SETTINGS_KEY]).toMatchObject({ comparisonCurrency: "JPY" });
+    expect(screen.getByRole("button", { name: "JPY" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "CAD" })).not.toBeInTheDocument();
   });
 
   it("puts a foreign source currency first", async () => {

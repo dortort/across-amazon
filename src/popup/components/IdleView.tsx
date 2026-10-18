@@ -49,14 +49,18 @@ function NotOnAmazonNotice(): ReactElement {
 
 export function IdleView({ source, baseline, status, targetCount, destination, onRun }: IdleViewProps): ReactElement {
   if (!source && status === "loading") {
-    return <div className="dB-scroll" />;
+    return (
+      <div className="dB-scroll" tabIndex={-1}>
+        <p className="dB-hint">Reading this page…</p>
+      </div>
+    );
   }
 
   return (
-    <div className="dB-scroll">
+    <div className="dB-scroll" tabIndex={-1}>
       {source ? <ProductCard source={source} baseline={baseline} /> : <NotOnAmazonNotice />}
       <button type="button" className="dB-cta" id="b-run" disabled={!source} onClick={onRun}>
-        {checkLabel(targetCount)}
+        {source ? checkLabel(targetCount) : "Check other Amazons"}
       </button>
       {source ? (
         <p className="dB-hint">

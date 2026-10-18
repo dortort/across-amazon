@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import type { ReactElement } from "react";
 import {
   CANCEL_COMPARISON,
@@ -8,7 +8,7 @@ import {
   RUN_COMPARISON_RESULT
 } from "../shared/messages";
 import type { ExtensionMessage } from "../shared/messages";
-import { MARKETPLACE_CODES, countryName, marketDisplayDomain } from "../shared/markets";
+import { MARKETPLACE_CODES, countryName, getMarketplaceByDomain, marketDisplayDomain } from "../shared/markets";
 import { loadSettings, saveSettings } from "../shared/storage";
 import type {
   ComparisonResult,
@@ -34,12 +34,25 @@ import { computeVerdict, issues, rankedRows, resolveDisplayCurrency, targetMarke
 import type { VerdictView } from "./view-model";
 
 const TOAST_MS = 2200;
+const BACKGROUND_UNREACHABLE = "Could not reach the background service";
 
 const FALLBACK_SETTINGS: ExtensionSettings = {
   enabledMarketplaces: [...MARKETPLACE_CODES],
   comparisonCurrency: "SOURCE",
   disclosureAcknowledged: false
 };
+
+type RunPhase = "none" | "active" | "finished" | "cancelled";
+
+interface RunCorrelation {
+  activeTabId?: number;
+  runId?: string;
+}
+
+interface ActiveTab {
+  id?: number;
+  url?: string;
+}
 
 interface PopupState {
   view: VerdictView;
@@ -52,7 +65,8 @@ interface PopupState {
   fxTable?: FxTable;
   progress?: RunComparisonProgressPayload;
   runTargets: Marketplace[];
-  cancelled: boolean;
+  runId?: string;
+  runPhase: RunPhase;
   error?: string;
   generatedAt?: string;
   sheet?: Marketplace;
@@ -62,11 +76,12 @@ interface PopupState {
 }
 
 type PopupAction =
-  | { type: "tab-resolved"; activeTabId?: number }
+  | { type: "tab-resolved"; activeTabId?: number; supported: boolean }
   | { type: "settings-changed"; settings: ExtensionSettings }
   | { type: "source-loaded"; payload: LoadSourcePayload }
-  | { type: "run-started"; targets: Marketplace[] }
+  | { type: "run-started"; targets: Marketplace[]; runId: string }
   | { type: "run-cancelled" }
+  | { type: "run-undelivered"; runId: string; generatedAt: string }
   | { type: "progress"; payload: RunComparisonProgressPayload }
   | { type: "result"; payload: RunComparisonResultPayload }
   | { type: "settings-toggled" }
@@ -81,10 +96,40 @@ const initialState: PopupState = {
   sourceStatus: "loading",
   results: [],
   runTargets: [],
-  cancelled: false,
+  runPhase: "none",
   issuesOpen: false,
   settings: FALLBACK_SETTINGS
 };
+
+function belongsToRun(state: PopupState, payload: RunCorrelation): boolean {
+  if (payload.activeTabId !== undefined && payload.activeTabId !== state.activeTabId) {
+    return false;
+  }
+  switch (state.runPhase) {
+    case "none":
+      return true;
+    case "active":
+      return payload.runId === undefined || state.runId === undefined || payload.runId === state.runId;
+    default:
+      return false;
+  }
+}
+
+function applyResult(state: PopupState, payload: RunComparisonResultPayload): PopupState {
+  const next: PopupState = {
+    ...state,
+    runPhase: "finished",
+    runId: state.runId ?? payload.runId,
+    source: payload.source ?? state.source,
+    baseline: payload.baseline ?? state.baseline,
+    fxTable: payload.fxTable ?? state.fxTable,
+    results: payload.results,
+    error: payload.error,
+    generatedAt: payload.generatedAt,
+    progress: undefined
+  };
+  return state.view === "settings" ? { ...next, returnView: "done" } : { ...next, view: "done" };
+}
 
 function reducer(state: PopupState, action: PopupAction): PopupState {
   switch (action.type) {
@@ -92,7 +137,7 @@ function reducer(state: PopupState, action: PopupAction): PopupState {
       return {
         ...state,
         activeTabId: action.activeTabId,
-        sourceStatus: action.activeTabId === undefined ? "failed" : state.sourceStatus
+        sourceStatus: action.activeTabId === undefined || !action.supported ? "failed" : state.sourceStatus
       };
     case "settings-changed":
       return { ...state, settings: action.settings };
@@ -111,39 +156,43 @@ function reducer(state: PopupState, action: PopupAction): PopupState {
         view: "running",
         returnView: undefined,
         runTargets: action.targets,
+        runId: action.runId,
+        runPhase: "active",
         progress: undefined,
         results: [],
         error: undefined,
-        cancelled: false,
         sheet: undefined,
         issuesOpen: false
       };
     case "run-cancelled":
-      return { ...state, view: "idle", progress: undefined, results: [], error: undefined, cancelled: true };
-    case "progress":
-      if (state.cancelled) {
+      return { ...state, view: "idle", progress: undefined, results: [], error: undefined, runPhase: "cancelled" };
+    case "run-undelivered":
+      if (state.runPhase !== "active" || state.runId !== action.runId) {
         return state;
       }
-      return state.view === "settings"
-        ? { ...state, progress: action.payload, returnView: "running" }
-        : { ...state, progress: action.payload, view: "running", sheet: undefined };
-    case "result": {
-      if (state.cancelled) {
-        return state;
-      }
+      return applyResult(state, {
+        results: state.progress?.results ?? [],
+        generatedAt: action.generatedAt,
+        error: BACKGROUND_UNREACHABLE
+      });
+    case "progress": {
       const { payload } = action;
-      const next: PopupState = {
+      if (!belongsToRun(state, payload)) {
+        return state;
+      }
+      const tracked: PopupState = {
         ...state,
-        source: payload.source ?? state.source,
-        baseline: payload.baseline ?? state.baseline,
-        fxTable: payload.fxTable ?? state.fxTable,
-        results: payload.results,
-        error: payload.error,
-        generatedAt: payload.generatedAt,
-        progress: undefined
+        runPhase: "active",
+        runId: state.runId ?? payload.runId,
+        progress: payload,
+        fxTable: payload.fxTable ?? state.fxTable
       };
-      return state.view === "settings" ? { ...next, returnView: "done" } : { ...next, view: "done" };
+      return state.view === "settings"
+        ? { ...tracked, returnView: "running" }
+        : { ...tracked, view: "running", sheet: undefined };
     }
+    case "result":
+      return belongsToRun(state, action.payload) ? applyResult(state, action.payload) : state;
     case "settings-toggled":
       if (state.view === "settings") {
         return {
@@ -170,13 +219,32 @@ function chromeApi(): typeof chrome | undefined {
   return typeof chrome === "undefined" ? undefined : chrome;
 }
 
-async function queryActiveTabId(): Promise<number | undefined> {
+async function queryActiveTab(): Promise<ActiveTab> {
   try {
     const tabs = await chromeApi()?.tabs?.query({ active: true, currentWindow: true });
-    return tabs?.[0]?.id;
+    return { id: tabs?.[0]?.id, url: tabs?.[0]?.url };
   } catch {
-    return undefined;
+    return {};
   }
+}
+
+function isSupportedMarketplaceUrl(url?: string): boolean {
+  if (!url) {
+    return false;
+  }
+  try {
+    return getMarketplaceByDomain(new URL(url).hostname) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+function createRunId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+  return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 async function sendMessage(message: ExtensionMessage): Promise<unknown> {
@@ -190,6 +258,11 @@ async function sendMessage(message: ExtensionMessage): Promise<unknown> {
 async function requestSource(activeTabId: number): Promise<LoadSourcePayload> {
   const response = await sendMessage({ type: LOAD_SOURCE, payload: { activeTabId } });
   return response && typeof response === "object" ? (response as LoadSourcePayload) : { error: "No response" };
+}
+
+async function requestRun(activeTabId: number, runId: string): Promise<boolean> {
+  const response = await sendMessage({ type: RUN_COMPARISON, payload: { activeTabId, runId } });
+  return Boolean(response && typeof response === "object" && (response as { ok?: unknown }).ok === true);
 }
 
 async function readSettings(): Promise<ExtensionSettings> {
@@ -239,6 +312,8 @@ function isMessageOf<T extends ExtensionMessage["type"]>(
 export function App(): ReactElement {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { view, source, baseline, results, fxTable, settings, toast, activeTabId } = state;
+  const rootRef = useRef<HTMLElement>(null);
+  const shownView = useRef(view);
 
   const currency = resolveDisplayCurrency(settings.comparisonCurrency, source);
   const destination = source ? countryName(source.destinationCountryCode) : "your address";
@@ -259,15 +334,16 @@ export function App(): ReactElement {
         dispatch({ type: "settings-changed", settings: loaded });
       }
     });
-    void queryActiveTabId().then(async (tabId) => {
+    void queryActiveTab().then(async (tab) => {
       if (!active) {
         return;
       }
-      dispatch({ type: "tab-resolved", activeTabId: tabId });
-      if (tabId === undefined) {
+      const supported = isSupportedMarketplaceUrl(tab.url);
+      dispatch({ type: "tab-resolved", activeTabId: tab.id, supported });
+      if (tab.id === undefined || !supported) {
         return;
       }
-      const payload = await requestSource(tabId);
+      const payload = await requestSource(tab.id);
       if (active) {
         dispatch({ type: "source-loaded", payload });
       }
@@ -290,6 +366,14 @@ export function App(): ReactElement {
   );
 
   useEffect(() => {
+    if (shownView.current === view) {
+      return;
+    }
+    shownView.current = view;
+    rootRef.current?.querySelector<HTMLElement>(".dB-scroll")?.focus();
+  }, [view]);
+
+  useEffect(() => {
     if (!toast?.visible) {
       return undefined;
     }
@@ -307,8 +391,13 @@ export function App(): ReactElement {
     if (activeTabId === undefined) {
       return;
     }
-    dispatch({ type: "run-started", targets });
-    void sendMessage({ type: RUN_COMPARISON, payload: { activeTabId } });
+    const runId = createRunId();
+    dispatch({ type: "run-started", targets, runId });
+    void requestRun(activeTabId, runId).then((delivered) => {
+      if (!delivered) {
+        dispatch({ type: "run-undelivered", runId, generatedAt: new Date().toISOString() });
+      }
+    });
   };
 
   const cancel = (): void => {
@@ -335,7 +424,7 @@ export function App(): ReactElement {
   const closeSheet = useCallback(() => dispatch({ type: "sheet-closed" }), []);
 
   return (
-    <section className="dB" aria-label="Across Amazon popup">
+    <section className="dB" aria-label="Across Amazon popup" ref={rootRef}>
       <TopBar inSettings={view === "settings"} onToggleSettings={() => dispatch({ type: "settings-toggled" })} />
       {view === "idle" ? (
         <IdleView
@@ -350,7 +439,7 @@ export function App(): ReactElement {
       {view === "running" ? (
         <RunningView
           progress={state.progress}
-          runTargets={state.runTargets}
+          runTargets={state.runTargets.length > 0 ? state.runTargets : targets}
           currency={currency}
           fxTable={fxTable}
           onCancel={cancel}
@@ -377,7 +466,7 @@ export function App(): ReactElement {
       <Footer fxTable={fxTable} />
       <DetailSheet
         row={sheetRow}
-        sourceTitle={source?.title}
+        source={source}
         destination={destination}
         onClose={closeSheet}
         onOpen={open}

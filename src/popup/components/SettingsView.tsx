@@ -1,7 +1,9 @@
 import type { ReactElement } from "react";
-import { MARKETPLACES, MARKETPLACE_CODES } from "../../shared/markets";
+import { MARKETPLACES, MARKETPLACE_BY_CODE, MARKETPLACE_CODES } from "../../shared/markets";
 import type { ExtensionSettings, Marketplace, SourceContext } from "../../shared/types";
 import { currencyChoices, resolveDisplayCurrency } from "../view-model";
+
+const CURRENCY_TITLE_ID = "b-cur-title";
 
 interface SettingsViewProps {
   settings: ExtensionSettings;
@@ -11,6 +13,7 @@ interface SettingsViewProps {
 
 export function SettingsView({ settings, source, onChange }: SettingsViewProps): ReactElement {
   const selectedCurrency = resolveDisplayCurrency(settings.comparisonCurrency, source);
+  const sourceCurrency = source ? MARKETPLACE_BY_CODE[source.marketplace].currency : undefined;
   const markets = MARKETPLACES.filter((market) => market.code !== source?.marketplace);
 
   const toggleMarket = (code: Marketplace, enabled: boolean): void => {
@@ -23,17 +26,19 @@ export function SettingsView({ settings, source, onChange }: SettingsViewProps):
   };
 
   return (
-    <div className="dB-scroll">
+    <div className="dB-scroll" tabIndex={-1}>
       <div className="dB-set">
         <div>
-          <h4>Show prices in</h4>
-          <div className="dB-seg" id="b-seg">
-            {currencyChoices(source).map((currency) => (
+          <h4 id={CURRENCY_TITLE_ID}>Show prices in</h4>
+          <div className="dB-seg" id="b-seg" role="group" aria-labelledby={CURRENCY_TITLE_ID}>
+            {currencyChoices(source, settings.comparisonCurrency).map((currency) => (
               <button
                 key={currency}
                 type="button"
                 aria-pressed={currency === selectedCurrency}
-                onClick={() => onChange({ ...settings, comparisonCurrency: currency })}
+                onClick={() =>
+                  onChange({ ...settings, comparisonCurrency: currency === sourceCurrency ? "SOURCE" : currency })
+                }
               >
                 {currency}
               </button>

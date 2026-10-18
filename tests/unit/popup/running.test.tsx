@@ -1,10 +1,12 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CANCEL_COMPARISON, RUN_COMPARISON } from "../../../src/shared/messages";
 import {
   ACTIVE_TAB_ID,
+  au,
   ca,
   de,
+  fxTable,
   it_,
   jp,
   mx,
@@ -51,10 +53,10 @@ describe("running view", () => {
       market: "France",
       domain: "amazon.fr",
       chips: [
-        ["dB-chk ok", "🇩🇪 DE $349.05"],
-        ["dB-chk ok", "🇬🇧 UK $372.16"],
         ["dB-chk ok", "🇨🇦 CA $391.44"],
         ["dB-chk bad", "🇲🇽 MX —"],
+        ["dB-chk ok", "🇬🇧 UK $372.16"],
+        ["dB-chk ok", "🇩🇪 DE $349.05"],
         ["dB-chk now", "🇫🇷 FR …"]
       ]
     });
@@ -71,9 +73,47 @@ describe("running view", () => {
     expect(state.count).toBe("8/9");
     expect(state.nowline).toBe("Reading cost stack Australia");
     expect(state.domain).toBe("amazon.com.au");
-    expect(state.chips).toHaveLength(7);
-    expect(state.chips[1]).toEqual(["dB-chk ok", "🇮🇹 IT $361.37"]);
-    expect(state.chips[5]).toEqual(["dB-chk bad", "🇯🇵 JP —"]);
+    expect(state.chips).toEqual([
+      ["dB-chk ok", "🇨🇦 CA $391.44"],
+      ["dB-chk bad", "🇲🇽 MX —"],
+      ["dB-chk ok", "🇬🇧 UK $372.16"],
+      ["dB-chk ok", "🇩🇪 DE $349.05"],
+      ["dB-chk ok", "🇮🇹 IT $361.37"],
+      ["dB-chk bad", "🇯🇵 JP —"],
+      ["dB-chk now", "🇦🇺 AU …"]
+    ]);
+  });
+
+  it("keeps chips in check order when a cheaper market is reported later", async () => {
+    const app = await renderRunning();
+    const okChips = () => runningState(app.container).chips.filter(([className]) => className !== "dB-chk now");
+
+    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", phase: "OPEN", results: [ca] });
+    app.progress({ completed: 3, total: 9, currentMarketplace: "DE", phase: "OPEN", results: [uk, ca, mx] });
+    const before = okChips();
+    app.progress({ completed: 4, total: 9, currentMarketplace: "FR", phase: "OPEN", results: [de, uk, ca, mx] });
+
+    expect(before.map(([, text]) => text)).toEqual(["🇨🇦 CA $391.44", "🇲🇽 MX —", "🇬🇧 UK $372.16"]);
+    expect(okChips().slice(0, 3)).toEqual(before);
+    expect(okChips()[3]).toEqual(["dB-chk ok", "🇩🇪 DE $349.05"]);
+  });
+
+  it("follows the order of the marketplaces the run checks", async () => {
+    const app = await renderRunning({ settings: { enabledMarketplaces: ["US", "UK", "DE", "AU"] } });
+
+    app.progress({ completed: 3, total: 3, results: [de, au, uk] });
+
+    expect(runningState(app.container).chips.map(([, text]) => text)).toEqual([
+      "🇬🇧 UK $372.16",
+      "🇩🇪 DE $349.05",
+      "🇦🇺 AU $438.72"
+    ]);
+  });
+
+  it("announces the current step politely", async () => {
+    const app = await renderRunning();
+
+    expect(app.container.querySelector(".dB-nowline")).toHaveAttribute("aria-live", "polite");
   });
 
   it("shows the opening phase when a progress message carries no phase", async () => {
@@ -154,9 +194,214 @@ describe("stopping a run", () => {
     app.result(resultPayload());
     expect(screen.getByText("Save $50.94")).toBeInTheDocument();
     expect(app.runRequests()).toEqual([
-      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } },
-      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } }
+      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } },
+      { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } }
     ]);
+    expect(app.runId(1)).not.toBe(app.runId(0));
+  });
+});
+
+describe("run correlation", () => {
+  it("ignores a late result from a cancelled run after a re-run", async () => {
+    const app = await renderRunning();
+    const cancelledRun = app.runId(0);
+    await app.user.click(screen.getByRole("button", { name: "Stop checking" }));
+    await app.user.click(screen.getByRole("button", { name: "Check 9 other Amazons" }));
+    const currentRun = app.runId(1);
+
+    app.progress({ completed: 6, total: 9, currentMarketplace: "ES", runId: cancelledRun, results: [ca, mx] });
+    app.result(resultPayload({ runId: cancelledRun, activeTabId: ACTIVE_TAB_ID }));
+
+    expect(runningState(app.container).count).toBe("0/9");
+    expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
+    expect(screen.queryByText("Save $50.94")).not.toBeInTheDocument();
+
+    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", runId: currentRun, results: [ca] });
+    expect(runningState(app.container).count).toBe("1/9");
+    app.result(resultPayload({ runId: currentRun, activeTabId: ACTIVE_TAB_ID }));
+    expect(screen.getByText("Save $50.94")).toBeInTheDocument();
+  });
+
+  it("ignores messages after Stop that carry the cancelled run id", async () => {
+    const app = await renderRunning();
+    const cancelledRun = app.runId(0);
+    await app.user.click(screen.getByRole("button", { name: "Stop checking" }));
+
+    app.progress({ completed: 2, total: 9, currentMarketplace: "UK", runId: cancelledRun, results: [ca, mx] });
+    app.result(resultPayload({ runId: cancelledRun }));
+
+    expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeInTheDocument();
+    expect(app.container.querySelector(".dB-run")).toBeNull();
+    expect(app.container.querySelector(".dB-verdict")).toBeNull();
+  });
+
+  it("ignores progress and results for another tab", async () => {
+    const app = await renderRunning();
+    const runId = app.runId(0);
+
+    app.progress({ completed: 5, total: 9, currentMarketplace: "IT", activeTabId: 7, runId, results: [ca] });
+    app.result(resultPayload({ activeTabId: 7, runId }));
+
+    expect(runningState(app.container).count).toBe("0/9");
+    expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
+
+    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", activeTabId: ACTIVE_TAB_ID, runId, results: [ca] });
+    expect(runningState(app.container).count).toBe("1/9");
+  });
+
+  it("does not adopt another tab's run while idle", async () => {
+    const app = await renderLoaded();
+
+    app.progress({ completed: 2, total: 5, currentMarketplace: "DE", activeTabId: 7, runId: "other-tab", results: [] });
+    app.result(resultPayload({ activeTabId: 7, runId: "other-tab" }));
+
+    expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeInTheDocument();
+    expect(app.container.querySelector(".dB-run")).toBeNull();
+    expect(app.container.querySelector(".dB-verdict")).toBeNull();
+  });
+
+  it("adopts a run in flight for its own tab and then follows only that run", async () => {
+    const app = await renderLoaded();
+
+    app.progress({
+      completed: 2,
+      total: 5,
+      currentMarketplace: "DE",
+      phase: "SEARCH",
+      activeTabId: ACTIVE_TAB_ID,
+      runId: "in-flight",
+      results: [uk, ca]
+    });
+    expect(runningState(app.container).count).toBe("2/5");
+
+    app.progress({ completed: 4, total: 5, currentMarketplace: "AU", runId: "someone-else", results: [uk, ca, de] });
+    app.result(resultPayload({ runId: "someone-else", activeTabId: ACTIVE_TAB_ID }));
+    expect(runningState(app.container).count).toBe("2/5");
+
+    app.result(resultPayload({ runId: "in-flight", activeTabId: ACTIVE_TAB_ID }));
+    expect(screen.getByText("Save $50.94")).toBeInTheDocument();
+    expect(app.runRequests()).toEqual([]);
+  });
+
+  it("ignores progress that arrives after the run's result", async () => {
+    const app = await renderRunning();
+    const runId = app.runId(0);
+
+    app.result(resultPayload({ runId }));
+    app.progress({ completed: 9, total: 9, runId, results: [de] });
+
+    expect(screen.getByText("Save $50.94")).toBeInTheDocument();
+    expect(app.container.querySelector(".dB-run")).toBeNull();
+  });
+
+  it("converts chip amounts with the progress rates after switching currency mid-run", async () => {
+    const app = await renderRunning();
+    const runId = app.runId(0);
+    const results = [
+      { ...ca, normalizedTotal: undefined },
+      { ...de, normalizedTotal: undefined }
+    ];
+    app.progress({ completed: 2, total: 9, currentMarketplace: "UK", phase: "OPEN", runId, results, fxTable });
+    expect(runningState(app.container).chips.slice(0, 2).map(([, text]) => text)).toEqual([
+      "🇨🇦 CA $391.44",
+      "🇩🇪 DE $349.05"
+    ]);
+    expect(screen.getByText(`Rates ${fxTable.date}`)).toBeInTheDocument();
+
+    await app.user.click(screen.getByRole("button", { name: "Settings" }));
+    await app.user.click(screen.getByRole("button", { name: "EUR" }));
+    await app.user.click(screen.getByRole("button", { name: "Close settings" }));
+
+    expect(runningState(app.container).chips.map(([, text]) => text)).toEqual([
+      "🇨🇦 CA €362.44",
+      "🇩🇪 DE €323.19",
+      "🇬🇧 UK …"
+    ]);
+  });
+});
+
+describe("run delivery", () => {
+  it("shows an error instead of spinning forever when the background cannot be reached", async () => {
+    const app = await renderRunning({
+      runResponse: async () => {
+        throw new Error("Could not establish connection. Receiving end does not exist.");
+      }
+    });
+
+    expect(await screen.findByText("Could not reach the background service")).toHaveClass("lede");
+    expect(app.container.querySelector(".dB-verdict")).toHaveClass("is-muted");
+    expect(screen.getByText("Couldn't compare")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop checking" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
+  });
+
+  it("treats a response without ok as undelivered", async () => {
+    const app = await renderRunning({ runResponse: async () => ({ ok: false, error: "Unsupported message" }) });
+
+    expect(await screen.findByText("Could not reach the background service")).toBeInTheDocument();
+    expect(app.container.querySelector(".dB-run")).toBeNull();
+  });
+
+  it("treats a missing response as undelivered", async () => {
+    await renderRunning({ runResponse: async () => undefined });
+
+    expect(await screen.findByText("Could not reach the background service")).toBeInTheDocument();
+  });
+
+  it("keeps the marketplaces checked so far when the background stops answering", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const app = await renderRunning({
+      runResponse: () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        })
+    });
+    app.progress({ completed: 2, total: 9, currentMarketplace: "UK", phase: "SEARCH", results: [ca, de] });
+
+    fail(new Error("The message port closed before a response was received."));
+
+    expect(await screen.findByText("Could not reach the background service")).toBeInTheDocument();
+    expect(Array.from(app.container.querySelectorAll(".dB-row .who strong")).map((name) => name.textContent)).toEqual([
+      "Germany",
+      "Canada",
+      "United States"
+    ]);
+  });
+
+  it("ignores a delivery failure that arrives after the result", async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    const app = await renderRunning({
+      runResponse: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    });
+    app.result(resultPayload({ runId: app.runId(0) }));
+
+    await act(async () => {
+      answer({ ok: false });
+    });
+
+    expect(screen.getByText("Save $50.94")).toBeInTheDocument();
+    expect(screen.queryByText("Could not reach the background service")).not.toBeInTheDocument();
+  });
+
+  it("ignores a delivery failure after Stop", async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    const app = await renderRunning({
+      runResponse: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    });
+    await app.user.click(screen.getByRole("button", { name: "Stop checking" }));
+
+    await act(async () => {
+      answer(undefined);
+    });
+
+    expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeInTheDocument();
+    expect(screen.queryByText("Could not reach the background service")).not.toBeInTheDocument();
   });
 });
 
