@@ -10,7 +10,8 @@ import { cancelComparison, loadSource, runComparison } from "./orchestrator";
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (isRunComparisonRequest(message)) {
-    void runComparison(message.payload.activeTabId)
+    const { activeTabId, runId } = message.payload;
+    void runComparison(activeTabId, runId)
       .then((payload) => {
         const resultMessage: RunComparisonResult = {
           type: RUN_COMPARISON_RESULT,
@@ -24,7 +25,9 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
           payload: {
             results: [],
             generatedAt: new Date().toISOString(),
-            error: error instanceof Error ? error.message : "Unknown error"
+            error: error instanceof Error ? error.message : "Unknown error",
+            activeTabId,
+            runId
           }
         };
         return chrome.runtime.sendMessage(fallbackMessage);
@@ -43,8 +46,9 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   }
 
   if (isCancelComparisonRequest(message)) {
-    cancelComparison(message.payload.activeTabId);
-    sendResponse({ ok: true, type: CANCEL_COMPARISON });
+    void cancelComparison(message.payload.activeTabId).then(() => {
+      sendResponse({ ok: true, type: CANCEL_COMPARISON });
+    });
     return true;
   }
 

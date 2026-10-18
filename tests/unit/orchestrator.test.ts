@@ -31,6 +31,7 @@ const ACTIVE_TAB_ID = 1;
 const SOURCE_URL = "https://www.amazon.com/dp/B000000001";
 const FIXTURE_ROOT = join(process.cwd(), "tests", "fixtures");
 const POPUP_CLOSED_ERROR = "Could not establish connection. Receiving end does not exist.";
+const CANCELLED_ERROR = "Comparison cancelled by user";
 
 const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
@@ -64,7 +65,7 @@ const EXPECTED_SOURCE: SourceContext = {
   imageUrl: "https://m.media-amazon.com/images/I/41acme-widget._AC_SX425_.jpg"
 };
 
-const EXPECTED_BASELINE: ComparisonResult = {
+const RAW_BASELINE: ComparisonResult = {
   marketplace: "US",
   status: "OK",
   confidence: 1,
@@ -74,7 +75,11 @@ const EXPECTED_BASELINE: ComparisonResult = {
     shipping: { amount: 0, currency: "USD" },
     importFees: { amount: 0, currency: "USD" }
   },
-  notes: ["Import fees not displayed for destination"],
+  notes: ["Import fees not displayed for destination"]
+};
+
+const EXPECTED_BASELINE: ComparisonResult = {
+  ...RAW_BASELINE,
   normalizedTotal: { amount: 49.99, currency: "USD" }
 };
 
@@ -98,6 +103,8 @@ type WindowScope = Record<string, unknown>;
 type Prepare = (group: FixtureGroup, market: Marketplace, document: Document) => void;
 type SendResponse = (response?: unknown) => void;
 type MessageListener = (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+type TabUpdatedListener = (tabId: number, changeInfo: { status?: string }) => void;
+type TabRemovedListener = (tabId: number) => void;
 
 interface FakeTab {
   id: number;
@@ -105,6 +112,8 @@ interface FakeTab {
   label: string;
   dom: JSDOM;
   scope: WindowScope;
+  status: "loading" | "complete";
+  completeDuringStatusCheck?: boolean;
 }
 
 interface Injection {
@@ -129,6 +138,7 @@ interface HarnessOptions {
   failScriptOn?: string;
   popupClosed?: boolean;
   onTabCreated?: (tab: FakeTab, harness: Harness) => void;
+  holdFx?: Promise<void>;
 }
 
 interface Harness {
@@ -141,6 +151,8 @@ interface Harness {
   tabsRemove: ReturnType<typeof vi.fn>;
   executeScript: ReturnType<typeof vi.fn>;
   openTempTabs: () => string[];
+  tabListenerCount: () => number;
+  finishLoading: (tabId: number) => void;
   dispatch: (message: unknown) => Promise<unknown>;
 }
 
@@ -192,7 +204,10 @@ function createHarness(options: HarnessOptions): Harness {
   const events: string[] = [];
   const messages: ExtensionMessage[] = [];
   const listeners: MessageListener[] = [];
+  const updatedListeners = new Set<TabUpdatedListener>();
+  const removedListeners = new Set<TabRemovedListener>();
   let nextTabId = 100;
+  let fxHold = options.holdFx;
 
   function requireTab(tabId: number): FakeTab {
     const tab = tabs.get(tabId);
@@ -210,7 +225,7 @@ function createHarness(options: HarnessOptions): Harness {
         ? new JSDOM(options.activeHtml ?? "<!doctype html><html><body></body></html>", { url })
         : loadFixtureDom("source", market, url, options.prepare);
     const label = market && options.activeHtml === undefined ? `source/${market}` : "active";
-    tabs.set(ACTIVE_TAB_ID, { id: ACTIVE_TAB_ID, url, label, dom, scope: {} });
+    tabs.set(ACTIVE_TAB_ID, { id: ACTIVE_TAB_ID, url, label, dom, scope: {}, status: "complete" });
   }
 
   function openTempTab(url: string): FakeTab {
@@ -225,7 +240,8 @@ function createHarness(options: HarnessOptions): Harness {
       url,
       label: `${group}/${market}`,
       dom: loadFixtureDom(group, market, url, options.prepare),
-      scope: {}
+      scope: {},
+      status: "complete"
     };
     nextTabId += 1;
     tabs.set(tab.id, tab);
@@ -274,10 +290,21 @@ function createHarness(options: HarnessOptions): Harness {
     return { id: tab.id, url, active: false, status: "loading" };
   });
 
+  function finishLoading(tabId: number): void {
+    const tab = requireTab(tabId);
+    tab.status = "complete";
+    for (const listener of [...updatedListeners]) {
+      listener(tabId, { status: "complete" });
+    }
+  }
+
   const tabsRemove = vi.fn(async (tabId: number) => {
     const tab = requireTab(tabId);
     tabs.delete(tabId);
     events.push(`close ${tab.label}`);
+    for (const listener of [...removedListeners]) {
+      listener(tabId);
+    }
   });
 
   const executeScript = vi.fn(async (injection: Injection) => runInjection(injection));
@@ -285,6 +312,9 @@ function createHarness(options: HarnessOptions): Harness {
   const fetchMock = vi.fn(async (input: string) => {
     const host = new URL(input).hostname;
     events.push(`fx ${host}`);
+    const hold = fxHold;
+    fxHold = undefined;
+    await hold;
     if (options.fxAvailable === false || host !== "www.ecb.europa.eu") {
       return { ok: false, status: 503 };
     }
@@ -296,13 +326,21 @@ function createHarness(options: HarnessOptions): Harness {
       create: tabsCreate,
       get: vi.fn(async (tabId: number) => {
         const tab = requireTab(tabId);
-        events.push(`ready ${tab.label}`);
-        return { id: tab.id, url: tab.url, status: "complete" };
+        const snapshot = { id: tab.id, url: tab.url, status: tab.status };
+        events.push(`${tab.status === "complete" ? "ready" : "loading"} ${tab.label}`);
+        if (tab.completeDuringStatusCheck) {
+          finishLoading(tabId);
+        }
+        return snapshot;
       }),
       remove: tabsRemove,
       onUpdated: {
-        addListener: vi.fn(),
-        removeListener: vi.fn()
+        addListener: vi.fn((listener: TabUpdatedListener) => updatedListeners.add(listener)),
+        removeListener: vi.fn((listener: TabUpdatedListener) => updatedListeners.delete(listener))
+      },
+      onRemoved: {
+        addListener: vi.fn((listener: TabRemovedListener) => removedListeners.add(listener)),
+        removeListener: vi.fn((listener: TabRemovedListener) => removedListeners.delete(listener))
       }
     },
     scripting: {
@@ -351,6 +389,8 @@ function createHarness(options: HarnessOptions): Harness {
     tabsRemove,
     executeScript,
     openTempTabs: () => [...tabs.values()].filter((tab) => tab.id !== ACTIVE_TAB_ID).map((tab) => tab.label),
+    tabListenerCount: () => updatedListeners.size + removedListeners.size,
+    finishLoading,
     dispatch: (message) => {
       const listener = listeners[listeners.length - 1];
       if (!listener) {
@@ -379,17 +419,40 @@ async function loadSourceViaWorker(harness: Harness): Promise<LoadSourcePayload>
   return (await harness.dispatch({ type: LOAD_SOURCE, payload: { activeTabId: ACTIVE_TAB_ID } })) as LoadSourcePayload;
 }
 
-async function runViaWorker(harness: Harness): Promise<RunComparisonResultPayload> {
-  const response = await harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } });
+async function runViaWorker(harness: Harness, runId = "run-1"): Promise<RunComparisonResultPayload> {
+  const response = await harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId } });
   expect(response).toEqual({ ok: true });
-  const resultMessages = harness.messages.filter((message) => message.type === RUN_COMPARISON_RESULT);
-  return resultMessages[resultMessages.length - 1].payload as RunComparisonResultPayload;
+  return resultPayloads(harness, runId).at(-1) as RunComparisonResultPayload;
 }
 
-function progressPayloads(harness: Harness): RunComparisonProgressPayload[] {
+function startRunViaWorker(harness: Harness, runId: string): Promise<unknown> {
+  return harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId } });
+}
+
+function cancelViaWorker(harness: Harness): Promise<unknown> {
+  return harness.dispatch({ type: CANCEL_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } });
+}
+
+function progressPayloads(harness: Harness, runId?: string): RunComparisonProgressPayload[] {
   return harness.messages
     .filter((message) => message.type === RUN_COMPARISON_PROGRESS)
-    .map((message) => message.payload as RunComparisonProgressPayload);
+    .map((message) => message.payload as RunComparisonProgressPayload)
+    .filter((payload) => runId === undefined || payload.runId === runId);
+}
+
+function resultPayloads(harness: Harness, runId?: string): RunComparisonResultPayload[] {
+  return harness.messages
+    .filter((message) => message.type === RUN_COMPARISON_RESULT)
+    .map((message) => message.payload as RunComparisonResultPayload)
+    .filter((payload) => runId === undefined || payload.runId === runId);
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 function cacheKeyFor(targetMarkets: Marketplace[]): string {
@@ -424,13 +487,16 @@ describe("background orchestrator", () => {
       }
     };
 
-    it("LOAD_SOURCE returns the source context with its image and a normalized baseline without opening tabs", async () => {
+    it("LOAD_SOURCE returns the source context with its image and the raw baseline without opening tabs, reading settings or fetching FX", async () => {
       const harness = await bootServiceWorker(fullRunOptions);
 
       const response = await loadSourceViaWorker(harness);
 
-      expect(response).toEqual({ source: EXPECTED_SOURCE, baseline: EXPECTED_BASELINE });
+      expect(response).toEqual({ source: EXPECTED_SOURCE, baseline: RAW_BASELINE });
+      expect(response.baseline).not.toHaveProperty("normalizedTotal");
       expect(harness.tabsCreate).not.toHaveBeenCalled();
+      expect(harness.fetch).not.toHaveBeenCalled();
+      expect(harness.chrome.storage.local.get).not.toHaveBeenCalled();
       expect(harness.events.filter((event) => event.startsWith("inject"))).toEqual([
         "inject content/source-extractor.js source/US",
         "inject content/product-extractor.js source/US"
@@ -443,6 +509,8 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.error).toBeUndefined();
+      expect(payload.activeTabId).toBe(ACTIVE_TAB_ID);
+      expect(payload.runId).toBe("run-1");
       expect(payload.source).toEqual(EXPECTED_SOURCE);
       expect(payload.baseline).toEqual(EXPECTED_BASELINE);
       expect(payload.fxTable).toEqual(EXPECTED_FX_TABLE);
@@ -560,6 +628,10 @@ describe("background orchestrator", () => {
         { completed: 2, total: 2, currentMarketplace: undefined, phase: undefined, results: ["UK", "DE"] }
       ]);
 
+      for (const entry of progress) {
+        expect(entry).toMatchObject({ activeTabId: ACTIVE_TAB_ID, runId: "run-1", fxTable: EXPECTED_FX_TABLE });
+      }
+
       const final = progress[progress.length - 1];
       expect(final).not.toHaveProperty("phase");
       expect(final).not.toHaveProperty("currentMarketplace");
@@ -603,9 +675,10 @@ describe("background orchestrator", () => {
       harness.fetch.mockClear();
       const progressBefore = progressPayloads(harness).length;
 
-      const second = await runViaWorker(harness);
+      const second = await runViaWorker(harness, "run-2");
 
-      expect(second).toEqual(first);
+      expect(second).toEqual({ ...first, runId: "run-2" });
+      expect(second.activeTabId).toBe(ACTIVE_TAB_ID);
       expect(second.baseline).toEqual(EXPECTED_BASELINE);
       expect(second.fxTable).toEqual(EXPECTED_FX_TABLE);
       expect(harness.tabsCreate).not.toHaveBeenCalled();
@@ -642,7 +715,7 @@ describe("background orchestrator", () => {
   });
 
   describe("cancellation", () => {
-    it("stops mid-run, closes the open temp tab and returns partial results with source, baseline and FX", async () => {
+    it("stops mid-run, closes a tab opened after Stop at once and returns partial results with source, baseline and FX", async () => {
       let cancelResponse: unknown;
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE", "UK"],
@@ -660,19 +733,181 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(cancelResponse).toEqual({ ok: true, type: CANCEL_COMPARISON });
-      expect(payload.error).toBe("Comparison cancelled by user");
+      expect(payload.error).toBe(CANCELLED_ERROR);
+      expect(payload.activeTabId).toBe(ACTIVE_TAB_ID);
+      expect(payload.runId).toBe("run-1");
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
       expect(payload.source).toEqual(EXPECTED_SOURCE);
       expect(payload.baseline).toEqual(EXPECTED_BASELINE);
       expect(payload.fxTable).toEqual(EXPECTED_FX_TABLE);
 
-      expect(harness.events.slice(harness.events.indexOf("open search/UK"))).toEqual([
-        "open search/UK",
-        "ready search/UK",
-        "close search/UK"
-      ]);
+      expect(harness.events.slice(harness.events.indexOf("open search/UK"))).toEqual(["open search/UK", "close search/UK"]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(Object.keys(harness.storage).some((key) => key.startsWith("cmp:"))).toBe(false);
+    });
+
+    it("closes the stopped run's tabs at once, ends it with the cancellation error and lets a new run on the same tab complete", async () => {
+      let held: FakeTab | undefined;
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        onTabCreated: (tab) => {
+          if (!held) {
+            tab.status = "loading";
+            held = tab;
+          }
+        }
+      });
+
+      const firstRun = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("loading search/DE"));
+      const progressBeforeCancel = progressPayloads(harness, "run-1");
+
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.events).toContain("close search/DE");
+
+      const second = await runViaWorker(harness, "run-2");
+      await firstRun;
+
+      expect(progressBeforeCancel.map((progress) => [progress.phase, progress.currentMarketplace])).toEqual([["OPEN", "DE"]]);
+      expect(progressPayloads(harness, "run-1")).toEqual(progressBeforeCancel);
+      expect(resultPayloads(harness, "run-1")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-1" })
+      ]);
+      expect(second.error).toBeUndefined();
+      expect(second.activeTabId).toBe(ACTIVE_TAB_ID);
+      expect(second.results.map((result) => [result.marketplace, result.status])).toEqual([
+        ["UK", "OK"],
+        ["DE", "OK"]
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("keeps a new run's tabs when the stopped run cleans up later, so a second Stop still stops the new run", async () => {
+      const fx = deferred();
+      let held: FakeTab | undefined;
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        holdFx: fx.promise,
+        onTabCreated: (tab) => {
+          if (!held) {
+            tab.status = "loading";
+            held = tab;
+          }
+        }
+      });
+
+      const firstRun = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("fx www.ecb.europa.eu"));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+
+      const secondRun = startRunViaWorker(harness, "run-2");
+      await vi.waitFor(() => expect(harness.events).toContain("loading search/DE"));
+
+      fx.resolve();
+      await firstRun;
+
+      expect(resultPayloads(harness, "run-1")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-1" })
+      ]);
+      expect(progressPayloads(harness, "run-1")).toEqual([]);
+      expect(harness.openTempTabs()).toEqual(["search/DE"]);
+
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      await secondRun;
+
+      expect(resultPayloads(harness, "run-2")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-2" })
+      ]);
+      expect(progressPayloads(harness, "run-2").map((progress) => progress.phase)).toEqual(["OPEN"]);
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(Object.keys(harness.storage).some((key) => key.startsWith("cmp:"))).toBe(false);
+    });
+
+    it("stops a run that is still going when a new run starts on the same tab", async () => {
+      let held: FakeTab | undefined;
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        onTabCreated: (tab) => {
+          if (!held) {
+            tab.status = "loading";
+            held = tab;
+          }
+        }
+      });
+
+      const firstRun = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("loading search/DE"));
+
+      const second = await runViaWorker(harness, "run-2");
+      await firstRun;
+
+      expect(resultPayloads(harness, "run-1")).toEqual([expect.objectContaining({ error: CANCELLED_ERROR, runId: "run-1" })]);
+      expect(second.error).toBeUndefined();
+      expect(second.results.map((result) => result.marketplace)).toEqual(["UK", "DE"]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+  });
+
+  describe("tab loading", () => {
+    it("waits for a loading tab to report complete before reading it", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        onTabCreated: (tab, self) => {
+          tab.status = "loading";
+          setTimeout(() => self.finishLoading(tab.id), 0);
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.events.slice(harness.events.indexOf("open search/DE"), harness.events.indexOf("progress SEARCH DE") + 1)).toEqual([
+        "open search/DE",
+        "loading search/DE",
+        "progress SEARCH DE"
+      ]);
+      expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    it("reads a tab that finishes loading between the listener registration and the status check", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        onTabCreated: (tab) => {
+          tab.status = "loading";
+          tab.completeDuringStatusCheck = true;
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.events.filter((event) => event.startsWith("loading "))).toEqual(["loading search/DE", "loading product/DE"]);
+      expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    it("records a market whose tab is closed while loading as PARSE_FAILED without waiting for the timeout", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        onTabCreated: (tab, self) => {
+          if (tab.label === "search/DE") {
+            tab.status = "loading";
+            setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+        ["UK", "OK"],
+        ["DE", "PARSE_FAILED"]
+      ]);
+      expect(payload.results[1].notes).toEqual(["Tab 100 was closed before it finished loading"]);
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.tabListenerCount()).toBe(0);
     });
   });
 
@@ -683,9 +918,11 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.error).toBe("Unable to load FX reference rates from ECB or Frankfurter");
+      expect(payload.activeTabId).toBe(ACTIVE_TAB_ID);
+      expect(payload.runId).toBe("run-1");
       expect(payload.results).toEqual([]);
       expect(payload.source).toEqual(EXPECTED_SOURCE);
-      expect(payload.baseline).toEqual({ ...EXPECTED_BASELINE, normalizedTotal: undefined });
+      expect(payload.baseline).toEqual(RAW_BASELINE);
       expect(payload.baseline).not.toHaveProperty("normalizedTotal");
       expect(payload.fxTable).toBeUndefined();
       expect(harness.fetch).toHaveBeenCalledTimes(2);
@@ -740,24 +977,13 @@ describe("background orchestrator", () => {
       expect(harness.storage[cacheKeyFor(["DE"])]).not.toHaveProperty("baseline");
     });
 
-    it("LOAD_SOURCE still returns the source and raw baseline when FX rates are unavailable", async () => {
-      const harness = await bootServiceWorker({ fxAvailable: false });
-
-      const response = await loadSourceViaWorker(harness);
-
-      expect(response.error).toBeUndefined();
-      expect(response.source).toEqual(EXPECTED_SOURCE);
-      expect(response.baseline).toEqual({ ...EXPECTED_BASELINE, normalizedTotal: undefined });
-      expect(response.baseline).not.toHaveProperty("normalizedTotal");
-    });
-
-    it("normalizes the baseline and results into a fixed comparison currency", async () => {
+    it("normalizes the run's baseline and results into a fixed comparison currency while LOAD_SOURCE stays raw", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"], comparisonCurrency: "EUR" });
 
       const loaded = await loadSourceViaWorker(harness);
       const payload = await runViaWorker(harness);
 
-      expect(loaded.baseline?.normalizedTotal).toEqual({ amount: 46.29, currency: "EUR" });
+      expect(loaded.baseline).toEqual(RAW_BASELINE);
       expect(payload.baseline?.normalizedTotal).toEqual({ amount: 46.29, currency: "EUR" });
       expect(payload.results.map((result) => [result.marketplace, result.normalizedTotal])).toEqual([
         ["UK", { amount: 44.25, currency: "EUR" }],
@@ -777,15 +1003,16 @@ describe("background orchestrator", () => {
       try {
         const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], popupClosed: true });
 
-        const response = await harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } });
+        const response = await startRunViaWorker(harness, "run-closed");
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(response).toEqual({ ok: true });
         expect(
-          harness.messages
-            .filter((message) => message.type === RUN_COMPARISON_RESULT)
-            .map((message) => (message.payload as RunComparisonResultPayload).error)
-        ).toEqual([undefined, POPUP_CLOSED_ERROR]);
+          resultPayloads(harness).map(({ error, activeTabId, runId }) => ({ error, activeTabId, runId }))
+        ).toEqual([
+          { error: undefined, activeTabId: ACTIVE_TAB_ID, runId: "run-closed" },
+          { error: POPUP_CLOSED_ERROR, activeTabId: ACTIVE_TAB_ID, runId: "run-closed" }
+        ]);
         expect(unhandled).toEqual([]);
       } finally {
         process.off("unhandledRejection", recordUnhandled);
@@ -834,6 +1061,8 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.error).toBe("Unsupported marketplace hostname: www.example.com");
+      expect(payload.activeTabId).toBe(ACTIVE_TAB_ID);
+      expect(payload.runId).toBe("run-1");
       expect(payload.results).toEqual([]);
       expect(payload.source).toBeUndefined();
       expect(harness.tabsCreate).not.toHaveBeenCalled();

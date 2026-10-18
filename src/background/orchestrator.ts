@@ -24,6 +24,7 @@ import type {
 import { getDailyFxTable } from "./fx-service";
 
 const COMPARISON_TTL_MS = 30 * 60 * 1000;
+const CANCELLED_ERROR = "Comparison cancelled by user";
 
 interface RunToken {
   cancelled: boolean;
@@ -32,10 +33,21 @@ interface RunToken {
 
 const RUN_TOKENS = new Map<number, RunToken>();
 
-function getOrCreateRunToken(activeTabId: number): RunToken {
-  const existing = RUN_TOKENS.get(activeTabId);
-  if (existing) {
-    return existing;
+async function closeTempTabs(token: RunToken): Promise<void> {
+  const tabIds = [...token.tempTabIds];
+  token.tempTabIds.clear();
+  await Promise.all(tabIds.map((tabId) => chrome.tabs.remove(tabId).catch(() => undefined)));
+}
+
+function cancelRun(token: RunToken): Promise<void> {
+  token.cancelled = true;
+  return closeTempTabs(token);
+}
+
+function startRun(activeTabId: number): RunToken {
+  const previous = RUN_TOKENS.get(activeTabId);
+  if (previous) {
+    void cancelRun(previous);
   }
 
   const token: RunToken = {
@@ -46,33 +58,60 @@ function getOrCreateRunToken(activeTabId: number): RunToken {
   return token;
 }
 
-function assertNotCancelled(token: RunToken): void {
-  if (token.cancelled) {
-    throw new Error("Comparison cancelled by user");
+async function finishRun(activeTabId: number, token: RunToken): Promise<void> {
+  await closeTempTabs(token);
+  if (RUN_TOKENS.get(activeTabId) === token) {
+    RUN_TOKENS.delete(activeTabId);
   }
 }
 
-async function waitForTabComplete(tabId: number, timeoutMs = 15_000): Promise<void> {
-  const existing = await chrome.tabs.get(tabId);
-  if (existing.status === "complete") {
-    return;
+function assertNotCancelled(token: RunToken): void {
+  if (token.cancelled) {
+    throw new Error(CANCELLED_ERROR);
   }
+}
 
-  await new Promise<void>((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
+function waitForTabComplete(tabId: number, timeoutMs = 15_000): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const settle = (error?: Error): void => {
+      clearTimeout(timeoutId);
       chrome.tabs.onUpdated.removeListener(onUpdated);
-      reject(new Error(`Timed out waiting for tab ${tabId} to complete`));
-    }, timeoutMs);
-
-    const onUpdated = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
-        clearTimeout(timeoutId);
-        chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      if (error) {
+        reject(error);
+      } else {
         resolve();
       }
     };
 
+    const onUpdated = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo): void => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        settle();
+      }
+    };
+
+    const onRemoved = (removedTabId: number): void => {
+      if (removedTabId === tabId) {
+        settle(new Error(`Tab ${tabId} was closed before it finished loading`));
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      settle(new Error(`Timed out waiting for tab ${tabId} to complete`));
+    }, timeoutMs);
+
     chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    chrome.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status === "complete") {
+          settle();
+        }
+      },
+      (error: unknown) => {
+        settle(new Error(errorMessage(error, `Unable to read tab ${tabId}`)));
+      }
+    );
   });
 }
 
@@ -87,6 +126,11 @@ async function openInactiveTab(url: string, token: RunToken): Promise<number> {
   }
 
   token.tempTabIds.add(tab.id);
+  if (token.cancelled) {
+    await closeTempTab(tab.id, token);
+    throw new Error(CANCELLED_ERROR);
+  }
+
   return tab.id;
 }
 
@@ -322,10 +366,10 @@ async function compareMarket(
   };
 }
 
-export function cancelComparison(activeTabId: number): void {
+export async function cancelComparison(activeTabId: number): Promise<void> {
   const token = RUN_TOKENS.get(activeTabId);
   if (token) {
-    token.cancelled = true;
+    await cancelRun(token);
   }
 }
 
@@ -333,23 +377,14 @@ export async function loadSource(activeTabId: number): Promise<LoadSourcePayload
   try {
     const source = await extractSourceContext(activeTabId);
     const baseline = await extractBaseline(activeTabId, source);
-    if (!baseline) {
-      return { source };
-    }
-
-    const [settings, fxTable] = await Promise.all([loadSettings(), getDailyFxTable().catch(() => undefined)]);
-    return {
-      source,
-      baseline: fxTable ? normalizeResult(baseline, resolveComparisonCurrency(settings, source), fxTable) : baseline
-    };
+    return { source, baseline };
   } catch (error) {
     return { error: errorMessage(error, "Unable to read the active tab") };
   }
 }
 
-export async function runComparison(activeTabId: number): Promise<RunComparisonResultPayload> {
-  const token = getOrCreateRunToken(activeTabId);
-  token.cancelled = false;
+export async function runComparison(activeTabId: number, runId?: string): Promise<RunComparisonResultPayload> {
+  const token = startRun(activeTabId);
 
   let sourceContext: SourceContext | undefined;
   let baseline: ComparisonResult | undefined;
@@ -377,7 +412,9 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
         baseline: cachedRecord.baseline,
         results: cachedRecord.results,
         generatedAt: cachedRecord.createdAt,
-        fxTable: cachedRecord.fxTable
+        fxTable: cachedRecord.fxTable,
+        activeTabId,
+        runId
       };
     }
 
@@ -400,30 +437,31 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
           total,
           currentMarketplace: targetMarket,
           phase,
-          results: sortComparisonResults(results)
+          results: sortComparisonResults(results),
+          fxTable: table,
+          activeTabId,
+          runId
         });
       };
 
-      let result: ComparisonResult;
-      try {
-        result = await compareMarket(source, targetMarket, query, token, enterPhase);
-      } catch (error) {
-        assertNotCancelled(token);
-        result = buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"));
-      }
-
+      const result = await compareMarket(source, targetMarket, query, token, enterPhase).catch((error: unknown) =>
+        buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"))
+      );
+      assertNotCancelled(token);
       results.push(normalizeResult(result, comparisonCurrency, table));
     }
 
     const sortedResults = sortComparisonResults(results);
-    pushProgress({ completed: total, total, results: sortedResults });
+    pushProgress({ completed: total, total, results: sortedResults, fxTable: table, activeTabId, runId });
 
     const payload: RunComparisonResultPayload = {
       source,
       baseline,
       results: sortedResults,
       generatedAt: new Date().toISOString(),
-      fxTable: table
+      fxTable: table,
+      activeTabId,
+      runId
     };
 
     await writeComparisonCache(cacheKey, {
@@ -442,13 +480,11 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
       results: sortComparisonResults(results),
       generatedAt: new Date().toISOString(),
       fxTable,
-      error: errorMessage(error, "Unknown comparison error")
+      error: errorMessage(error, "Unknown comparison error"),
+      activeTabId,
+      runId
     };
   } finally {
-    for (const tabId of token.tempTabIds) {
-      await chrome.tabs.remove(tabId).catch(() => undefined);
-    }
-    token.tempTabIds.clear();
-    RUN_TOKENS.delete(activeTabId);
+    await finishRun(activeTabId, token);
   }
 }
