@@ -18,7 +18,7 @@ docker run --rm --ipc=host \
     corepack enable
     corepack prepare pnpm@10 --activate
     pnpm install --no-frozen-lockfile
-    pnpm exec playwright test --update-snapshots "$@"
+    pnpm exec playwright test --update-snapshots=all "$@"
     for dir in tests/e2e/*-snapshots; do
       [ -d "$dir" ] && cp -r "$dir" /out/
     done
