@@ -30,6 +30,7 @@ import type {
 const ACTIVE_TAB_ID = 1;
 const SOURCE_URL = "https://www.amazon.com/dp/B000000001";
 const FIXTURE_ROOT = join(process.cwd(), "tests", "fixtures");
+const POPUP_CLOSED_ERROR = "Could not establish connection. Receiving end does not exist.";
 
 const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
@@ -126,6 +127,7 @@ interface HarnessOptions {
   prepare?: Prepare;
   fxAvailable?: boolean;
   failScriptOn?: string;
+  popupClosed?: boolean;
   onTabCreated?: (tab: FakeTab, harness: Harness) => void;
 }
 
@@ -326,6 +328,9 @@ function createHarness(options: HarnessOptions): Harness {
         if (copy.type === RUN_COMPARISON_PROGRESS) {
           const payload = copy.payload as RunComparisonProgressPayload;
           events.push(`progress ${payload.phase ?? "DONE"}${payload.currentMarketplace ? ` ${payload.currentMarketplace}` : ""}`);
+        }
+        if (options.popupClosed) {
+          throw new Error(POPUP_CLOSED_ERROR);
         }
       }),
       onMessage: {
@@ -729,6 +734,33 @@ describe("background orchestrator", () => {
         ["DE", { amount: 37.2, currency: "EUR" }],
         ["UK", { amount: 38.15, currency: "EUR" }]
       ]);
+    });
+  });
+
+  describe("popup closed", () => {
+    it("answers RUN_COMPARISON without an unhandled rejection when the popup has closed", async () => {
+      const unhandled: unknown[] = [];
+      const recordUnhandled = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", recordUnhandled);
+
+      try {
+        const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], popupClosed: true });
+
+        const response = await harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(response).toEqual({ ok: true });
+        expect(
+          harness.messages
+            .filter((message) => message.type === RUN_COMPARISON_RESULT)
+            .map((message) => (message.payload as RunComparisonResultPayload).error)
+        ).toEqual([undefined, POPUP_CLOSED_ERROR]);
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", recordUnhandled);
+      }
     });
   });
 

@@ -31,7 +31,8 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       })
       .finally(() => {
         sendResponse({ ok: true });
-      });
+      })
+      .catch(() => undefined);
 
     return true;
   }
