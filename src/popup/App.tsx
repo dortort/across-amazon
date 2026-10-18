@@ -1,265 +1,388 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 import type { ReactElement } from "react";
 import {
   CANCEL_COMPARISON,
+  LOAD_SOURCE,
   RUN_COMPARISON,
   RUN_COMPARISON_PROGRESS,
   RUN_COMPARISON_RESULT
 } from "../shared/messages";
-import { findCheapestAvailable } from "../shared/comparison";
-import { MARKETPLACE_BY_CODE, marketLabel } from "../shared/markets";
-import { formatMoney } from "../shared/money";
+import type { ExtensionMessage } from "../shared/messages";
+import { MARKETPLACE_CODES, countryName, marketDisplayDomain } from "../shared/markets";
+import { loadSettings, saveSettings } from "../shared/storage";
 import type {
   ComparisonResult,
+  ExtensionSettings,
+  FxTable,
+  LoadSourcePayload,
+  Marketplace,
   RunComparisonProgressPayload,
   RunComparisonResultPayload,
   SourceContext
 } from "../shared/types";
+import { DetailSheet } from "./components/DetailSheet";
+import { DoneView } from "./components/DoneView";
+import { Footer } from "./components/Footer";
+import { IdleView } from "./components/IdleView";
+import type { SourceStatus } from "./components/IdleView";
+import { RunningView } from "./components/RunningView";
+import { SettingsView } from "./components/SettingsView";
+import { Toast } from "./components/Toast";
+import type { ToastState } from "./components/Toast";
+import { TopBar } from "./components/TopBar";
+import { computeVerdict, issues, rankedRows, resolveDisplayCurrency, targetMarkets } from "./view-model";
+import type { VerdictView } from "./view-model";
 
-interface ComparisonState {
+const TOAST_MS = 2200;
+
+const FALLBACK_SETTINGS: ExtensionSettings = {
+  enabledMarketplaces: [...MARKETPLACE_CODES],
+  comparisonCurrency: "SOURCE",
+  disclosureAcknowledged: false
+};
+
+interface PopupState {
+  view: VerdictView;
+  returnView?: VerdictView;
+  activeTabId?: number;
+  sourceStatus: SourceStatus;
   source?: SourceContext;
+  baseline?: ComparisonResult;
   results: ComparisonResult[];
-  running: boolean;
-  generatedAt?: string;
-  progress: RunComparisonProgressPayload;
+  fxTable?: FxTable;
+  progress?: RunComparisonProgressPayload;
+  runTargets: Marketplace[];
+  cancelled: boolean;
   error?: string;
+  generatedAt?: string;
+  sheet?: Marketplace;
+  issuesOpen: boolean;
+  toast?: ToastState;
+  settings: ExtensionSettings;
 }
 
-const initialProgress: RunComparisonProgressPayload = {
-  completed: 0,
-  total: 0
-};
+type PopupAction =
+  | { type: "tab-resolved"; activeTabId?: number }
+  | { type: "settings-changed"; settings: ExtensionSettings }
+  | { type: "source-loaded"; payload: LoadSourcePayload }
+  | { type: "run-started"; targets: Marketplace[] }
+  | { type: "run-cancelled" }
+  | { type: "progress"; payload: RunComparisonProgressPayload }
+  | { type: "result"; payload: RunComparisonResultPayload }
+  | { type: "settings-toggled" }
+  | { type: "sheet-opened"; marketplace: Marketplace }
+  | { type: "sheet-closed" }
+  | { type: "issues-toggled" }
+  | { type: "toast-shown"; text: string }
+  | { type: "toast-hidden"; id: number };
 
-const initialState: ComparisonState = {
+const initialState: PopupState = {
+  view: "idle",
+  sourceStatus: "loading",
   results: [],
-  running: false,
-  progress: initialProgress
+  runTargets: [],
+  cancelled: false,
+  issuesOpen: false,
+  settings: FALLBACK_SETTINGS
 };
 
-function statusLabel(status: ComparisonResult["status"]): string {
-  switch (status) {
-    case "OK":
-      return "Available";
-    case "UNAVAILABLE":
-      return "Unavailable";
-    case "DESTINATION_MISMATCH":
-      return "Destination mismatch";
-    case "PARSE_FAILED":
-      return "Parse failed";
-    case "NO_CONFIDENT_MATCH":
-      return "No confident match";
-    default:
-      return status;
+function reducer(state: PopupState, action: PopupAction): PopupState {
+  switch (action.type) {
+    case "tab-resolved":
+      return {
+        ...state,
+        activeTabId: action.activeTabId,
+        sourceStatus: action.activeTabId === undefined ? "failed" : state.sourceStatus
+      };
+    case "settings-changed":
+      return { ...state, settings: action.settings };
+    case "source-loaded": {
+      const source = state.source ?? (action.payload.error ? undefined : action.payload.source);
+      return {
+        ...state,
+        source,
+        baseline: state.baseline ?? (source ? action.payload.baseline : undefined),
+        sourceStatus: source ? "ready" : "failed"
+      };
+    }
+    case "run-started":
+      return {
+        ...state,
+        view: "running",
+        returnView: undefined,
+        runTargets: action.targets,
+        progress: undefined,
+        results: [],
+        error: undefined,
+        cancelled: false,
+        sheet: undefined,
+        issuesOpen: false
+      };
+    case "run-cancelled":
+      return { ...state, view: "idle", progress: undefined, results: [], error: undefined, cancelled: true };
+    case "progress":
+      if (state.cancelled) {
+        return state;
+      }
+      return state.view === "settings"
+        ? { ...state, progress: action.payload, returnView: "running" }
+        : { ...state, progress: action.payload, view: "running", sheet: undefined };
+    case "result": {
+      if (state.cancelled) {
+        return state;
+      }
+      const { payload } = action;
+      const next: PopupState = {
+        ...state,
+        source: payload.source ?? state.source,
+        baseline: payload.baseline ?? state.baseline,
+        fxTable: payload.fxTable ?? state.fxTable,
+        results: payload.results,
+        error: payload.error,
+        generatedAt: payload.generatedAt,
+        progress: undefined
+      };
+      return state.view === "settings" ? { ...next, returnView: "done" } : { ...next, view: "done" };
+    }
+    case "settings-toggled":
+      if (state.view === "settings") {
+        return {
+          ...state,
+          view: state.returnView ?? (state.results.length > 0 ? "done" : "idle"),
+          returnView: undefined
+        };
+      }
+      return { ...state, view: "settings", returnView: state.view, sheet: undefined };
+    case "sheet-opened":
+      return { ...state, sheet: action.marketplace };
+    case "sheet-closed":
+      return state.sheet ? { ...state, sheet: undefined } : state;
+    case "issues-toggled":
+      return { ...state, issuesOpen: !state.issuesOpen };
+    case "toast-shown":
+      return { ...state, toast: { id: (state.toast?.id ?? 0) + 1, text: action.text, visible: true } };
+    case "toast-hidden":
+      return state.toast?.id === action.id ? { ...state, toast: { ...state.toast, visible: false } } : state;
   }
 }
 
+function chromeApi(): typeof chrome | undefined {
+  return typeof chrome === "undefined" ? undefined : chrome;
+}
+
+async function queryActiveTabId(): Promise<number | undefined> {
+  try {
+    const tabs = await chromeApi()?.tabs?.query({ active: true, currentWindow: true });
+    return tabs?.[0]?.id;
+  } catch {
+    return undefined;
+  }
+}
+
+async function sendMessage(message: ExtensionMessage): Promise<unknown> {
+  try {
+    return await chromeApi()?.runtime?.sendMessage(message);
+  } catch {
+    return undefined;
+  }
+}
+
+async function requestSource(activeTabId: number): Promise<LoadSourcePayload> {
+  const response = await sendMessage({ type: LOAD_SOURCE, payload: { activeTabId } });
+  return response && typeof response === "object" ? (response as LoadSourcePayload) : { error: "No response" };
+}
+
+async function readSettings(): Promise<ExtensionSettings> {
+  try {
+    return await loadSettings();
+  } catch {
+    return FALLBACK_SETTINGS;
+  }
+}
+
+async function writeSettings(settings: ExtensionSettings): Promise<void> {
+  try {
+    await saveSettings(settings);
+  } catch {
+    return;
+  }
+}
+
+async function openTab(url: string): Promise<void> {
+  try {
+    await chromeApi()?.tabs?.create({ url, active: true });
+  } catch {
+    return;
+  }
+}
+
+function subscribe(listener: (message: unknown) => void): () => void {
+  const onMessage = chromeApi()?.runtime?.onMessage;
+  if (!onMessage) {
+    return () => undefined;
+  }
+  onMessage.addListener(listener);
+  return () => onMessage.removeListener(listener);
+}
+
+function isMessageOf<T extends ExtensionMessage["type"]>(
+  message: unknown,
+  type: T
+): message is Extract<ExtensionMessage, { type: T }> {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const { type: messageType, payload } = message as { type?: unknown; payload?: unknown };
+  return messageType === type && Boolean(payload) && typeof payload === "object";
+}
+
 export function App(): ReactElement {
-  const [state, setState] = useState<ComparisonState>(initialState);
-  const [activeTabId, setActiveTabId] = useState<number>();
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const { view, source, baseline, results, fxTable, settings, toast, activeTabId } = state;
+
+  const currency = resolveDisplayCurrency(settings.comparisonCurrency, source);
+  const destination = source ? countryName(source.destinationCountryCode) : "your address";
+  const sourceMarket = source?.marketplace ?? baseline?.marketplace;
+  const targets = targetMarkets(settings, source);
+  const rows = useMemo(() => rankedRows(baseline, results, currency, fxTable), [baseline, results, currency, fxTable]);
+  const verdict = useMemo(
+    () => computeVerdict(baseline, results, currency, fxTable),
+    [baseline, results, currency, fxTable]
+  );
+  const issueResults = useMemo(() => issues(results), [results]);
+  const sheetRow = view === "done" ? rows.find((row) => row.result.marketplace === state.sheet) : undefined;
 
   useEffect(() => {
-    void chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-      setActiveTabId(tabs[0]?.id);
+    let active = true;
+    void readSettings().then((loaded) => {
+      if (active) {
+        dispatch({ type: "settings-changed", settings: loaded });
+      }
     });
-  }, []);
-
-  useEffect(() => {
-    const listener = (message: unknown) => {
-      if (!message || typeof message !== "object") {
+    void queryActiveTabId().then(async (tabId) => {
+      if (!active) {
         return;
       }
-
-      if ((message as { type?: string }).type === RUN_COMPARISON_PROGRESS) {
-        setState((previous) => ({
-          ...previous,
-          running: true,
-          progress: (message as { payload: RunComparisonProgressPayload }).payload
-        }));
+      dispatch({ type: "tab-resolved", activeTabId: tabId });
+      if (tabId === undefined) {
+        return;
       }
-
-      if ((message as { type?: string }).type === RUN_COMPARISON_RESULT) {
-        const payload = (message as { payload: RunComparisonResultPayload }).payload;
-        setState((previous) => ({
-          ...previous,
-          source: payload.source,
-          results: payload.results,
-          generatedAt: payload.generatedAt,
-          error: payload.error,
-          running: false,
-          progress: {
-            completed: previous.progress.total,
-            total: previous.progress.total
-          }
-        }));
+      const payload = await requestSource(tabId);
+      if (active) {
+        dispatch({ type: "source-loaded", payload });
       }
-    };
-
-    chrome.runtime.onMessage.addListener(listener);
+    });
     return () => {
-      chrome.runtime.onMessage.removeListener(listener);
+      active = false;
     };
   }, []);
 
-  const visibleResults = useMemo(
-    () => state.results.filter((result) => result.status !== "NO_CONFIDENT_MATCH"),
-    [state.results]
+  useEffect(
+    () =>
+      subscribe((message) => {
+        if (isMessageOf(message, RUN_COMPARISON_PROGRESS)) {
+          dispatch({ type: "progress", payload: message.payload });
+        } else if (isMessageOf(message, RUN_COMPARISON_RESULT)) {
+          dispatch({ type: "result", payload: message.payload });
+        }
+      }),
+    []
   );
 
-  const hiddenNoMatchCount = state.results.length - visibleResults.length;
+  useEffect(() => {
+    if (!toast?.visible) {
+      return undefined;
+    }
+    const timer = setTimeout(() => dispatch({ type: "toast-hidden", id: toast.id }), TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
-  const cheapestMarket = useMemo(() => {
-    const cheapest = findCheapestAvailable(visibleResults);
-    return cheapest?.marketplace;
-  }, [visibleResults]);
+  const showToast = (text: string): void => dispatch({ type: "toast-shown", text });
 
-  const runComparison = async (): Promise<void> => {
-    if (!activeTabId) {
-      setState((previous) => ({
-        ...previous,
-        error: "Unable to resolve current tab"
-      }));
+  const run = (): void => {
+    if (targets.length === 0) {
+      showToast("Pick at least one marketplace to check.");
       return;
     }
-
-    setState({
-      ...initialState,
-      running: true,
-      progress: {
-        completed: 0,
-        total: 0
-      }
-    });
-
-    await chrome.runtime.sendMessage({
-      type: RUN_COMPARISON,
-      payload: {
-        activeTabId
-      }
-    });
-  };
-
-  const cancel = async (): Promise<void> => {
-    if (!activeTabId) {
+    if (activeTabId === undefined) {
       return;
     }
-
-    await chrome.runtime.sendMessage({
-      type: CANCEL_COMPARISON,
-      payload: {
-        activeTabId
-      }
-    });
-
-    setState((previous) => ({
-      ...previous,
-      running: false
-    }));
+    dispatch({ type: "run-started", targets });
+    void sendMessage({ type: RUN_COMPARISON, payload: { activeTabId } });
   };
+
+  const cancel = (): void => {
+    if (activeTabId !== undefined) {
+      void sendMessage({ type: CANCEL_COMPARISON, payload: { activeTabId } });
+    }
+    dispatch({ type: "run-cancelled" });
+    showToast("Stopped. No background tabs left open.");
+  };
+
+  const open = (result: ComparisonResult): void => {
+    if (!result.productUrl) {
+      return;
+    }
+    void openTab(result.productUrl);
+    showToast(`Opening ${marketDisplayDomain(result.marketplace)} — you complete the purchase on Amazon.`);
+  };
+
+  const changeSettings = (next: ExtensionSettings): void => {
+    dispatch({ type: "settings-changed", settings: next });
+    void writeSettings(next);
+  };
+
+  const closeSheet = useCallback(() => dispatch({ type: "sheet-closed" }), []);
 
   return (
-    <main className="popup">
-      <header className="popup-header">
-        <h1>Across Amazon</h1>
-        <p>Compare true delivered cost across marketplaces.</p>
-      </header>
-
-      <section className="controls">
-        <button className="primary" onClick={() => void runComparison()} disabled={state.running || !activeTabId}>
-          {state.running ? "Comparing..." : "Compare delivered prices"}
-        </button>
-        {state.running ? (
-          <button className="secondary" onClick={() => void cancel()}>
-            Cancel
-          </button>
-        ) : null}
-      </section>
-
-      <section className="status">
-        {state.running ? (
-          <p>
-            Progress: {state.progress.completed}/{state.progress.total}
-            {state.progress.currentMarketplace ? ` (${marketLabel(state.progress.currentMarketplace)})` : ""}
-          </p>
-        ) : null}
-        {state.generatedAt ? <p>Updated: {new Date(state.generatedAt).toLocaleString()}</p> : null}
-        {state.error ? <p className="error">{state.error}</p> : null}
-      </section>
-
-      {visibleResults.length > 0 ? (
-        <section className="results">
-          <table>
-            <thead>
-              <tr>
-                <th>Marketplace</th>
-                <th>Item</th>
-                <th>Shipping</th>
-                <th>Import</th>
-                <th>Total</th>
-                <th>Normalized</th>
-                <th>Confidence</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleResults.map((result) => (
-                <tr key={result.marketplace} className={result.status !== "OK" ? "muted" : ""}>
-                  <td>
-                    {marketLabel(result.marketplace)}
-                    {result.status === "OK" && result.marketplace === cheapestMarket ? (
-                      <span className="badge">Cheapest</span>
-                    ) : null}
-                  </td>
-                  <td>{formatMoney(result.breakdown?.item, MARKETPLACE_BY_CODE[result.marketplace].locale)}</td>
-                  <td>{formatMoney(result.breakdown?.shipping, MARKETPLACE_BY_CODE[result.marketplace].locale)}</td>
-                  <td>{formatMoney(result.breakdown?.importFees, MARKETPLACE_BY_CODE[result.marketplace].locale)}</td>
-                  <td>
-                    {formatMoney(
-                      result.breakdown?.totalDisplayed ??
-                        (result.breakdown
-                          ? {
-                              amount:
-                                result.breakdown.item.amount +
-                                (result.breakdown.shipping?.amount ?? 0) +
-                                (result.breakdown.importFees?.amount ?? 0),
-                              currency: result.breakdown.item.currency
-                            }
-                          : undefined),
-                      MARKETPLACE_BY_CODE[result.marketplace].locale
-                    )}
-                  </td>
-                  <td>{formatMoney(result.normalizedTotal)}</td>
-                  <td>{result.status === "OK" ? `${Math.round(result.confidence * 100)}%` : statusLabel(result.status)}</td>
-                  <td>
-                    {result.productUrl ? (
-                      <button
-                        className="link"
-                        onClick={() => {
-                          void chrome.tabs.create({ url: result.productUrl, active: true });
-                        }}
-                      >
-                        Open
-                      </button>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {hiddenNoMatchCount > 0 ? (
-            <p className="subtle">{hiddenNoMatchCount} marketplace(s) omitted due to low-confidence product matching.</p>
-          ) : null}
-        </section>
-      ) : (
-        <section className="results empty">
-          <p>Run a comparison to see cross-market delivered totals.</p>
-        </section>
-      )}
-
-      <footer className="disclaimer">
-        Across Amazon is not affiliated with Amazon. Prices/fees are what Amazon displayed at check time.
-      </footer>
-    </main>
+    <section className="dB" aria-label="Across Amazon popup">
+      <TopBar inSettings={view === "settings"} onToggleSettings={() => dispatch({ type: "settings-toggled" })} />
+      {view === "idle" ? (
+        <IdleView
+          source={source}
+          baseline={baseline}
+          status={state.sourceStatus}
+          targetCount={targets.length}
+          destination={destination}
+          onRun={run}
+        />
+      ) : null}
+      {view === "running" ? (
+        <RunningView
+          progress={state.progress}
+          runTargets={state.runTargets}
+          currency={currency}
+          fxTable={fxTable}
+          onCancel={cancel}
+        />
+      ) : null}
+      {view === "done" ? (
+        <DoneView
+          verdict={verdict}
+          error={state.error}
+          rows={rows}
+          issues={issueResults}
+          currency={currency}
+          destination={destination}
+          destinationCountryCode={source?.destinationCountryCode}
+          sourceDomain={sourceMarket ? marketDisplayDomain(sourceMarket) : "this page"}
+          issuesOpen={state.issuesOpen}
+          onToggleIssues={() => dispatch({ type: "issues-toggled" })}
+          onSelectRow={(marketplace) => dispatch({ type: "sheet-opened", marketplace })}
+          onOpen={open}
+          onRun={run}
+        />
+      ) : null}
+      {view === "settings" ? <SettingsView settings={settings} source={source} onChange={changeSettings} /> : null}
+      <Footer fxTable={fxTable} />
+      <DetailSheet
+        row={sheetRow}
+        sourceTitle={source?.title}
+        destination={destination}
+        onClose={closeSheet}
+        onOpen={open}
+      />
+      <Toast toast={toast} />
+    </section>
   );
 }

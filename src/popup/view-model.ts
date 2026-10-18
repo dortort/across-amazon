@@ -308,6 +308,10 @@ export function targetMarkets(settings: ExtensionSettings, source?: SourceContex
   return settings.enabledMarketplaces.filter((market) => market !== source?.marketplace);
 }
 
+export function formatVariantTokens(tokens: string[]): string {
+  return tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join(" · ");
+}
+
 export function percentFormat(percent: number): string {
   return Number.isFinite(percent) ? String(Math.round(Math.abs(percent))) : "0";
 }
