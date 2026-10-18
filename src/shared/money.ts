@@ -1,4 +1,4 @@
-import type { FxTable, Marketplace, Money } from "./types";
+import type { FxTable, Marketplace, Money, PriceBreakdown } from "./types";
 import { MARKETPLACE_BY_CODE } from "./markets";
 
 const CURRENCY_SYMBOL_PATTERNS: Array<{ symbol: string; currency: string }> = [
@@ -92,6 +92,30 @@ export function sumMoney(parts: Array<Money | undefined>, currency: string): Mon
     amount: sum,
     currency
   };
+}
+
+function roundCents(amount: number): number {
+  return Number(amount.toFixed(2));
+}
+
+export function deliveredTotal(breakdown: PriceBreakdown | undefined): Money | undefined {
+  if (!breakdown) {
+    return undefined;
+  }
+
+  const { currency } = breakdown.item;
+  const parts = [breakdown.item, breakdown.shipping, breakdown.importFees].filter((part): part is Money => Boolean(part));
+  if (parts.some((part) => part.currency !== currency)) {
+    return undefined;
+  }
+
+  const sum = roundCents(parts.reduce((total, part) => total + part.amount, 0));
+  const displayed = breakdown.totalDisplayed;
+  if (displayed && displayed.currency === currency && roundCents(displayed.amount) >= sum) {
+    return { amount: roundCents(displayed.amount), currency };
+  }
+
+  return { amount: sum, currency };
 }
 
 export function convertMoney(value: Money, targetCurrency: string, fxTable: FxTable): Money | undefined {

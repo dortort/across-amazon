@@ -1,5 +1,5 @@
 import { MARKETPLACE_BY_CODE, countryName } from "../shared/markets";
-import { convertMoney, formatMoney } from "../shared/money";
+import { convertMoney, deliveredTotal, formatMoney } from "../shared/money";
 import type {
   ComparisonPhase,
   ComparisonResult,
@@ -122,15 +122,7 @@ export function currencyChoices(source?: SourceContext): string[] {
 }
 
 export function deliveredLocalTotal(result: ComparisonResult): Money | undefined {
-  const breakdown = result.breakdown;
-  if (!breakdown) {
-    return undefined;
-  }
-  if (breakdown.totalDisplayed) {
-    return { ...breakdown.totalDisplayed };
-  }
-  const amount = breakdown.item.amount + (breakdown.shipping?.amount ?? 0) + (breakdown.importFees?.amount ?? 0);
-  return { amount: roundAmount(amount), currency: breakdown.item.currency };
+  return deliveredTotal(result.breakdown);
 }
 
 export function displayTotal(result: ComparisonResult, currency: string, fxTable?: FxTable): Money | undefined {

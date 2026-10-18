@@ -2,7 +2,7 @@ import { buildSearchUrl } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
 import { pickBestCandidate } from "../shared/matching";
-import { convertMoney, getDefaultCurrencyForMarketplace, sumMoney } from "../shared/money";
+import { convertMoney, deliveredTotal, getDefaultCurrencyForMarketplace } from "../shared/money";
 import { sortComparisonResults } from "../shared/comparison";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
 import type {
@@ -12,8 +12,6 @@ import type {
   FxTable,
   LoadSourcePayload,
   Marketplace,
-  Money,
-  PriceBreakdown,
   ProductExtractionRequest,
   ProductExtractionResult,
   RunComparisonProgressPayload,
@@ -188,14 +186,6 @@ function resolveComparisonCurrency(settings: ExtensionSettings, source: SourceCo
   return settings.comparisonCurrency === "SOURCE"
     ? getDefaultCurrencyForMarketplace(source.marketplace)
     : settings.comparisonCurrency;
-}
-
-function deliveredTotal(breakdown: PriceBreakdown): Money | undefined {
-  const total =
-    breakdown.totalDisplayed ??
-    sumMoney([breakdown.item, breakdown.shipping, breakdown.importFees], breakdown.item.currency);
-
-  return total ? { amount: Number(total.amount.toFixed(2)), currency: total.currency } : undefined;
 }
 
 function normalizeResult(result: ComparisonResult, currency: string, fxTable: FxTable): ComparisonResult {

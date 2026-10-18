@@ -90,7 +90,7 @@ const EXPECTED_DE_RESULT: ComparisonResult = {
     totalDisplayed: { amount: 37.2, currency: "EUR" }
   },
   notes: ["Match confidence: MEDIUM"],
-  normalizedTotal: { amount: 40.18, currency: "USD" }
+  normalizedTotal: { amount: 48.49, currency: "USD" }
 };
 
 type FixtureGroup = "source" | "search" | "product";
@@ -447,10 +447,10 @@ describe("background orchestrator", () => {
       expect(payload.baseline).toEqual(EXPECTED_BASELINE);
       expect(payload.fxTable).toEqual(EXPECTED_FX_TABLE);
       expect(payload.results.map((result) => [result.marketplace, result.status, result.normalizedTotal?.amount])).toEqual([
-        ["ES", "OK", 38.66],
-        ["IT", "OK", 39.85],
-        ["DE", "OK", 40.18],
-        ["UK", "OK", 41.2],
+        ["ES", "OK", 46.12],
+        ["IT", "OK", 47.52],
+        ["UK", "OK", 47.79],
+        ["DE", "OK", 48.49],
         ["FR", "NO_CONFIDENT_MATCH", undefined],
         ["JP", "DESTINATION_MISMATCH", undefined]
       ]);
@@ -474,7 +474,7 @@ describe("background orchestrator", () => {
         (progress) => progress.currentMarketplace === "JP" && progress.phase === "OPEN"
       );
       expect(jpOpen?.completed).toBe(5);
-      expect(jpOpen?.results?.map((result) => result.marketplace)).toEqual(["ES", "IT", "DE", "UK", "FR"]);
+      expect(jpOpen?.results?.map((result) => result.marketplace)).toEqual(["ES", "IT", "UK", "DE", "FR"]);
     });
 
     it("writes the cache record with the baseline and FX table", async () => {
@@ -504,6 +504,35 @@ describe("background orchestrator", () => {
     });
   });
 
+  describe("delivered total", () => {
+    function withDisplayedTotal(text: string): Prepare {
+      return (group, market, document) => {
+        const total = document.querySelector("#subtotals-marketplace-table .a-color-price");
+        if (group === "product" && market === "DE" && total) {
+          total.textContent = text;
+        }
+      };
+    }
+
+    it("ignores a displayed total below the item, shipping and import fees and normalizes their sum", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results[0].breakdown?.totalDisplayed).toEqual({ amount: 37.2, currency: "EUR" });
+      expect(payload.results[0].normalizedTotal).toEqual({ amount: 48.49, currency: "USD" });
+    });
+
+    it("normalizes a displayed total that covers every charge", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], prepare: withDisplayedTotal("€46,00") });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results[0].breakdown?.totalDisplayed).toEqual({ amount: 46, currency: "EUR" });
+      expect(payload.results[0].normalizedTotal).toEqual({ amount: 49.68, currency: "USD" });
+    });
+  });
+
   describe("progress", () => {
     it("emits OPEN, SEARCH, MATCH and READ per market with growing sorted results, then a completion message", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"] });
@@ -528,14 +557,14 @@ describe("background orchestrator", () => {
         { completed: 1, total: 2, currentMarketplace: "DE", phase: "SEARCH", results: ["UK"] },
         { completed: 1, total: 2, currentMarketplace: "DE", phase: "MATCH", results: ["UK"] },
         { completed: 1, total: 2, currentMarketplace: "DE", phase: "READ", results: ["UK"] },
-        { completed: 2, total: 2, currentMarketplace: undefined, phase: undefined, results: ["DE", "UK"] }
+        { completed: 2, total: 2, currentMarketplace: undefined, phase: undefined, results: ["UK", "DE"] }
       ]);
 
       const final = progress[progress.length - 1];
       expect(final).not.toHaveProperty("phase");
       expect(final).not.toHaveProperty("currentMarketplace");
-      expect(progress[4].results?.[0].normalizedTotal).toEqual({ amount: 41.2, currency: "USD" });
-      expect(final.results?.[0]).toEqual(EXPECTED_DE_RESULT);
+      expect(progress[4].results?.[0].normalizedTotal).toEqual({ amount: 47.79, currency: "USD" });
+      expect(final.results?.[1]).toEqual(EXPECTED_DE_RESULT);
     });
 
     it("emits each phase at the right point of the tab lifecycle", async () => {
@@ -731,8 +760,8 @@ describe("background orchestrator", () => {
       expect(loaded.baseline?.normalizedTotal).toEqual({ amount: 46.29, currency: "EUR" });
       expect(payload.baseline?.normalizedTotal).toEqual({ amount: 46.29, currency: "EUR" });
       expect(payload.results.map((result) => [result.marketplace, result.normalizedTotal])).toEqual([
-        ["DE", { amount: 37.2, currency: "EUR" }],
-        ["UK", { amount: 38.15, currency: "EUR" }]
+        ["UK", { amount: 44.25, currency: "EUR" }],
+        ["DE", { amount: 44.9, currency: "EUR" }]
       ]);
     });
   });

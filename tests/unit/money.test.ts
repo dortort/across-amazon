@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { convertMoney, parseLocalizedNumber, parseMoney, sumMoney } from "../../src/shared/money";
+import { convertMoney, deliveredTotal, parseLocalizedNumber, parseMoney, sumMoney } from "../../src/shared/money";
+import type { Money, PriceBreakdown } from "../../src/shared/types";
 
 describe("money utilities", () => {
   it("parses localized number formats", () => {
@@ -44,5 +45,62 @@ describe("money utilities", () => {
     );
 
     expect(converted).toEqual({ amount: 8.33, currency: "EUR" });
+  });
+});
+
+function eur(amount: number): Money {
+  return { amount, currency: "EUR" };
+}
+
+const charges: PriceBreakdown = { item: eur(37.2), shipping: eur(4.5), importFees: eur(3.2) };
+
+describe("deliveredTotal", () => {
+  it("adds item, shipping and import fees rounded to cents", () => {
+    expect(deliveredTotal(charges)).toEqual(eur(44.9));
+  });
+
+  it("trusts a displayed total above the sum of the charges", () => {
+    expect(deliveredTotal({ ...charges, totalDisplayed: eur(46) })).toEqual(eur(46));
+  });
+
+  it("trusts a displayed total equal to the sum despite floating point drift", () => {
+    expect(deliveredTotal({ ...charges, totalDisplayed: eur(44.9) })).toEqual(eur(44.9));
+  });
+
+  it("ignores a displayed total below the sum of the charges", () => {
+    expect(deliveredTotal({ ...charges, totalDisplayed: eur(37.2) })).toEqual(eur(44.9));
+  });
+
+  it("sums only the charges that are known", () => {
+    expect(deliveredTotal({ item: eur(37.2) })).toEqual(eur(37.2));
+    expect(deliveredTotal({ item: eur(37.2), shipping: eur(4.5) })).toEqual(eur(41.7));
+    expect(deliveredTotal({ item: eur(37.2), importFees: eur(3.2) })).toEqual(eur(40.4));
+  });
+
+  it("compares the displayed total against the known charges only", () => {
+    expect(deliveredTotal({ item: eur(37.2), shipping: eur(4.5), totalDisplayed: eur(44.9) })).toEqual(eur(44.9));
+    expect(deliveredTotal({ item: eur(37.2), shipping: eur(4.5), totalDisplayed: eur(40) })).toEqual(eur(41.7));
+  });
+
+  it("ignores a displayed total in another currency and keeps the sum", () => {
+    expect(deliveredTotal({ ...charges, totalDisplayed: { amount: 99, currency: "USD" } })).toEqual(eur(44.9));
+  });
+
+  it("returns undefined when the charges are in different currencies", () => {
+    expect(deliveredTotal({ ...charges, shipping: { amount: 4.5, currency: "USD" } })).toBeUndefined();
+    expect(
+      deliveredTotal({ ...charges, importFees: { amount: 3.2, currency: "GBP" }, totalDisplayed: eur(50) })
+    ).toBeUndefined();
+  });
+
+  it("returns undefined without a breakdown", () => {
+    expect(deliveredTotal(undefined)).toBeUndefined();
+  });
+
+  it("keeps whole yen amounts whole", () => {
+    const yen = (amount: number): Money => ({ amount, currency: "JPY" });
+    expect(deliveredTotal({ item: yen(4200), shipping: yen(500), importFees: yen(300), totalDisplayed: yen(4200) })).toEqual(
+      yen(5000)
+    );
   });
 });

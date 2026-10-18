@@ -208,12 +208,20 @@ describe("deliveredLocalTotal", () => {
     expect(deliveredLocalTotal(baseline)).toEqual(money(399.99, "USD"));
   });
 
-  it("prefers the total Amazon displayed over the computed sum", () => {
+  it("prefers a displayed total that covers every charge over the computed sum", () => {
     const result: ComparisonResult = {
       ...de,
-      breakdown: { ...de.breakdown!, totalDisplayed: money(320.5, "EUR") }
+      breakdown: { ...de.breakdown!, totalDisplayed: money(325.5, "EUR") }
     };
-    expect(deliveredLocalTotal(result)).toEqual(money(320.5, "EUR"));
+    expect(deliveredLocalTotal(result)).toEqual(money(325.5, "EUR"));
+  });
+
+  it("ignores a displayed total below the sum of the charges", () => {
+    const result: ComparisonResult = {
+      ...de,
+      breakdown: { ...de.breakdown!, totalDisplayed: money(279, "EUR") }
+    };
+    expect(deliveredLocalTotal(result)).toEqual(money(323.19, "EUR"));
   });
 
   it("treats missing shipping and import fees as zero", () => {
@@ -236,6 +244,14 @@ describe("deliveredLocalTotal", () => {
     expect(deliveredLocalTotal(okResult("JP", 52800, 1200, 0, 0.95))).toEqual(money(54000, "JPY"));
   });
 
+  it("returns undefined when the charges are in different currencies", () => {
+    const result: ComparisonResult = {
+      ...de,
+      breakdown: { ...de.breakdown!, shipping: money(12.99, "USD") }
+    };
+    expect(deliveredLocalTotal(result)).toBeUndefined();
+  });
+
   it("returns undefined when there is no breakdown", () => {
     expect(deliveredLocalTotal(jp)).toBeUndefined();
     expect(deliveredLocalTotal({ ...de, breakdown: undefined })).toBeUndefined();
@@ -243,6 +259,16 @@ describe("deliveredLocalTotal", () => {
 });
 
 describe("displayTotal", () => {
+  it("converts the summed charges when the displayed total understates them", () => {
+    const understated: ComparisonResult = {
+      ...de,
+      breakdown: { ...de.breakdown!, totalDisplayed: money(279, "EUR") }
+    };
+    expect(displayTotal(understated, "USD", fxTable)).toEqual(money(349.05, "USD"));
+    const spain = okResult("ES", 300, 10, 0, 0.95);
+    expect(rankAvailable([understated, spain], "USD", fxTable)).toEqual([spain, understated]);
+  });
+
   it("converts the delivered total into the display currency", () => {
     expect(displayTotal(de, "USD", fxTable)).toEqual(money(349.05, "USD"));
     expect(displayTotal(uk, "USD", fxTable)).toEqual(money(372.16, "USD"));
