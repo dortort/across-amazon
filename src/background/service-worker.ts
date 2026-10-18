@@ -2,10 +2,11 @@ import {
   CANCEL_COMPARISON,
   RUN_COMPARISON_RESULT,
   isCancelComparisonRequest,
+  isLoadSourceRequest,
   isRunComparisonRequest
 } from "../shared/messages";
 import type { RunComparisonResult } from "../shared/messages";
-import { cancelComparison, runComparison } from "./orchestrator";
+import { cancelComparison, loadSource, runComparison } from "./orchestrator";
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (isRunComparisonRequest(message)) {
@@ -32,6 +33,11 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
         sendResponse({ ok: true });
       });
 
+    return true;
+  }
+
+  if (isLoadSourceRequest(message)) {
+    void loadSource(message.payload.activeTabId).then(sendResponse);
     return true;
   }
 
