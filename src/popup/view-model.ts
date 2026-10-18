@@ -1,4 +1,4 @@
-import { MARKETPLACE_BY_CODE, countryName } from "../shared/markets";
+import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName } from "../shared/markets";
 import { convertMoney, deliveredTotal, formatMoney } from "../shared/money";
 import type {
   ComparisonPhase,
@@ -43,7 +43,7 @@ const MATCH_CHECK_THRESHOLD = 0.9;
 const SECONDS_PER_MARKET = 3;
 const MIN_ESTIMATED_SECONDS = 5;
 const MINUS_SIGN = "−";
-const MATCH_CONFIDENCE_NOTE = /^match confidence:/i;
+const SOURCE_TRUST_SENTENCE = "This is the page you are on. Prices are what Amazon showed when we checked.";
 
 const STATUS_TEXT: Record<ComparisonStatus, string> = {
   OK: "Available",
@@ -77,17 +77,8 @@ function marketCurrency(marketplace: Marketplace): string {
   return MARKETPLACE_BY_CODE[marketplace].currency;
 }
 
-function asSentence(note: string): string {
-  const trimmed = note.trim();
-  return /[.!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
-}
-
-function noteText(notes: string[] | undefined): string {
-  return (notes ?? [])
-    .map((note) => note.trim())
-    .filter((note) => note.length > 0 && !MATCH_CONFIDENCE_NOTE.test(note))
-    .map(asSentence)
-    .join(" ");
+function canonicalIndex(marketplace: Marketplace): number {
+  return MARKETPLACE_CODES.indexOf(marketplace);
 }
 
 function compareTotals(left: Money, right: Money): number {
@@ -116,9 +107,10 @@ export function resolveDisplayCurrency(settingsCurrency: string, source?: Source
   return source ? marketCurrency(source.marketplace) : "USD";
 }
 
-export function currencyChoices(source?: SourceContext): string[] {
+export function currencyChoices(source?: SourceContext, storedCurrency?: string): string[] {
   const leading = source ? [marketCurrency(source.marketplace)] : [];
-  return [...new Set<string>([...leading, ...DISPLAY_CURRENCIES])];
+  const stored = storedCurrency && storedCurrency !== "SOURCE" ? [storedCurrency] : [];
+  return [...new Set<string>([...leading, ...DISPLAY_CURRENCIES, ...stored])];
 }
 
 export function deliveredLocalTotal(result: ComparisonResult): Money | undefined {
@@ -158,7 +150,17 @@ export function rankAvailable(results: ComparisonResult[], currency: string, fxT
 }
 
 export function issues(results: ComparisonResult[]): ComparisonResult[] {
-  return results.filter((result) => result.status !== "OK");
+  return results
+    .filter((result) => result.status !== "OK")
+    .sort((left, right) => canonicalIndex(left.marketplace) - canonicalIndex(right.marketplace));
+}
+
+export function inCheckOrder(results: ComparisonResult[], order: Marketplace[]): ComparisonResult[] {
+  const position = (marketplace: Marketplace): number => {
+    const index = order.indexOf(marketplace);
+    return index === -1 ? order.length + canonicalIndex(marketplace) : index;
+  };
+  return [...results].sort((left, right) => position(left.marketplace) - position(right.marketplace));
 }
 
 export function needsMatchCheck(result: ComparisonResult): boolean {
@@ -260,10 +262,6 @@ export function statusText(status: ComparisonStatus): string {
 }
 
 export function issueNote(result: ComparisonResult, destinationCountryCode?: string): string {
-  const fromNotes = noteText(result.notes);
-  if (fromNotes) {
-    return fromNotes;
-  }
   const destination = destinationCountryCode ? countryName(destinationCountryCode) : "your address";
   switch (result.status) {
     case "DESTINATION_MISMATCH":
@@ -283,13 +281,14 @@ export function phaseLabel(phase?: ComparisonPhase): string {
   return phase ? PHASE_LABEL[phase] : PHASE_LABEL.OPEN;
 }
 
-export function trustSentence(result: ComparisonResult): string {
+export function trustSentence(result: ComparisonResult, isSource = false): string {
+  if (isSource) {
+    return SOURCE_TRUST_SENTENCE;
+  }
   const percent = Math.round(Math.min(1, Math.max(0, result.confidence)) * 100);
-  const lead = needsMatchCheck(result)
+  return needsMatchCheck(result)
     ? `We are ${percent}% sure this is the same product.`
     : `We are ${percent}% sure this is the same product — title, brand and variant all line up.`;
-  const note = noteText(result.notes);
-  return note ? `${lead} ${note}` : lead;
 }
 
 export function estimatedSeconds(targetCount: number): number {

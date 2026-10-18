@@ -26,6 +26,7 @@ import {
   needsMatchCheck,
   percentFormat,
   formatVariantTokens,
+  inCheckOrder,
   phaseLabel,
   progressPercent,
   rankAvailable,
@@ -185,6 +186,18 @@ describe("currencyChoices", () => {
     expect(currencyChoices(sourceFor("CA"))).toEqual(["CAD", "USD", "EUR", "GBP", "JPY"]);
     expect(currencyChoices(sourceFor("AU"))).toEqual(["AUD", "USD", "EUR", "GBP", "JPY"]);
     expect(currencyChoices(sourceFor("MX"))).toEqual(["MXN", "USD", "EUR", "GBP", "JPY"]);
+  });
+
+  it("appends a stored currency that is not offered by default", () => {
+    expect(currencyChoices(sourceFor("DE"), "CAD")).toEqual(["EUR", "USD", "GBP", "JPY", "CAD"]);
+    expect(currencyChoices(undefined, "AUD")).toEqual(["USD", "EUR", "GBP", "JPY", "AUD"]);
+    expect(currencyChoices(sourceFor("CA"), "MXN")).toEqual(["CAD", "USD", "EUR", "GBP", "JPY", "MXN"]);
+  });
+
+  it("does not duplicate a stored currency that is already offered or the SOURCE default", () => {
+    expect(currencyChoices(sourceFor("DE"), "GBP")).toEqual(["EUR", "USD", "GBP", "JPY"]);
+    expect(currencyChoices(sourceFor("CA"), "CAD")).toEqual(["CAD", "USD", "EUR", "GBP", "JPY"]);
+    expect(currencyChoices(sourceFor("DE"), "SOURCE")).toEqual(["EUR", "USD", "GBP", "JPY"]);
   });
 
   it.each(MARKETPLACE_CODES)("offers at most five unique choices led by the %s currency", (code) => {
@@ -362,8 +375,19 @@ describe("rankAvailable", () => {
 });
 
 describe("issues", () => {
-  it("returns every non-OK result in input order, including no-confident-match", () => {
+  it("returns every non-OK result, including no-confident-match", () => {
     expect(codes(issues(mockupResults))).toEqual(["MX", "FR", "ES", "JP"]);
+  });
+
+  it("orders issues by canonical marketplace order whatever order they arrive in", () => {
+    expect(codes(issues([jp, de, es, fr, mx]))).toEqual(["MX", "FR", "ES", "JP"]);
+    expect(codes(issues([es, jp, mx]))).toEqual(["MX", "ES", "JP"]);
+  });
+
+  it("does not mutate its input", () => {
+    const input = [jp, es, mx];
+    issues(input);
+    expect(codes(input)).toEqual(["JP", "ES", "MX"]);
   });
 
   it("returns an empty list when every marketplace was compared", () => {
@@ -623,36 +647,27 @@ describe("statusText", () => {
 });
 
 describe("issueNote", () => {
-  it("returns the result notes as written", () => {
-    expect(issueNote(jp, "US")).toBe("Match found, but the seller does not ship to the United States.");
-    expect(issueNote(fr)).toBe("Out of stock — no delivery date offered.");
-    expect(issueNote(mx)).toBe("Closest listing scored 31% — below the confidence floor.");
+  it("uses the per-status sentence for the destination country, never the backend notes", () => {
+    expect(issueNote(jp, "US")).toBe("Match found, but the seller does not ship to United States.");
+    expect(issueNote(jp, "DE")).toBe("Match found, but the seller does not ship to Germany.");
+    expect(issueNote(fr, "US")).toBe("Amazon did not show a delivered price for this destination.");
+    expect(issueNote(es, "US")).toBe("The product page could not be read.");
+    expect(issueNote(mx, "US")).toBe("No listing scored above the confidence floor.");
   });
 
-  it("joins several notes into sentences and drops the match confidence label", () => {
-    const demoted: ComparisonResult = {
+  it("hides internal diagnostics from the backend", () => {
+    const timedOut: ComparisonResult = {
       marketplace: "CA",
-      status: "UNAVAILABLE",
-      confidence: 0.92,
-      notes: ["Match confidence: HIGH", "Shipping not displayed for destination", "  ", "Missing FX conversion path to USD"]
+      status: "PARSE_FAILED",
+      confidence: 0,
+      notes: ["Timed out waiting for tab 123 to complete", "Missing FX conversion path to USD"]
     };
-    expect(issueNote(demoted)).toBe("Shipping not displayed for destination. Missing FX conversion path to USD.");
+    expect(issueNote(timedOut, "US")).toBe("The product page could not be read.");
   });
 
-  it("falls back to a per-status sentence when there are no notes", () => {
-    expect(issueNote(failedResult("JP", "DESTINATION_MISMATCH", 0.93), "US")).toBe(
-      "Match found, but the seller does not ship to United States."
-    );
-    expect(issueNote(failedResult("JP", "DESTINATION_MISMATCH", 0.93, []), "DE")).toBe(
-      "Match found, but the seller does not ship to Germany."
-    );
-    expect(issueNote(failedResult("FR", "UNAVAILABLE", 0.9))).toBe(
-      "Amazon did not show a delivered price for this destination."
-    );
-    expect(issueNote(failedResult("ES", "PARSE_FAILED", 0.89, [" "]))).toBe("The product page could not be read.");
-    expect(issueNote(failedResult("MX", "NO_CONFIDENT_MATCH", 0.31, ["Match confidence: LOW"]))).toBe(
-      "No listing scored above the confidence floor."
-    );
+  it("gives the same sentence with or without notes", () => {
+    expect(issueNote(failedResult("FR", "UNAVAILABLE", 0.9))).toBe(issueNote(fr));
+    expect(issueNote(failedResult("ES", "PARSE_FAILED", 0.89, [" "]))).toBe(issueNote(es));
   });
 
   it("uses a generic destination when the country is unknown", () => {
@@ -661,7 +676,8 @@ describe("issueNote", () => {
     );
   });
 
-  it("returns an empty note for an OK result without notes", () => {
+  it("returns an empty note for an OK result, notes or not", () => {
+    expect(issueNote(de, "US")).toBe("");
     expect(issueNote({ ...de, notes: undefined })).toBe("");
   });
 });
@@ -682,26 +698,35 @@ describe("phaseLabel", () => {
 
 describe("trustSentence", () => {
   it("warns on a low-confidence match", () => {
-    expect(trustSentence(it_)).toBe(
-      "We are 76% sure this is the same product. Colour is not stated in the listing title — confirm it is the black variant before buying."
-    );
+    expect(trustSentence(it_)).toBe("We are 76% sure this is the same product.");
   });
 
   it("reassures on a confident match", () => {
     expect(trustSentence(uk)).toBe(
-      "We are 94% sure this is the same product — title, brand and variant all line up. Import fees deposit quoted. Sold and shipped by Amazon UK."
+      "We are 94% sure this is the same product — title, brand and variant all line up."
     );
     expect(trustSentence(de)).toBe(
-      "We are 91% sure this is the same product — title, brand and variant all line up. Import fees deposit quoted on the product page. Delivery 6–10 days."
+      "We are 91% sure this is the same product — title, brand and variant all line up."
     );
   });
 
-  it("omits the trailing note when there is none", () => {
-    expect(trustSentence(baseline)).toBe(
-      "We are 100% sure this is the same product — title, brand and variant all line up."
+  it("never appends backend notes", () => {
+    const noisy: ComparisonResult = { ...de, notes: ["Shipping not displayed for destination", "Selected best candidate"] };
+    expect(trustSentence(noisy)).toBe(
+      "We are 91% sure this is the same product — title, brand and variant all line up."
     );
-    expect(trustSentence({ ...it_, notes: ["Match confidence: MEDIUM"] })).toBe(
+    expect(trustSentence({ ...it_, notes: ["Timed out waiting for tab 7 to complete"] })).toBe(
       "We are 76% sure this is the same product."
+    );
+  });
+
+  it("describes the page you are on without a match percentage or extractor notes", () => {
+    const noisyBaseline: ComparisonResult = { ...baseline, notes: ["Import fees not displayed on the page"] };
+    expect(trustSentence(noisyBaseline, true)).toBe(
+      "This is the page you are on. Prices are what Amazon showed when we checked."
+    );
+    expect(trustSentence(baseline, false)).toBe(
+      "We are 100% sure this is the same product — title, brand and variant all line up."
     );
   });
 
@@ -710,6 +735,30 @@ describe("trustSentence", () => {
     expect(trustSentence({ ...de, confidence: 0.934, notes: [] })).toBe(
       "We are 93% sure this is the same product — title, brand and variant all line up."
     );
+  });
+});
+
+describe("inCheckOrder", () => {
+  const order: Marketplace[] = ["CA", "MX", "UK", "DE", "FR", "IT", "ES", "JP", "AU"];
+
+  it("orders results by the run's target order instead of price", () => {
+    expect(codes(inCheckOrder([de, uk, ca, mx], order))).toEqual(["CA", "MX", "UK", "DE"]);
+    expect(codes(inCheckOrder([de, it_, uk, ca, mx, jp], order))).toEqual(["CA", "MX", "UK", "DE", "IT", "JP"]);
+  });
+
+  it("follows a custom target order", () => {
+    expect(codes(inCheckOrder([de, uk, ca], ["DE", "CA", "UK"]))).toEqual(["DE", "CA", "UK"]);
+  });
+
+  it("puts results outside the target order last, in canonical order", () => {
+    expect(codes(inCheckOrder([jp, de, uk, ca], ["UK", "DE"]))).toEqual(["UK", "DE", "CA", "JP"]);
+    expect(codes(inCheckOrder([au, de, ca], []))).toEqual(["CA", "DE", "AU"]);
+  });
+
+  it("does not mutate its input", () => {
+    const input = [de, uk, ca];
+    inCheckOrder(input, order);
+    expect(codes(input)).toEqual(["DE", "UK", "CA"]);
   });
 });
 
