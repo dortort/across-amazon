@@ -17,6 +17,7 @@ export interface RunComparisonRequest {
   type: typeof RUN_COMPARISON;
   payload: {
     activeTabId: number;
+    runId?: string;
   };
 }
 

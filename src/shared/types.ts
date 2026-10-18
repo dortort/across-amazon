@@ -102,6 +102,9 @@ export interface RunComparisonProgressPayload {
   currentMarketplace?: Marketplace;
   phase?: ComparisonPhase;
   results?: ComparisonResult[];
+  fxTable?: FxTable;
+  activeTabId?: number;
+  runId?: string;
 }
 
 export interface RunComparisonResultPayload {
@@ -111,6 +114,8 @@ export interface RunComparisonResultPayload {
   generatedAt: string;
   fxTable?: FxTable;
   error?: string;
+  activeTabId?: number;
+  runId?: string;
 }
 
 export interface LoadSourcePayload {
