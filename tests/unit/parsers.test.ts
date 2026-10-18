@@ -72,4 +72,94 @@ describe("content parsers", () => {
       expect(result.destinationMatched).toBe(true);
     }
   });
+
+  it("reads the product image from the landing image on the source page", () => {
+    const dom = loadFixture("source", "US");
+    const extracted = extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname);
+
+    expect(extracted.source?.imageUrl).toBe("https://m.media-amazon.com/images/I/41acme-widget._AC_SX425_.jpg");
+  });
+
+  it("falls back to the og:image meta tag when there is no landing image", () => {
+    const dom = loadFixture("source", "DE");
+    const extracted = extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname);
+
+    expect(extracted.source?.imageUrl).toBe("https://m.media-amazon.com/images/I/51acme-widget-de._AC_SX425_.jpg");
+  });
+
+  it("leaves imageUrl unset when the page has no product image", () => {
+    const dom = loadFixture("source", "UK");
+    const extracted = extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname);
+
+    expect(extracted.source).toBeDefined();
+    expect(extracted.source).not.toHaveProperty("imageUrl");
+  });
+
+  describe("source image fallbacks", () => {
+    const PRODUCT_BODY = `
+      <input id="ASIN" value="B000000001" />
+      <span id="productTitle">Acme Ultra Widget Model X100 2 Pack Blue</span>
+    `;
+
+    function imageUrlFor(markup: string, head = ""): string | undefined {
+      const dom = new JSDOM(`<!doctype html><html><head>${head}</head><body>${PRODUCT_BODY}${markup}</body></html>`, {
+        url: "https://www.amazon.com/dp/B000000001"
+      });
+      return extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname).source
+        ?.imageUrl;
+    }
+
+    it("uses data-old-hires when the landing image src is a data placeholder", () => {
+      expect(
+        imageUrlFor(
+          '<img id="landingImage" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-old-hires="https://m.media-amazon.com/images/I/hires.jpg" />'
+        )
+      ).toBe("https://m.media-amazon.com/images/I/hires.jpg");
+    });
+
+    it("uses the image wrapper img when there is no landing image id", () => {
+      expect(imageUrlFor('<div id="imgTagWrapperId"><img src="https://m.media-amazon.com/images/I/wrapper.jpg" /></div>')).toBe(
+        "https://m.media-amazon.com/images/I/wrapper.jpg"
+      );
+    });
+
+    it("prefers the landing image over the og:image meta tag", () => {
+      expect(
+        imageUrlFor(
+          '<img id="landingImage" src="https://m.media-amazon.com/images/I/landing.jpg" />',
+          '<meta property="og:image" content="https://m.media-amazon.com/images/I/og.jpg" />'
+        )
+      ).toBe("https://m.media-amazon.com/images/I/landing.jpg");
+    });
+
+    it("resolves a relative image path against the page URL", () => {
+      expect(imageUrlFor('<img id="landingImage" src="/images/I/relative.jpg" />')).toBe(
+        "https://www.amazon.com/images/I/relative.jpg"
+      );
+    });
+
+    it("ignores empty and non-http image sources", () => {
+      expect(
+        imageUrlFor(
+          '<img id="landingImage" src="" data-old-hires="" />',
+          '<meta property="og:image" content="javascript:alert(1)" />'
+        )
+      ).toBeUndefined();
+    });
+  });
+
+  it("reads the baseline price from the source page with free domestic delivery", () => {
+    const dom = loadFixture("source", "US");
+    const result = extractProductData(
+      dom.window.document,
+      { marketplace: "US", sourceDestinationCountryCode: "US" },
+      dom.window.location.href
+    );
+
+    expect(result.breakdown?.item).toEqual({ amount: 49.99, currency: "USD" });
+    expect(result.breakdown?.shipping).toEqual({ amount: 0, currency: "USD" });
+    expect(result.breakdown?.importFees).toBeUndefined();
+    expect(result.destinationMatched).toBe(true);
+    expect(result.notes).toEqual(["Import fees not displayed for destination"]);
+  });
 });

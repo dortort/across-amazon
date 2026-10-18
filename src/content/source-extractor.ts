@@ -130,6 +130,39 @@ function cleanBrand(rawBrand?: string): string | undefined {
   return cleaned || undefined;
 }
 
+function toHttpUrl(value: string | null | undefined, href: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(trimmed, href);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractImageUrl(documentRef: Document, href: string): string | undefined {
+  const landingImage = documentRef.querySelector("#landingImage");
+  const candidates = [
+    landingImage?.getAttribute("src"),
+    landingImage?.getAttribute("data-old-hires"),
+    documentRef.querySelector("#imgTagWrapperId img")?.getAttribute("src"),
+    documentRef.querySelector("meta[property='og:image']")?.getAttribute("content")
+  ];
+
+  for (const candidate of candidates) {
+    const url = toHttpUrl(candidate, href);
+    if (url) {
+      return url;
+    }
+  }
+
+  return undefined;
+}
+
 export function extractSourceContext(documentRef: Document, href: string, hostname: string): SourceExtractionResult {
   const marketplace = MARKET_BY_HOST[hostname.toLowerCase()];
   if (!marketplace) {
@@ -163,6 +196,11 @@ export function extractSourceContext(documentRef: Document, href: string, hostna
     destinationCountryCode: resolveDestinationCountryCode(documentRef) ?? marketplace,
     sourceUrl: href
   };
+
+  const imageUrl = extractImageUrl(documentRef, href);
+  if (imageUrl) {
+    source.imageUrl = imageUrl;
+  }
 
   return {
     source
