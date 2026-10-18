@@ -1,135 +1,73 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { sortComparisonResults } from "../../src/shared/comparison";
-import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES } from "../../src/shared/markets";
-import { LOAD_SOURCE, RUN_COMPARISON_PROGRESS, RUN_COMPARISON_RESULT } from "../../src/shared/messages";
+import {
+  CANCEL_COMPARISON,
+  LOAD_SOURCE,
+  RUN_COMPARISON,
+  RUN_COMPARISON_PROGRESS,
+  RUN_COMPARISON_RESULT
+} from "../../src/shared/messages";
 import type {
   ComparisonPhase,
   ComparisonResult,
-  ComparisonStatus,
   ExtensionSettings,
   FxTable,
   LoadSourcePayload,
   Marketplace,
-  Money,
   RunComparisonProgressPayload,
   RunComparisonResultPayload,
   SourceContext
 } from "../../src/shared/types";
+import {
+  ACTIVE_TAB_ID,
+  DEFAULT_SETTINGS,
+  GENERATED_AT,
+  IMAGE_HOST,
+  SETTINGS_KEY,
+  baseline,
+  fxTable,
+  mockupResults,
+  source
+} from "../fixtures/popup";
 
-export const NBSP = " ";
-export const MINUS = "−";
-export const SETTINGS_KEY = "settings:v1";
-export const ACTIVE_TAB_ID = 42;
-export const GENERATED_AT = "2026-07-30T09:00:00.000Z";
+export {
+  ACTIVE_TAB_ID,
+  DEFAULT_SETTINGS,
+  GENERATED_AT,
+  IMAGE_HOST,
+  MINUS,
+  NBSP,
+  SETTINGS_KEY,
+  TARGET_ORDER,
+  au,
+  baseline,
+  ca,
+  cheapBaseline,
+  de,
+  es,
+  fr,
+  fxTable,
+  it_,
+  jp,
+  money,
+  mx,
+  productUrl,
+  source,
+  uk
+} from "../fixtures/popup";
+
 export const PHASES: ComparisonPhase[] = ["OPEN", "SEARCH", "MATCH", "READ"];
-export const IMAGE_HOST = "https://m.media-amazon.com";
-
-export const fxTable: FxTable = {
-  base: "EUR",
-  date: "2026-07-30",
-  rates: { EUR: 1, USD: 1.08, GBP: 0.852, CAD: 1.475, AUD: 1.655, JPY: 155.52, MXN: 19.46 },
-  source: "ECB"
-};
-
-export function money(amount: number, currency: string): Money {
-  return { amount, currency };
-}
-
-export function productUrl(marketplace: Marketplace): string {
-  return `https://${MARKETPLACE_BY_CODE[marketplace].domain}/dp/B09XS7JWHH`;
-}
-
-export const source: SourceContext = {
-  marketplace: "US",
-  asin: "B09XS7JWHH",
-  title: "Sony WH-1000XM5 Wireless Noise Canceling Headphones",
-  brand: "Sony",
-  variationTokens: ["black"],
-  destinationCountryCode: "US",
-  sourceUrl: productUrl("US"),
-  imageUrl: `${IMAGE_HOST}/images/I/sony-wh1000xm5.jpg`
-};
-
-function okResult(
-  marketplace: Marketplace,
-  costs: [item: number, shipping: number, importFees: number],
-  confidence: number,
-  normalizedUsd: number,
-  notes: string[]
-): ComparisonResult {
-  const currency = MARKETPLACE_BY_CODE[marketplace].currency;
-  const [item, shipping, importFees] = costs;
-  return {
-    marketplace,
-    status: "OK",
-    confidence,
-    productUrl: productUrl(marketplace),
-    breakdown: {
-      item: money(item, currency),
-      shipping: money(shipping, currency),
-      importFees: money(importFees, currency)
-    },
-    normalizedTotal: money(normalizedUsd, "USD"),
-    notes
-  };
-}
-
-function failedResult(
-  marketplace: Marketplace,
-  status: Exclude<ComparisonStatus, "OK">,
-  confidence: number,
-  notes: string[]
-): ComparisonResult {
-  return { marketplace, status, confidence, notes };
-}
-
-export const baseline: ComparisonResult = {
-  ...okResult("US", [399.99, 0, 0], 1, 399.99, ["The page you are on. Everything else is measured against this."]),
-  productUrl: source.sourceUrl
-};
-
-export const cheapBaseline: ComparisonResult = {
-  ...okResult("US", [299.99, 0, 0], 1, 299.99, ["The page you are on. Everything else is measured against this."]),
-  productUrl: source.sourceUrl
-};
-
-export const de = okResult("DE", [279.0, 12.99, 31.2], 0.91, 349.05, [
-  "Match confidence: HIGH",
-  "Import fees deposit quoted on the product page. Delivery 6–10 days."
-]);
-export const it_ = okResult("IT", [289.9, 14.5, 30.2], 0.76, 361.37, [
-  "Match confidence: MEDIUM",
-  "Colour is not stated in the listing title — confirm it is the black variant before buying."
-]);
-export const uk = okResult("UK", [259.0, 9.99, 24.6], 0.94, 372.16, [
-  "Import fees deposit quoted. Sold and shipped by Amazon UK."
-]);
-export const ca = okResult("CA", [479.99, 12.99, 41.62], 0.97, 391.44, [
-  "Duties collected at checkout. Delivery 4–7 days."
-]);
-export const au = okResult("AU", [599.0, 19.95, 53.35], 0.9, 438.72, ["GST included in the quoted import estimate."]);
-export const jp = failedResult("JP", "DESTINATION_MISMATCH", 0.93, [
-  "Match found, but the seller does not ship to the United States."
-]);
-export const fr = failedResult("FR", "UNAVAILABLE", 0.9, ["Out of stock — no delivery date offered."]);
-export const es = failedResult("ES", "PARSE_FAILED", 0.89, [
-  "Import fees are only revealed at checkout, so the delivered total cannot be quoted."
-]);
-export const mx = failedResult("MX", "NO_CONFIDENT_MATCH", 0.31, [
-  "Closest listing scored 31% — below the confidence floor."
-]);
-
-export const mockupResults: ComparisonResult[] = sortComparisonResults([ca, mx, uk, de, fr, it_, es, jp, au]);
-
-export const DEFAULT_SETTINGS: ExtensionSettings = {
-  enabledMarketplaces: [...MARKETPLACE_CODES],
-  comparisonCurrency: "SOURCE",
-  disclosureAcknowledged: false
-};
-
 export const FX_FAILURE = "Unable to load FX reference rates from ECB or Frankfurter";
 export const CANCELLED = "Comparison cancelled by user";
+export const BACKGROUND_UNREACHABLE = "Could not reach the background service";
+export const LOADING_HINT = "Reading this page…";
+export const OTHER_TAB_ID = 7;
+export const NON_AMAZON_URL = "https://www.example.com/sony-wh-1000xm5";
+export const AMAZON_NON_PRODUCT_URL = "https://www.amazon.com/gp/cart/view.html";
+export const EXTRACTION_FAILURE = "Unable to extract required source product metadata";
+
+export const sortedResults: ComparisonResult[] = sortComparisonResults(mockupResults);
 
 export interface Scenario {
   source?: SourceContext;
@@ -139,7 +77,9 @@ export interface Scenario {
   generatedAt: string;
   error?: string;
   loadSourceError?: string;
+  holdLoadSource?: boolean;
   activeTabId: number | null;
+  tabUrl?: string;
   settings?: Partial<ExtensionSettings>;
   stepMs?: number;
 }
@@ -148,10 +88,11 @@ export function scenario(overrides: Partial<Scenario> = {}): Scenario {
   return {
     source,
     baseline,
-    results: mockupResults,
+    results: sortedResults,
     fxTable,
     generatedAt: GENERATED_AT,
     activeTabId: ACTIVE_TAB_ID,
+    tabUrl: source.sourceUrl,
     ...overrides
   };
 }
@@ -184,7 +125,14 @@ export function progressSteps(scn: Scenario): RunComparisonProgressPayload[] {
 
   targets.forEach((market, completed) => {
     for (const phase of PHASES) {
-      steps.push({ completed, total, currentMarketplace: market, phase, results: sortComparisonResults(finished) });
+      steps.push({
+        completed,
+        total,
+        currentMarketplace: market,
+        phase,
+        results: sortComparisonResults(finished),
+        fxTable: scn.fxTable
+      });
     }
     const result = scn.results.find((candidate) => candidate.marketplace === market);
     if (result) {
@@ -192,7 +140,7 @@ export function progressSteps(scn: Scenario): RunComparisonProgressPayload[] {
     }
   });
 
-  steps.push({ completed: total, total, results: sortComparisonResults(finished) });
+  steps.push({ completed: total, total, results: sortComparisonResults(finished), fxTable: scn.fxTable });
   return steps;
 }
 
@@ -220,13 +168,22 @@ export interface SentMessage {
   payload?: unknown;
 }
 
+export interface RunRequest {
+  activeTabId: number;
+  runId?: string;
+}
+
+export type RunFailure = "reject" | "no-response";
+
 export interface AaControl {
   openedUrls: string[];
   sentMessages: SentMessage[];
   emitted: SentMessage[];
   store: Record<string, unknown>;
   listenerCount: () => number;
-  emit: (message: unknown) => void;
+  emit: (message: SentMessage) => void;
+  failRun: (failure: RunFailure) => void;
+  releaseLoadSource: () => void;
 }
 
 declare global {
@@ -236,8 +193,16 @@ declare global {
 }
 
 interface MockConfig {
-  activeTabId: number | null;
+  types: {
+    load: string;
+    run: string;
+    cancel: string;
+    progress: string;
+    result: string;
+  };
+  tab: { id: number; url?: string } | null;
   loadSourceResponse: LoadSourcePayload;
+  holdLoadSource: boolean;
   store: Record<string, unknown>;
   autoplay: { stepMs: number; messages: SentMessage[] } | null;
 }
@@ -248,8 +213,16 @@ function mockConfig(scn: Scenario): MockConfig {
     { type: RUN_COMPARISON_RESULT, payload: resultPayload(scn) }
   ];
   return {
-    activeTabId: scn.activeTabId,
+    types: {
+      load: LOAD_SOURCE,
+      run: RUN_COMPARISON,
+      cancel: CANCEL_COMPARISON,
+      progress: RUN_COMPARISON_PROGRESS,
+      result: RUN_COMPARISON_RESULT
+    },
+    tab: scn.activeTabId === null ? null : { id: scn.activeTabId, url: scn.tabUrl },
     loadSourceResponse: loadSourcePayload(scn),
+    holdLoadSource: scn.holdLoadSource === true,
     store: scn.settings ? { [SETTINGS_KEY]: { ...DEFAULT_SETTINGS, ...scn.settings } } : {},
     autoplay: scn.stepMs === undefined ? null : { stepMs: scn.stepMs, messages }
   };
@@ -257,10 +230,52 @@ function mockConfig(scn: Scenario): MockConfig {
 
 function mockChrome(config: MockConfig): void {
   type Listener = (message: unknown, sender: { id: string }, sendResponse: () => void) => void;
+  type Correlation = { activeTabId?: number; runId?: string };
+  interface PendingRun {
+    request: RunRequest;
+    settled: boolean;
+    resolve: (response: unknown) => void;
+    reject: (error: Error) => void;
+  }
+
   const listeners: Listener[] = [];
   const timers: number[] = [];
+  const runs: PendingRun[] = [];
   const clone = <T>(value: T): T => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
   const store: Record<string, unknown> = clone(config.store);
+  let releaseSource: () => void = () => undefined;
+
+  const settle = (run: PendingRun | undefined, outcome: "ok" | RunFailure): void => {
+    if (!run || run.settled) {
+      return;
+    }
+    run.settled = true;
+    if (outcome === "reject") {
+      run.reject(new Error("Could not establish connection. Receiving end does not exist."));
+    } else {
+      run.resolve(outcome === "ok" ? { ok: true } : undefined);
+    }
+  };
+
+  const stamp = (message: SentMessage, run: RunRequest | undefined): SentMessage => {
+    const payload: Correlation = { ...(clone(message.payload) as Correlation) };
+    payload.activeTabId ??= run?.activeTabId ?? config.tab?.id;
+    payload.runId ??= run?.runId;
+    return { type: message.type, payload };
+  };
+
+  const dispatch = (message: SentMessage, run: RunRequest | undefined): void => {
+    const stamped = stamp(message, run);
+    control.emitted.push(clone(stamped));
+    [...listeners].forEach((listener) => listener(clone(stamped), { id: "across-amazon" }, () => undefined));
+    if (stamped.type === config.types.result) {
+      const { runId } = stamped.payload as Correlation;
+      settle(
+        runs.find((pending) => pending.request.runId === runId),
+        "ok"
+      );
+    }
+  };
 
   const control: AaControl = {
     openedUrls: [],
@@ -268,19 +283,18 @@ function mockChrome(config: MockConfig): void {
     emitted: [],
     store,
     listenerCount: () => listeners.length,
-    emit: (message) => {
-      control.emitted.push(clone(message) as SentMessage);
-      [...listeners].forEach((listener) => listener(clone(message), { id: "across-amazon" }, () => undefined));
-    }
+    emit: (message) => dispatch(message, runs[runs.length - 1]?.request),
+    failRun: (failure) => settle(runs[runs.length - 1], failure),
+    releaseLoadSource: () => releaseSource()
   };
 
-  const play = (): void => {
+  const play = (run: RunRequest): void => {
     const autoplay = config.autoplay;
     if (!autoplay) {
       return;
     }
     autoplay.messages.forEach((message, index) => {
-      timers.push(window.setTimeout(() => control.emit(message), autoplay.stepMs * (index + 1)));
+      timers.push(window.setTimeout(() => dispatch(message, run), autoplay.stepMs * (index + 1)));
     });
   };
 
@@ -293,13 +307,29 @@ function mockChrome(config: MockConfig): void {
     return Object.fromEntries(wanted.filter((key) => key in store).map((key) => [key, clone(store[key])]));
   };
 
+  const loadSource = (): Promise<LoadSourcePayload> => {
+    if (!config.holdLoadSource) {
+      return Promise.resolve(clone(config.loadSourceResponse));
+    }
+    return new Promise((resolve) => {
+      releaseSource = () => resolve(clone(config.loadSourceResponse));
+    });
+  };
+
+  const startRun = (request: RunRequest): Promise<unknown> =>
+    new Promise((resolve, reject) => {
+      stop();
+      runs.push({ request, settled: false, resolve, reject });
+      play(request);
+    });
+
   Object.defineProperty(window, "__aa", { configurable: true, value: control });
   Object.defineProperty(window, "chrome", {
     configurable: true,
     writable: true,
     value: {
       tabs: {
-        query: async () => (config.activeTabId === null ? [] : [{ id: config.activeTabId, active: true }]),
+        query: async () => (config.tab ? [{ active: true, ...config.tab }] : []),
         create: async (properties: { url?: string; active?: boolean }) => {
           control.openedUrls.push(properties.url ?? "");
           return { id: 99, ...properties };
@@ -333,17 +363,15 @@ function mockChrome(config: MockConfig): void {
         sendMessage: async (message: SentMessage) => {
           control.sentMessages.push(clone(message));
           switch (message.type) {
-            case "LOAD_SOURCE":
-              return clone(config.loadSourceResponse);
-            case "RUN_COMPARISON":
+            case config.types.load:
+              return loadSource();
+            case config.types.run:
+              return startRun(clone(message.payload) as RunRequest);
+            case config.types.cancel:
               stop();
-              play();
-              return { ok: true };
-            case "CANCEL_COMPARISON":
-              stop();
-              return { ok: true };
+              return { ok: true, type: config.types.cancel };
             default:
-              return { ok: true };
+              return { ok: false, error: "Unsupported message" };
           }
         }
       }
@@ -367,12 +395,18 @@ export async function installChromeMock(page: Page, scn: Scenario): Promise<void
   await page.addInitScript(mockChrome, mockConfig(scn));
 }
 
+export function loadingHint(page: Page): Locator {
+  return page.getByText(LOADING_HINT, { exact: true });
+}
+
 export async function openPopup(page: Page, scn: Scenario = scenario()): Promise<void> {
   await installChromeMock(page, scn);
   await page.goto("/popup.html");
   await page.waitForFunction(() => window.__aa.listenerCount() > 0);
-  if (scn.activeTabId !== null) {
+  if (scn.holdLoadSource) {
     await expect.poll(() => sentTypes(page)).toContain(LOAD_SOURCE);
+  } else {
+    await expect(loadingHint(page)).toHaveCount(0);
   }
 }
 
@@ -391,6 +425,17 @@ export function emitResult(page: Page, payload: RunComparisonResultPayload): Pro
   return emit(page, { type: RUN_COMPARISON_RESULT, payload });
 }
 
+export async function failRun(page: Page, failure: RunFailure): Promise<void> {
+  await page.evaluate(async (outcome) => {
+    window.__aa.failRun(outcome);
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  }, failure);
+}
+
+export function releaseLoadSource(page: Page): Promise<void> {
+  return page.evaluate(() => window.__aa.releaseLoadSource());
+}
+
 export function sentMessages(page: Page, type?: string): Promise<SentMessage[]> {
   return page.evaluate(
     (wanted) => window.__aa.sentMessages.filter((message) => wanted === null || message.type === wanted),
@@ -402,8 +447,22 @@ export async function sentTypes(page: Page): Promise<string[]> {
   return (await sentMessages(page)).map((message) => message.type);
 }
 
-export function emittedTypes(page: Page): Promise<string[]> {
-  return page.evaluate(() => window.__aa.emitted.map((message) => message.type));
+export async function runIds(page: Page): Promise<string[]> {
+  return (await sentMessages(page, RUN_COMPARISON)).map((message) => {
+    const { runId } = message.payload as RunRequest;
+    if (typeof runId !== "string" || runId.length === 0) {
+      throw new Error(`RUN_COMPARISON was sent without a run id: ${JSON.stringify(message)}`);
+    }
+    return runId;
+  });
+}
+
+export function emittedMessages(page: Page): Promise<SentMessage[]> {
+  return page.evaluate(() => window.__aa.emitted);
+}
+
+export async function emittedTypes(page: Page): Promise<string[]> {
+  return (await emittedMessages(page)).map((message) => message.type);
 }
 
 export function openedUrls(page: Page): Promise<string[]> {
@@ -415,7 +474,11 @@ export function storedSettings(page: Page): Promise<unknown> {
 }
 
 export function runButton(page: Page): Locator {
-  return page.getByRole("button", { name: /^Check \d+ other Amazons?$/ });
+  return page.getByRole("button", { name: /^Check (\d+ )?other Amazons?$/ });
+}
+
+export function scrollArea(page: Page): Locator {
+  return page.locator(".dB-scroll");
 }
 
 export function listRows(page: Page): Locator {
@@ -431,7 +494,7 @@ export function verdictCard(page: Page): Locator {
 }
 
 export function toast(page: Page): Locator {
-  return page.getByRole("status");
+  return page.getByRole("status", { includeHidden: true });
 }
 
 export async function startRun(page: Page): Promise<void> {

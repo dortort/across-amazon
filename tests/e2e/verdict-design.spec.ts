@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import {
+  NON_AMAZON_URL,
   cheapBaseline,
   completeRun,
   emitProgress,
@@ -11,6 +12,8 @@ import {
   resultPayload,
   runButton,
   scenario,
+  scrollArea,
+  sortedResults,
   startRun,
   verdictCard
 } from "./harness";
@@ -24,6 +27,7 @@ const WHITE = "rgb(255, 255, 255)";
 const IDENTITY = "matrix(1, 0, 0, 1, 0, 0)";
 const SHEET_TRANSITION_MS = 260;
 const SNAPSHOT = { animations: "disabled", caret: "hide" } as const;
+const TOAST_GUTTER = 16;
 
 interface Box {
   x: number;
@@ -71,10 +75,6 @@ function parseMatrix(transform: string): number[] {
     throw new Error(`Expected a 2D matrix transform, received "${transform}"`);
   }
   return match[1].split(",").map((part) => Number(part.trim()));
-}
-
-function scrollArea(page: Page): Locator {
-  return page.locator(".dB-scroll");
 }
 
 function sheet(page: Page): Locator {
@@ -163,6 +163,18 @@ function openSheetFromBestRow(page: Page): Promise<SheetOpening> {
       scrimOpacityAfterTwoFrames: getComputedStyle(overlay).opacity
     };
   });
+}
+
+async function tabTo(page: Page, target: Locator): Promise<void> {
+  const focused = (): Promise<boolean> => target.evaluate((element) => element === document.activeElement);
+  for (let press = 0; press < 5 && !(await focused()); press += 1) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(target).toBeFocused();
+}
+
+function matchesFocusVisible(locator: Locator): Promise<boolean> {
+  return locator.evaluate((element) => element.matches(":focus-visible"));
 }
 
 async function finishRun(page: Page): Promise<void> {
@@ -296,9 +308,10 @@ test.describe("buttons", () => {
   });
 
   test("dims the call to action when the tab is not an Amazon product page", async ({ page }) => {
-    await openPopup(page, scenario({ loadSourceError: "Unsupported marketplace hostname" }));
+    await openPopup(page, scenario({ tabUrl: NON_AMAZON_URL }));
     const cta = runButton(page);
 
+    await expect(cta).toHaveText("Check other Amazons");
     await expect(cta).toBeDisabled();
     await expect(cta).toHaveCSS("opacity", "0.5");
     await expect(cta).toHaveCSS("cursor", "not-allowed");
@@ -313,12 +326,9 @@ test.describe("buttons", () => {
     await expect(cta).toBeEnabled();
     await expect(cta).toHaveCSS("outline-style", "none");
 
-    for (let press = 0; press < 5 && !(await cta.evaluate((element) => element === document.activeElement)); press += 1) {
-      await page.keyboard.press("Tab");
-    }
+    await tabTo(page, cta);
 
-    await expect(cta).toBeFocused();
-    expect(await cta.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+    expect(await matchesFocusVisible(cta)).toBe(true);
     await expect(cta).toHaveCSS("outline-style", "solid");
     await expect(cta).toHaveCSS("outline-width", "2px");
     await expect(cta).toHaveCSS("outline-color", ACCENT);
@@ -361,6 +371,24 @@ test.describe("verdict card", () => {
 
     await expect(card.locator(".dB-vbtn")).toHaveCSS("background-color", WHITE);
     await expect(card.locator(".dB-vbtn")).toHaveCSS("color", "rgb(11, 90, 75)");
+  });
+
+  test("keeps the Check match pill in sentence case inside the uppercase eyebrow", async ({ page }) => {
+    const scn = scenario({ results: sortedResults.filter((result) => result.marketplace !== "DE") });
+    await openPopup(page, scn);
+    await completeRun(page, scn);
+    const eyebrow = verdictCard(page).locator(".eyebrow");
+    const pill = eyebrow.locator(".dB-flag-pill");
+
+    await expect(eyebrow).toHaveCSS("text-transform", "uppercase");
+    await expect(pill).toHaveText("Check match");
+    await expect(pill).toHaveCSS("text-transform", "none");
+    await expect(pill).toHaveCSS("background-color", "rgb(251, 240, 228)");
+    await expect(pill).toHaveCSS("color", "rgb(153, 86, 44)");
+    expect(await pill.evaluate((element: HTMLElement) => element.innerText)).toBe("Check match");
+    expect(await eyebrow.evaluate((element: HTMLElement) => element.innerText)).toMatch(
+      /^CHEAPEST DELIVERED TO UNITED STATES\s*Check match$/
+    );
   });
 
   test("switches to the muted slate gradient and a smaller headline when staying is cheapest", async ({ page }) => {
@@ -486,6 +514,19 @@ test.describe("detail sheet", () => {
     await expectSheetOpen(page);
   });
 
+  test("drops the focus outline on the sheet when the keyboard opens it", async ({ page }) => {
+    await openPopup(page);
+    await completeRun(page);
+
+    await listRow(page, "Germany").focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "🇩🇪 Germany" });
+
+    await expect(dialog).toBeFocused();
+    expect(await matchesFocusVisible(dialog)).toBe(true);
+    await expect(dialog).toHaveCSS("outline-style", "none");
+  });
+
   test("opens the sheet instantly when the user prefers reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await openPopup(page);
@@ -496,6 +537,40 @@ test.describe("detail sheet", () => {
     expect(opening.transitionDurations.every((duration) => duration < 1)).toBe(true);
     expect(opening.transformAfterTwoFrames).toBe(IDENTITY);
     expect(opening.scrimOpacityAfterTwoFrames).toBe("1");
+  });
+});
+
+test.describe("content area", () => {
+  test("drops the focus outline when it takes focus after a keyboard-started view swap", async ({ page }) => {
+    await openPopup(page);
+    await parkPointer(page);
+    await tabTo(page, runButton(page));
+
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByRole("button", { name: "Stop checking" })).toBeVisible();
+    await expect(scrollArea(page)).toBeFocused();
+    expect(await matchesFocusVisible(scrollArea(page))).toBe(true);
+    await expect(scrollArea(page)).toHaveCSS("outline-style", "none");
+  });
+});
+
+test.describe("toast", () => {
+  test("fits the opening message on at most two lines within the popup gutters", async ({ page }) => {
+    await openPopup(page);
+    await completeRun(page);
+
+    await verdictCard(page).getByRole("button", { name: "Open on amazon.de" }).click();
+
+    const shown = page.locator(".toast.is-on");
+    await expect(shown).toHaveText("Opening amazon.de — you complete the purchase on Amazon.");
+    await expect(shown).toHaveCSS("opacity", "1");
+    const box = await boxOf(shown);
+    expect(box.height).toBeLessThan(50);
+    expect(box.width).toBeGreaterThan(200);
+    expect(box.x).toBeGreaterThanOrEqual(TOAST_GUTTER - 0.5);
+    expect(box.x + box.width).toBeLessThanOrEqual(POPUP_WIDTH - TOAST_GUTTER + 0.5);
+    await expect(shown).toHaveCSS("box-sizing", "border-box");
   });
 });
 
@@ -555,7 +630,7 @@ test.describe("visual snapshots", () => {
     await startRun(page);
     await emitProgress(page, progressStep(scn, "DE", "MATCH"));
     await expect(page.locator(".dB-dial-num")).toHaveText("3/9");
-    await expect(page.locator(".dB-chk")).toHaveText(["🇬🇧 UK $372.16", "🇨🇦 CA $391.44", "🇲🇽 MX —", "🇩🇪 DE …"]);
+    await expect(page.locator(".dB-chk")).toHaveText(["🇨🇦 CA $391.44", "🇲🇽 MX —", "🇬🇧 UK $372.16", "🇩🇪 DE …"]);
     await parkPointer(page);
     await expect(page).toHaveScreenshot("verdict-running.png", SNAPSHOT);
   });
@@ -615,8 +690,9 @@ test.describe("visual snapshots", () => {
   });
 
   test("not-on-amazon", async ({ page }) => {
-    await openPopup(page, scenario({ loadSourceError: "Unsupported marketplace hostname" }));
+    await openPopup(page, scenario({ tabUrl: NON_AMAZON_URL }));
     await expect(page.getByText("Open an Amazon product page")).toBeVisible();
+    await expect(runButton(page)).toHaveText("Check other Amazons");
     await expect(runButton(page)).toBeDisabled();
     await parkPointer(page);
     await expect(page).toHaveScreenshot("verdict-not-on-amazon.png", SNAPSHOT);

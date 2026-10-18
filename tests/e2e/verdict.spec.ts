@@ -4,43 +4,59 @@ import { MARKETPLACE_CODES } from "../../src/shared/markets";
 import { CANCEL_COMPARISON, LOAD_SOURCE, RUN_COMPARISON } from "../../src/shared/messages";
 import {
   ACTIVE_TAB_ID,
+  AMAZON_NON_PRODUCT_URL,
+  BACKGROUND_UNREACHABLE,
   CANCELLED,
   DEFAULT_SETTINGS,
+  EXTRACTION_FAILURE,
   FX_FAILURE,
   MINUS,
   NBSP,
+  NON_AMAZON_URL,
+  OTHER_TAB_ID,
   cheapBaseline,
   completeRun,
   emitProgress,
   emitResult,
+  emittedMessages,
   emittedTypes,
   es,
+  failRun,
   finalStep,
   fr,
+  fxTable,
   jp,
   listRow,
   listRows,
+  loadingHint,
   mx,
   openPopup,
   openedUrls,
   productUrl,
   progressStep,
   progressSteps,
+  releaseLoadSource,
   resultPayload,
   runButton,
+  runIds,
   scenario,
+  scrollArea,
   sentMessages,
+  sortedResults,
   source,
   startRun,
   storedSettings,
   toast,
   verdictCard
 } from "./harness";
+import type { RunFailure } from "./harness";
 
 test.use({ viewport: { width: 400, height: 560 } });
 
-const RUN_REQUEST = { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } };
+const RUN_REQUEST = { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } };
 const TOAST_HIDE_TIMEOUT = 5_000;
+const TOAST_GUTTER = 16;
+const POPUP_WIDTH = 400;
 
 const USD_ROWS = {
   names: [/^🇩🇪\s*Germany/, /^🇮🇹\s*Italy/, /^🇬🇧\s*United Kingdom/, /^🇨🇦\s*Canada/, /^🇺🇸\s*United States/, /^🇦🇺\s*Australia/],
@@ -56,6 +72,27 @@ const USD_ROWS = {
   deltas: [`${MINUS}$50.94`, `${MINUS}$38.62`, `${MINUS}$27.83`, `${MINUS}$8.55`, "the page you are on", "+$38.73"]
 };
 
+const ISSUES_IN_ORDER = {
+  flags: ["🇲🇽", "🇫🇷", "🇪🇸", "🇯🇵"],
+  titles: [
+    "Mexico — No confident match",
+    "France — Delivered total not quotable",
+    "Spain — Could not read the page",
+    "Japan — Does not ship here"
+  ],
+  notes: [
+    "No listing scored above the confidence floor.",
+    "Amazon did not show a delivered price for this destination.",
+    "The product page could not be read.",
+    "Match found, but the seller does not ship to United States."
+  ]
+};
+
+const CONFIDENT_TRUST = "We are 91% sure this is the same product — title, brand and variant all line up.";
+const SOURCE_TRUST = "This is the page you are on. Prices are what Amazon showed when we checked.";
+const MATCH_CHECK_SENTENCE = "Confirm it is the same product before you buy.";
+const NOTICE_TITLE = "Open an Amazon product page";
+
 function dial(page: Page) {
   return {
     ring: page.locator(".dB-dial"),
@@ -67,14 +104,43 @@ function dial(page: Page) {
 }
 
 async function expectToastShown(page: Page, text: string): Promise<void> {
-  await expect(toast(page)).toHaveText(text);
-  await expect(toast(page)).toHaveClass(/\bis-on\b/);
-  await expect(toast(page)).toHaveCSS("opacity", "1");
+  const shown = toast(page);
+  await expect(shown).toHaveText(text);
+  await expect(shown).toHaveClass(/\bis-on\b/);
+  await expect(shown).not.toHaveAttribute("aria-hidden");
+  await expect(page.getByRole("status")).toHaveText(text);
+  await expect(shown).toHaveCSS("opacity", "1");
+  const box = await shown.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.x ?? 0).toBeGreaterThanOrEqual(TOAST_GUTTER - 0.5);
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(POPUP_WIDTH - TOAST_GUTTER + 0.5);
 }
 
 async function expectToastHidden(page: Page): Promise<void> {
   await expect(toast(page)).not.toHaveClass(/\bis-on\b/, { timeout: TOAST_HIDE_TIMEOUT });
+  await expect(toast(page)).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("status")).toHaveCount(0);
   await expect(toast(page)).toHaveCSS("opacity", "0");
+}
+
+function dispatchEscape(page: Page) {
+  return page.evaluate(() => {
+    let reachedWindow = false;
+    const onWindowKeyDown = (): void => {
+      reachedWindow = true;
+    };
+    window.addEventListener("keydown", onWindowKeyDown);
+    const target = document.activeElement ?? document.body;
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const notCancelled = target.dispatchEvent(event);
+    window.removeEventListener("keydown", onWindowKeyDown);
+    return {
+      defaultPrevented: event.defaultPrevented,
+      notCancelled,
+      reachedWindow,
+      fromSheet: target.classList.contains("dB-sheet")
+    };
+  });
 }
 
 test.describe("a full comparison", () => {
@@ -105,13 +171,17 @@ test.describe("a full comparison", () => {
     await expect(running.count).toHaveText("0/9");
     await expect(running.ring).toHaveAttribute("style", /--p:\s*0%/);
     await expect(running.nowline).toHaveText("Opening tab Canada");
+    await expect(running.nowline).toHaveAttribute("aria-live", "polite");
     await expect(running.nowsub).toHaveText("amazon.ca");
     await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
     await expect(running.chips).toHaveClass(["dB-chk now"]);
+    await expect(page.getByText("ECB daily rates")).toBeVisible();
 
     await emitProgress(page, progressStep(scn, "CA", "SEARCH"));
     await expect(running.nowline).toHaveText("Searching Canada");
     await expect(running.count).toHaveText("0/9");
+    await expect(page.getByText("Rates 2026-07-30")).toBeVisible();
+    await expect(page.getByText("ECB daily rates")).toHaveCount(0);
 
     await emitProgress(page, progressStep(scn, "FR", "MATCH"));
     await expect(running.count).toHaveText("4/9");
@@ -120,17 +190,17 @@ test.describe("a full comparison", () => {
     await expect(page.locator(".dB-nowline b")).toHaveText("France");
     await expect(running.nowsub).toHaveText("amazon.fr");
     await expect(running.chips).toHaveText([
-      "🇩🇪 DE $349.05",
-      "🇬🇧 UK $372.16",
       "🇨🇦 CA $391.44",
       "🇲🇽 MX —",
+      "🇬🇧 UK $372.16",
+      "🇩🇪 DE $349.05",
       "🇫🇷 FR …"
     ]);
     await expect(running.chips).toHaveClass([
       "dB-chk ok",
-      "dB-chk ok",
-      "dB-chk ok",
       "dB-chk bad",
+      "dB-chk ok",
+      "dB-chk ok",
       "dB-chk now"
     ]);
 
@@ -147,22 +217,34 @@ test.describe("a full comparison", () => {
     await expect(running.ring).toHaveAttribute("style", /--p:\s*100%/);
     await expect(page.locator(".dB-chk.now")).toHaveCount(0);
     await expect(running.chips).toHaveText([
-      "🇩🇪 DE $349.05",
-      "🇮🇹 IT $361.37",
-      "🇬🇧 UK $372.16",
       "🇨🇦 CA $391.44",
-      "🇦🇺 AU $438.72",
-      "🇪🇸 ES —",
+      "🇲🇽 MX —",
+      "🇬🇧 UK $372.16",
+      "🇩🇪 DE $349.05",
       "🇫🇷 FR —",
+      "🇮🇹 IT $361.37",
+      "🇪🇸 ES —",
       "🇯🇵 JP —",
-      "🇲🇽 MX —"
+      "🇦🇺 AU $438.72"
     ]);
-    await expect(page.getByText("ECB daily rates")).toBeVisible();
+    await expect(running.chips).toHaveClass([
+      "dB-chk ok",
+      "dB-chk bad",
+      "dB-chk ok",
+      "dB-chk ok",
+      "dB-chk bad",
+      "dB-chk ok",
+      "dB-chk bad",
+      "dB-chk bad",
+      "dB-chk ok"
+    ]);
+    await expect(page.getByText("Rates 2026-07-30")).toBeVisible();
 
     await emitResult(page, resultPayload(scn));
 
     const card = verdictCard(page);
     await expect(card.locator(".eyebrow")).toHaveText("Cheapest delivered to United States");
+    await expect(card.locator(".dB-flag-pill")).toHaveCount(0);
     await expect(card.getByText("Save $50.94")).toBeVisible();
     await expect(card.locator(".lede")).toHaveText(
       "Buy from Germany for $349.05 delivered — 13% less than the $399.99 you would pay here. Item, shipping and import fees included."
@@ -190,7 +272,7 @@ test.describe("a full comparison", () => {
     await expect(sheet).toBeVisible();
     await expect(sheet).toHaveAttribute("aria-modal", "true");
     await expect(sheet).toBeFocused();
-    await expect(sheet.locator(".sub")).toHaveText("www.amazon.de");
+    await expect(sheet.locator(".sub")).toHaveText("amazon.de");
     await expect(sheet.locator(".dB-line > span")).toHaveText([
       "Item price",
       "Shipping to United States",
@@ -206,9 +288,7 @@ test.describe("a full comparison", () => {
       "$349.05 at today’s rate"
     ]);
     const trust = sheet.locator(".dB-trust");
-    await expect(trust).toHaveText(
-      "We are 91% sure this is the same product — title, brand and variant all line up. Import fees deposit quoted on the product page. Delivery 6–10 days."
-    );
+    await expect(trust).toHaveText(CONFIDENT_TRUST);
     await expect(trust).not.toHaveClass(/\bwarn\b/);
 
     await sheet.getByRole("button", { name: "Open on amazon.de" }).click();
@@ -226,19 +306,9 @@ test.describe("a full comparison", () => {
     await accordion.click();
     await expect(accordion).toHaveAttribute("aria-expanded", "true");
     await expect(issues).toHaveCount(4);
-    await expect(issues.locator(".flag")).toHaveText(["🇪🇸", "🇫🇷", "🇯🇵", "🇲🇽"]);
-    await expect(issues.locator("strong")).toHaveText([
-      "Spain — Could not read the page",
-      "France — Delivered total not quotable",
-      "Japan — Does not ship here",
-      "Mexico — No confident match"
-    ]);
-    await expect(issues.locator("p")).toHaveText([
-      "Import fees are only revealed at checkout, so the delivered total cannot be quoted.",
-      "Out of stock — no delivery date offered.",
-      "Match found, but the seller does not ship to the United States.",
-      "Closest listing scored 31% — below the confidence floor."
-    ]);
+    await expect(issues.locator(".flag")).toHaveText(ISSUES_IN_ORDER.flags);
+    await expect(issues.locator("strong")).toHaveText(ISSUES_IN_ORDER.titles);
+    await expect(issues.locator("p")).toHaveText(ISSUES_IN_ORDER.notes);
     for (const issue of await issues.all()) {
       await expect(issue).toBeVisible();
     }
@@ -249,6 +319,7 @@ test.describe("a full comparison", () => {
 
     await page.getByRole("button", { name: "Check again" }).click();
     expect(await sentMessages(page, RUN_COMPARISON)).toEqual([RUN_REQUEST, RUN_REQUEST]);
+    expect(new Set(await runIds(page)).size).toBe(2);
     await expect(running.count).toHaveText("0/9");
     await expect(running.nowline).toHaveText("Opening tab Canada");
     await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
@@ -272,6 +343,12 @@ test.describe("a full comparison", () => {
       "RUN_COMPARISON_RESULT"
     ]);
     expect(progressSteps(scn)).toHaveLength(9 * 4 + 1);
+
+    const [runId] = await runIds(page);
+    const payloads = (await emittedMessages(page)).map((message) => message.payload);
+    expect(payloads).toEqual(
+      payloads.map(() => expect.objectContaining({ activeTabId: ACTIVE_TAB_ID, runId, fxTable }))
+    );
   });
 
   test("opens the cheapest marketplace straight from the verdict card", async ({ page }) => {
@@ -294,10 +371,9 @@ test.describe("the detail sheet", () => {
     await listRow(page, "Italy").click();
     const sheet = page.getByRole("dialog", { name: "🇮🇹 Italy" });
     await expect(sheet).toBeVisible();
+    await expect(sheet.locator(".sub")).toHaveText("amazon.it");
     await expect(sheet.locator(".dB-trust")).toHaveClass(/\bwarn\b/);
-    await expect(sheet.locator(".dB-trust")).toHaveText(
-      "We are 76% sure this is the same product. Colour is not stated in the listing title — confirm it is the black variant before buying."
-    );
+    await expect(sheet.locator(".dB-trust")).toHaveText("We are 76% sure this is the same product.");
     await expect(page.locator(".dB-scrim")).toHaveClass(/\bis-on\b/);
 
     await page.locator(".dB-scrim").click({ position: { x: 200, y: 24 } });
@@ -313,7 +389,7 @@ test.describe("the detail sheet", () => {
 
     await listRow(page, "United States").click();
     const sheet = page.getByRole("dialog", { name: "🇺🇸 United States" });
-    await expect(sheet.locator(".sub")).toHaveText(source.title);
+    await expect(sheet.locator(".sub")).toHaveText(`${source.title} — Black`);
     await expect(sheet.locator(".dB-line > b")).toHaveText([
       "$399.99",
       "Free",
@@ -321,12 +397,39 @@ test.describe("the detail sheet", () => {
       "$399.99",
       "$399.99 at today’s rate"
     ]);
+    await expect(sheet.locator(".dB-trust")).toHaveText(SOURCE_TRUST);
+    await expect(sheet.locator(".dB-trust")).not.toHaveClass(/\bwarn\b/);
     await expect(sheet.getByRole("button", { name: /^Open on/ })).toHaveCount(0);
 
     await sheet.getByRole("button", { name: "Close" }).click();
 
     await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(await openedUrls(page)).toEqual([]);
+  });
+
+  test("consumes Escape while open and leaves it to the page once closed", async ({ page }) => {
+    await openPopup(page);
+    await completeRun(page);
+
+    await listRow(page, "Germany").click();
+    await expect(page.getByRole("dialog", { name: "🇩🇪 Germany" })).toBeFocused();
+
+    expect(await dispatchEscape(page)).toEqual({
+      defaultPrevented: true,
+      notCancelled: false,
+      reachedWindow: false,
+      fromSheet: true
+    });
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(listRow(page, "Germany")).toBeFocused();
+
+    expect(await dispatchEscape(page)).toEqual({
+      defaultPrevented: false,
+      notCancelled: true,
+      reachedWindow: true,
+      fromSheet: false
+    });
+    await expect(verdictCard(page).getByText("Save $50.94")).toBeVisible();
   });
 });
 
@@ -417,8 +520,82 @@ test.describe("other verdicts", () => {
     await page.getByRole("button", { name: "Check again" }).click();
 
     expect(await sentMessages(page, RUN_COMPARISON)).toEqual([RUN_REQUEST, RUN_REQUEST]);
+    expect(new Set(await runIds(page)).size).toBe(2);
     await expect(dial(page).count).toHaveText("0/9");
   });
+});
+
+test.describe("a low-confidence best match", () => {
+  const withoutGermany = sortedResults.filter((result) => result.marketplace !== "DE");
+
+  test("flags the saving verdict with a Check match pill and asks to confirm the product", async ({ page }) => {
+    const scn = scenario({ results: withoutGermany });
+    await openPopup(page, scn);
+    await completeRun(page, scn);
+
+    const card = verdictCard(page);
+    await expect(card).not.toHaveClass(/\bis-muted\b/);
+    await expect(card.locator(".eyebrow")).toContainText("Cheapest delivered to United States");
+    await expect(card.locator(".eyebrow .dB-flag-pill")).toHaveText("Check match");
+    await expect(card.locator(".dB-save")).toHaveText("Save $38.62");
+    await expect(card.locator(".lede")).toHaveText(
+      `Buy from Italy for $361.37 delivered — 10% less than the $399.99 you would pay here. Item, shipping and import fees included. ${MATCH_CHECK_SENTENCE}`
+    );
+    await expect(card.getByRole("button", { name: "Open on amazon.it" })).toBeVisible();
+
+    const best = page.locator(".dB-row.best");
+    await expect(best).toHaveCount(1);
+    await expect(best).toContainText("Italy");
+    await expect(best.locator(".dB-flag-pill")).toHaveText("Check match");
+  });
+
+  test("flags the cheapest verdict too when the page price could not be read", async ({ page }) => {
+    const scn = scenario({ baseline: undefined, results: withoutGermany });
+    await openPopup(page, scn);
+    await completeRun(page, scn);
+
+    const card = verdictCard(page);
+    await expect(card.locator(".eyebrow .dB-flag-pill")).toHaveText("Check match");
+    await expect(card.locator(".dB-save")).toHaveText("$361.37");
+    await expect(card.locator(".lede")).toHaveText(
+      `Buy from Italy for $361.37 delivered. Item, shipping and import fees included. We could not read the price on this page to compare. ${MATCH_CHECK_SENTENCE}`
+    );
+  });
+});
+
+test.describe("when the background service cannot be reached", () => {
+  const failures: Array<{ failure: RunFailure; label: string }> = [
+    { failure: "reject", label: "the run request is rejected" },
+    { failure: "no-response", label: "the run request gets no response" }
+  ];
+
+  for (const { failure, label } of failures) {
+    test(`shows the error card with the markets checked so far when ${label}`, async ({ page }) => {
+      const scn = scenario();
+      await openPopup(page, scn);
+      await startRun(page);
+      await emitProgress(page, progressStep(scn, "UK", "OPEN"));
+      await expect(dial(page).count).toHaveText("2/9");
+
+      await failRun(page, failure);
+
+      const card = verdictCard(page);
+      await expect(card).toHaveClass(/\bis-muted\b/);
+      await expect(card.locator(".eyebrow")).toHaveText("Something went wrong");
+      await expect(card.locator(".dB-save")).toHaveText("Couldn't compare");
+      await expect(card.locator(".lede")).toHaveText(BACKGROUND_UNREACHABLE);
+      await expect(page.getByRole("button", { name: "Stop checking" })).toHaveCount(0);
+      await expect(listRows(page)).toHaveText([/Canada/, /United States/]);
+      await expect(listRows(page).locator(".amt strong")).toHaveText(["$391.44", "$399.99"]);
+      await expect(page.getByRole("button", { name: "1 marketplace could not be compared" })).toBeVisible();
+
+      await page.getByRole("button", { name: "Check again" }).click();
+
+      expect(await sentMessages(page, RUN_COMPARISON)).toEqual([RUN_REQUEST, RUN_REQUEST]);
+      await expect(dial(page).count).toHaveText("0/9");
+      await expect(page.getByText(BACKGROUND_UNREACHABLE)).toHaveCount(0);
+    });
+  }
 });
 
 test.describe("stopping a run", () => {
@@ -452,16 +629,81 @@ test.describe("stopping a run", () => {
 
     await expectToastHidden(page);
   });
+
+  test("ignores a late result from the stopped run once the user has started a new one", async ({ page }) => {
+    const scn = scenario();
+    await openPopup(page, scn);
+    await startRun(page);
+    const stopped = progressStep(scn, "DE", "READ");
+    await emitProgress(page, stopped);
+    await expect(dial(page).count).toHaveText("3/9");
+
+    await page.getByRole("button", { name: "Stop checking" }).click();
+    await expect(runButton(page)).toHaveText("Check 9 other Amazons");
+
+    await startRun(page);
+    const [stoppedRun, currentRun] = await runIds(page);
+    expect(currentRun).not.toBe(stoppedRun);
+
+    await emitResult(page, {
+      ...resultPayload(scenario({ results: stopped.results ?? [], error: CANCELLED })),
+      runId: stoppedRun
+    });
+    await emitProgress(page, { ...progressStep(scn, "FR", "OPEN"), runId: stoppedRun });
+
+    const running = dial(page);
+    await expect(running.count).toHaveText("0/9");
+    await expect(running.nowline).toHaveText("Opening tab Canada");
+    await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
+    await expect(page.getByText("Something went wrong")).toHaveCount(0);
+    await expect(page.getByText(CANCELLED)).toHaveCount(0);
+
+    await emitProgress(page, progressStep(scn, "CA", "SEARCH"));
+    await expect(running.nowline).toHaveText("Searching Canada");
+
+    await emitResult(page, resultPayload(scn));
+    await expect(verdictCard(page).getByText("Save $50.94")).toBeVisible();
+    await expect(listRows(page).locator(".amt strong")).toHaveText(USD_ROWS.totals);
+  });
+});
+
+test.describe("another tab's comparison", () => {
+  test("never moves this popup, whether idle or running", async ({ page }) => {
+    const scn = scenario();
+    await openPopup(page, scn);
+
+    await emitProgress(page, { ...progressStep(scn, "DE", "MATCH"), activeTabId: OTHER_TAB_ID });
+    await expect(runButton(page)).toHaveText("Check 9 other Amazons");
+    await expect(dial(page).count).toHaveCount(0);
+
+    await startRun(page);
+    await emitProgress(page, { ...progressStep(scn, "FR", "MATCH"), activeTabId: OTHER_TAB_ID });
+    await emitResult(page, { ...resultPayload(scn), activeTabId: OTHER_TAB_ID });
+
+    const running = dial(page);
+    await expect(running.count).toHaveText("0/9");
+    await expect(running.nowline).toHaveText("Opening tab Canada");
+    await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
+    await expect(page.getByText("ECB daily rates")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Check again" })).toHaveCount(0);
+
+    await emitProgress(page, progressStep(scn, "CA", "SEARCH"));
+    await expect(running.nowline).toHaveText("Searching Canada");
+    await expect(page.getByText("Rates 2026-07-30")).toBeVisible();
+  });
 });
 
 test.describe("settings", () => {
-  test("switching to EUR persists the choice and re-renders every total", async ({ page }) => {
+  test("switching to EUR persists it, re-renders every total, and the page currency is saved as SOURCE", async ({
+    page
+  }) => {
     await openPopup(page);
     await completeRun(page);
 
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByRole("heading", { name: "Show prices in" })).toBeVisible();
-    await expect(page.locator("#b-seg").getByRole("button")).toHaveText(["USD", "EUR", "GBP", "JPY"]);
+    const segments = page.getByRole("group", { name: "Show prices in" }).getByRole("button");
+    await expect(segments).toHaveText(["USD", "EUR", "GBP", "JPY"]);
     await expect(page.getByRole("button", { name: "USD" })).toHaveAttribute("aria-pressed", "true");
 
     await page.getByRole("button", { name: "EUR" }).click();
@@ -496,6 +738,18 @@ test.describe("settings", () => {
 
     await listRow(page, "Germany").click();
     await expect(page.getByRole("dialog").locator(".dB-line.conv b")).toHaveText("€323.19 at today’s rate");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "USD" }).click();
+
+    await expect(page.getByRole("button", { name: "USD" })).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => storedSettings(page)).toEqual({ ...DEFAULT_SETTINGS, comparisonCurrency: "SOURCE" });
+
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await expect(verdictCard(page).getByText("Save $50.94")).toBeVisible();
+    await expect(listRows(page).locator(".amt strong")).toHaveText(USD_ROWS.totals);
   });
 
   test("a currency stored from an earlier session is used at load", async ({ page }) => {
@@ -512,6 +766,24 @@ test.describe("settings", () => {
     await expect(verdictCard(page).getByText("Save £40.19")).toBeVisible();
     await expect(page.getByText("GBP delivered")).toBeVisible();
     await expect(listRows(page).first().locator(".amt strong")).toHaveText("£275.36");
+  });
+
+  test("offers and selects a stored currency outside the default choices", async ({ page }) => {
+    const scn = scenario({ settings: { comparisonCurrency: "CAD" } });
+    await openPopup(page, scn);
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    const segments = page.getByRole("group", { name: "Show prices in" }).getByRole("button");
+    await expect(segments).toHaveText(["USD", "EUR", "GBP", "JPY", "CAD"]);
+    await expect(page.getByRole("button", { name: "CAD" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "USD" })).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("button", { name: "Close settings" }).click();
+
+    await completeRun(page, scn);
+
+    await expect(verdictCard(page).getByText("Save CA$69.57")).toBeVisible();
+    await expect(page.getByText("CAD delivered")).toBeVisible();
+    await expect(listRows(page).first().locator(".amt strong")).toHaveText("CA$476.71");
   });
 
   test("toggling a marketplace persists the list and changes the run button count", async ({ page }) => {
@@ -558,11 +830,15 @@ test.describe("settings", () => {
     await expect(dial(page).nowline).toHaveText("Matching product Italy");
 
     await page.getByRole("button", { name: "Settings" }).click();
+    const japan = page.getByRole("checkbox", { name: "🇯🇵 Japan" });
+    await japan.focus();
+    await emitProgress(page, progressStep(scn, "AU", "OPEN"));
     await emitResult(page, resultPayload(scn));
 
     await expect(page.getByRole("heading", { name: "Show prices in" })).toBeVisible();
     await expect(page.getByText("Save $50.94")).toHaveCount(0);
     await expect(page.getByText("Rates 2026-07-30")).toBeVisible();
+    await expect(japan).toBeFocused();
 
     await page.getByRole("button", { name: "Close settings" }).click();
     await expect(verdictCard(page).getByText("Save $50.94")).toBeVisible();
@@ -589,44 +865,115 @@ test.describe("settings", () => {
   });
 });
 
-test.describe("not on an Amazon product page", () => {
-  test("shows the notice and a disabled run button when the page is not supported", async ({ page }) => {
-    await openPopup(page, scenario({ loadSourceError: "Unsupported marketplace hostname" }));
+test.describe("while the page is being read", () => {
+  test("shows a reading hint until LOAD_SOURCE answers, then the product card", async ({ page }) => {
+    await openPopup(page, scenario({ holdLoadSource: true }));
 
-    await expect(page.getByText("Open an Amazon product page")).toBeVisible();
-    await expect(
-      page.getByText(
-        "Across Amazon compares the delivered price of the product you are looking at across other Amazon marketplaces."
-      )
-    ).toBeVisible();
+    await expect(loadingHint(page)).toBeVisible();
+    await expect(runButton(page)).toHaveCount(0);
+    await expect(page.getByText(NOTICE_TITLE)).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 3 })).toHaveCount(0);
+
+    await releaseLoadSource(page);
+
+    await expect(page.getByRole("heading", { level: 3, name: source.title })).toBeVisible();
+    await expect(loadingHint(page)).toHaveCount(0);
+    await expect(runButton(page)).toHaveText("Check 9 other Amazons");
+    await expect(runButton(page)).toBeEnabled();
+  });
+});
+
+test.describe("not on an Amazon product page", () => {
+  const unsupportedTabs: Array<{ label: string; tabUrl?: string }> = [
+    { label: "a site that is not Amazon", tabUrl: NON_AMAZON_URL },
+    { label: "a tab without a URL", tabUrl: undefined }
+  ];
+
+  for (const { label, tabUrl } of unsupportedTabs) {
+    test(`shows the notice without asking the background for ${label}`, async ({ page }) => {
+      await openPopup(page, scenario({ tabUrl }));
+
+      await expect(page.getByText(NOTICE_TITLE)).toBeVisible();
+      await expect(
+        page.getByText(
+          "Across Amazon compares the delivered price of the product you are looking at across other Amazon marketplaces."
+        )
+      ).toBeVisible();
+      await expect(runButton(page)).toHaveText("Check other Amazons");
+      await expect(runButton(page)).toBeDisabled();
+      await expect(page.getByRole("heading", { level: 3 })).toHaveCount(0);
+      await expect(page.getByText(/^Takes about/)).toHaveCount(0);
+      await expect(loadingHint(page)).toHaveCount(0);
+      expect(await sentMessages(page)).toEqual([]);
+
+      await page.getByRole("button", { name: "Settings" }).click();
+      await expect(page.getByRole("checkbox")).toHaveCount(10);
+    });
+  }
+
+  test("shows the notice when an Amazon page has no product to read", async ({ page }) => {
+    await openPopup(page, scenario({ tabUrl: AMAZON_NON_PRODUCT_URL, loadSourceError: EXTRACTION_FAILURE }));
+
+    await expect(page.getByText(NOTICE_TITLE)).toBeVisible();
+    await expect(runButton(page)).toHaveText("Check other Amazons");
     await expect(runButton(page)).toBeDisabled();
     await expect(page.getByRole("heading", { level: 3 })).toHaveCount(0);
-    await expect(page.getByText(/^Takes about/)).toHaveCount(0);
-    expect(await sentMessages(page, RUN_COMPARISON)).toEqual([]);
-
-    await page.getByRole("button", { name: "Settings" }).click();
-    await expect(page.getByRole("checkbox")).toHaveCount(10);
+    await expect(page.getByText(EXTRACTION_FAILURE)).toHaveCount(0);
+    expect(await sentMessages(page)).toEqual([{ type: LOAD_SOURCE, payload: { activeTabId: ACTIVE_TAB_ID } }]);
   });
 
   test("shows the notice without asking the background when there is no active tab", async ({ page }) => {
     await openPopup(page, scenario({ activeTabId: null }));
 
-    await expect(page.getByText("Open an Amazon product page")).toBeVisible();
+    await expect(page.getByText(NOTICE_TITLE)).toBeVisible();
+    await expect(runButton(page)).toHaveText("Check other Amazons");
     await expect(runButton(page)).toBeDisabled();
     expect(await sentMessages(page)).toEqual([]);
   });
 });
 
+test.describe("focus", () => {
+  test("lands on the new content after every view swap but not when the popup first opens", async ({ page }) => {
+    const scn = scenario();
+    await openPopup(page, scn);
+    await expect(runButton(page)).toBeEnabled();
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+
+    await startRun(page);
+    await expect(scrollArea(page)).toBeFocused();
+    await emitProgress(page, progressStep(scn, "UK", "SEARCH"));
+    await expect(dial(page).count).toHaveText("2/9");
+    await expect(scrollArea(page)).toBeFocused();
+
+    await page.getByRole("button", { name: "Stop checking" }).click();
+    await expect(runButton(page)).toBeVisible();
+    await expect(scrollArea(page)).toBeFocused();
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByRole("heading", { name: "Show prices in" })).toBeVisible();
+    await expect(scrollArea(page)).toBeFocused();
+
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await expect(runButton(page)).toBeVisible();
+    await expect(scrollArea(page)).toBeFocused();
+
+    await completeRun(page, scn);
+    await expect(scrollArea(page)).toBeFocused();
+    await expect(scrollArea(page)).toHaveAttribute("tabindex", "-1");
+  });
+});
+
 test.describe("keyboard", () => {
-  test("Tab reaches a row, Enter opens its sheet and Escape closes it back onto the row", async ({ page }) => {
+  test("Tab from the verdict reaches a row, Enter opens its sheet and Escape closes it back onto the row", async ({
+    page
+  }) => {
     await openPopup(page);
     await completeRun(page);
+    await expect(scrollArea(page)).toBeFocused();
 
-    const gear = page.getByRole("button", { name: "Settings" });
     const verdictOpen = verdictCard(page).getByRole("button", { name: "Open on amazon.de" });
     const germany = listRow(page, "Germany");
 
-    await gear.focus();
     await page.keyboard.press("Tab");
     await expect(verdictOpen).toBeFocused();
     await page.keyboard.press("Tab");
