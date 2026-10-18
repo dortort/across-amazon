@@ -22,6 +22,32 @@ const DOMAIN_BY_MARKET: Record<Marketplace, string> = {
   AU: "www.amazon.com.au"
 };
 
+const CURRENCY_BY_MARKET: Record<Marketplace, string> = {
+  US: "USD",
+  CA: "CAD",
+  MX: "MXN",
+  UK: "GBP",
+  DE: "EUR",
+  FR: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  JP: "JPY",
+  AU: "AUD"
+};
+
+const PRODUCT_AMOUNTS_BY_MARKET: Record<Marketplace, { item: number; shipping: number; importFees: number }> = {
+  US: { item: 49.99, shipping: 6, importFees: 4 },
+  CA: { item: 64.99, shipping: 8, importFees: 5.5 },
+  MX: { item: 899, shipping: 95, importFees: 70 },
+  UK: { item: 32.5, shipping: 3.2, importFees: 2 },
+  DE: { item: 37.2, shipping: 4.5, importFees: 3.2 },
+  FR: { item: 38.1, shipping: 4.3, importFees: 3 },
+  IT: { item: 36.9, shipping: 4.2, importFees: 2.9 },
+  ES: { item: 35.8, shipping: 4.1, importFees: 2.8 },
+  JP: { item: 4200, shipping: 500, importFees: 300 },
+  AU: { item: 78.99, shipping: 9.9, importFees: 6.5 }
+};
+
 function loadFixture(group: "source" | "search" | "product", market: Marketplace): JSDOM {
   const file = join(process.cwd(), "tests", "fixtures", group, `${market}.html`);
   const html = readFileSync(file, "utf8");
@@ -70,6 +96,35 @@ describe("content parsers", () => {
       expect(result.hasShippingInfo).toBe(true);
       expect(result.hasImportInfo).toBe(true);
       expect(result.destinationMatched).toBe(true);
+    }
+  });
+
+  it.each(MARKETS)("reads every %s product charge in the marketplace currency", (market) => {
+    const dom = loadFixture("product", market);
+    const result = extractProductData(
+      dom.window.document,
+      { marketplace: market, sourceDestinationCountryCode: market },
+      dom.window.location.href
+    );
+    const currency = CURRENCY_BY_MARKET[market];
+    const amounts = PRODUCT_AMOUNTS_BY_MARKET[market];
+
+    expect(result.breakdown).toEqual({
+      item: { amount: amounts.item, currency },
+      shipping: { amount: amounts.shipping, currency },
+      importFees: { amount: amounts.importFees, currency },
+      totalDisplayed: { amount: amounts.item, currency }
+    });
+    expect(result.notes).toEqual([]);
+  });
+
+  it.each(MARKETS)("reads every %s search candidate price in the marketplace currency", (market) => {
+    const dom = loadFixture("search", market);
+    const candidates = extractSearchCandidates(dom.window.document, { marketplace: market, limit: 8 }, dom.window.location.origin);
+
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const candidate of candidates) {
+      expect(candidate.price).toEqual({ amount: PRODUCT_AMOUNTS_BY_MARKET[market].item, currency: CURRENCY_BY_MARKET[market] });
     }
   });
 
