@@ -1,5 +1,6 @@
 import { buildSearchUrl } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
+import type { RunComparisonProgress } from "../shared/messages";
 import { pickBestCandidate } from "../shared/matching";
 import { convertMoney, getDefaultCurrencyForMarketplace, sumMoney } from "../shared/money";
 import { sortComparisonResults } from "../shared/comparison";
@@ -9,7 +10,6 @@ import type {
   Marketplace,
   ProductExtractionRequest,
   ProductExtractionResult,
-  RunComparisonProgress,
   RunComparisonResultPayload,
   SearchCandidate,
   SearchExtractionRequest,
@@ -100,9 +100,10 @@ async function runScriptFile(tabId: number, file: string): Promise<void> {
 async function readWindowValue<T>(tabId: number, key: string): Promise<T | undefined> {
   const [result] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (propertyName) => {
-      const value = (window as Record<string, unknown>)[propertyName];
-      delete (window as Record<string, unknown>)[propertyName];
+    func: (propertyName: string) => {
+      const scope = window as unknown as Record<string, unknown>;
+      const value = scope[propertyName];
+      delete scope[propertyName];
       return value;
     },
     args: [key]
@@ -114,8 +115,8 @@ async function readWindowValue<T>(tabId: number, key: string): Promise<T | undef
 async function writeWindowValue<T>(tabId: number, key: string, value: T): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
-    func: (propertyName, propertyValue) => {
-      (window as Record<string, unknown>)[propertyName] = propertyValue;
+    func: (propertyName: string, propertyValue: unknown) => {
+      (window as unknown as Record<string, unknown>)[propertyName] = propertyValue;
     },
     args: [key, value]
   });
@@ -191,15 +192,16 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
   const results: ComparisonResult[] = [];
 
   try {
-    sourceContext = await extractSourceContext(activeTabId);
+    const source = await extractSourceContext(activeTabId);
+    sourceContext = source;
     const settings = await loadSettings();
 
-    const targetMarkets = settings.enabledMarketplaces.filter((market) => market !== sourceContext.marketplace);
+    const targetMarkets = settings.enabledMarketplaces.filter((market) => market !== source.marketplace);
     const cacheKey = buildComparisonCacheKey({
-      asin: sourceContext.asin,
-      variationTokens: sourceContext.variationTokens,
-      sourceMarketplace: sourceContext.marketplace,
-      destinationCountryCode: sourceContext.destinationCountryCode,
+      asin: source.asin,
+      variationTokens: source.variationTokens,
+      sourceMarketplace: source.marketplace,
+      destinationCountryCode: source.destinationCountryCode,
       targetMarkets
     });
 
@@ -212,7 +214,7 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
       };
     }
 
-    const queryParts = [sourceContext.title, sourceContext.brand, ...sourceContext.variationTokens].filter(Boolean);
+    const queryParts = [source.title, source.brand, ...source.variationTokens].filter(Boolean);
     const query = queryParts.join(" ");
 
     for (let index = 0; index < targetMarkets.length; index += 1) {
@@ -231,7 +233,7 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
         });
         await closeTempTab(searchTabId, token);
 
-        const best = pickBestCandidate(sourceContext, candidates);
+        const best = pickBestCandidate(source, candidates);
         if (!best) {
           results.push(buildNoMatchResult(targetMarket));
           continue;
@@ -242,7 +244,7 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
 
         const productData = await extractProductData(productTabId, {
           marketplace: targetMarket,
-          sourceDestinationCountryCode: sourceContext.destinationCountryCode
+          sourceDestinationCountryCode: source.destinationCountryCode
         });
 
         await closeTempTab(productTabId, token);
@@ -298,7 +300,7 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
 
     const comparisonCurrency =
       settings.comparisonCurrency === "SOURCE"
-        ? getDefaultCurrencyForMarketplace(sourceContext.marketplace)
+        ? getDefaultCurrencyForMarketplace(source.marketplace)
         : settings.comparisonCurrency;
 
     const fxTable = await getDailyFxTable();
@@ -341,14 +343,14 @@ export async function runComparison(activeTabId: number): Promise<RunComparisonR
     const sortedResults = sortComparisonResults(normalizedResults);
 
     const payload: RunComparisonResultPayload = {
-      source: sourceContext,
+      source,
       results: sortedResults,
       generatedAt: new Date().toISOString()
     };
 
     await writeComparisonCache(cacheKey, {
       createdAt: payload.generatedAt,
-      source: sourceContext,
+      source,
       results: sortedResults
     });
 
