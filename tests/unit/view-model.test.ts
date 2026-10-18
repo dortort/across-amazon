@@ -25,6 +25,7 @@ import {
   issuesLabel,
   needsMatchCheck,
   percentFormat,
+  formatVariantTokens,
   phaseLabel,
   progressPercent,
   rankAvailable,
@@ -791,5 +792,15 @@ describe("formatLocal", () => {
 
   it("formats yen without decimals", () => {
     expect(formatLocal(money(54000, "JPY"), "JP")).toMatch(/^[¥￥]54,000$/);
+  });
+});
+
+describe("formatVariantTokens", () => {
+  it("capitalises each extracted token and joins them with a middle dot", () => {
+    expect(formatVariantTokens(["black", "2 pack", "x100"])).toBe("Black · 2 pack · X100");
+  });
+
+  it("returns an empty string for no tokens", () => {
+    expect(formatVariantTokens([])).toBe("");
   });
 });
