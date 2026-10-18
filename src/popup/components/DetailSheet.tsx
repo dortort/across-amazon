@@ -8,6 +8,8 @@ import type { RankedRow } from "../view-model";
 import { OpenButton } from "./OpenButton";
 
 const SHEET_TITLE_ID = "b-sheet-title";
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface DetailSheetProps {
   row?: RankedRow;
@@ -33,6 +35,14 @@ function productHost(result: ComparisonResult): string {
   } catch {
     return marketDisplayDomain(result.marketplace);
   }
+}
+
+function cycleFocus(sheet: HTMLElement, backwards: boolean): void {
+  const stops = [sheet, ...sheet.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  const current = stops.findIndex((stop) => stop === document.activeElement);
+  const step = backwards ? -1 : 1;
+  const next = current === -1 ? (backwards ? stops.length - 1 : 0) : (current + step + stops.length) % stops.length;
+  stops[next].focus();
 }
 
 function SheetLine({ label, value, variant }: SheetLineProps): ReactElement {
@@ -105,6 +115,9 @@ export function DetailSheet(props: DetailSheetProps): ReactElement {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         onClose();
+      } else if (event.key === "Tab" && sheetRef.current) {
+        event.preventDefault();
+        cycleFocus(sheetRef.current, event.shiftKey);
       }
     };
     document.addEventListener("keydown", onKeyDown);

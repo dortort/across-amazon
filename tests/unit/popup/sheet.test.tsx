@@ -136,4 +136,81 @@ describe("detail sheet", () => {
 
     expect(screen.getByRole("dialog", { name: "🇩🇪 Germany" })).toHaveFocus();
   });
+
+  describe("focus trap", () => {
+    it("cycles Tab between the dialog and its Open button without reaching the page behind", async () => {
+      const app = await renderDone();
+      await app.user.click(rowFor(app.container, "Germany"));
+      const dialog = screen.getByRole("dialog", { name: "🇩🇪 Germany" });
+      const open = within(dialog).getByRole("button", { name: "Open on amazon.de" });
+
+      await app.user.tab();
+      expect(open).toHaveFocus();
+      await app.user.tab();
+      expect(dialog).toHaveFocus();
+      await app.user.tab();
+      expect(open).toHaveFocus();
+      await app.user.tab();
+      expect(dialog).toHaveFocus();
+    });
+
+    it("cycles Shift+Tab backwards through the same stops", async () => {
+      const app = await renderDone();
+      await app.user.click(rowFor(app.container, "Germany"));
+      const dialog = screen.getByRole("dialog", { name: "🇩🇪 Germany" });
+      const open = within(dialog).getByRole("button", { name: "Open on amazon.de" });
+
+      await app.user.tab({ shift: true });
+      expect(open).toHaveFocus();
+      await app.user.tab({ shift: true });
+      expect(dialog).toHaveFocus();
+      await app.user.tab({ shift: true });
+      expect(open).toHaveFocus();
+    });
+
+    it("traps focus on the Close button of the page you are on", async () => {
+      const app = await renderDone();
+      await app.user.click(rowFor(app.container, "United States"));
+      const dialog = screen.getByRole("dialog", { name: "🇺🇸 United States" });
+      const close = within(dialog).getByRole("button", { name: "Close" });
+
+      await app.user.tab();
+      expect(close).toHaveFocus();
+      await app.user.tab();
+      expect(dialog).toHaveFocus();
+      await app.user.tab({ shift: true });
+      expect(close).toHaveFocus();
+      await app.user.tab({ shift: true });
+      expect(dialog).toHaveFocus();
+    });
+
+    it("pulls focus that wandered behind the sheet back into it on Tab", async () => {
+      const app = await renderDone();
+      await app.user.click(rowFor(app.container, "Germany"));
+      const dialog = screen.getByRole("dialog", { name: "🇩🇪 Germany" });
+      const checkAgain = screen.getByRole("button", { name: "Check again" });
+
+      checkAgain.focus();
+      await app.user.tab();
+      expect(dialog).toHaveFocus();
+
+      checkAgain.focus();
+      await app.user.tab({ shift: true });
+      expect(within(dialog).getByRole("button", { name: "Open on amazon.de" })).toHaveFocus();
+    });
+
+    it("releases the trap once the sheet closes", async () => {
+      const app = await renderDone();
+      const germany = rowFor(app.container, "Germany");
+      germany.focus();
+      await app.user.keyboard("{Enter}");
+      await app.user.tab();
+      await app.user.keyboard("{Escape}");
+      expect(germany).toHaveFocus();
+
+      await app.user.tab();
+
+      expect(rowFor(app.container, "Italy")).toHaveFocus();
+    });
+  });
 });
