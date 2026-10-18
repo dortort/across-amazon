@@ -29,7 +29,26 @@ function parseLocalizedNumber(input: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function detectCurrency(text: string): string {
+const MARKET_DEFAULT_CURRENCY: Record<SearchExtractionRequest["marketplace"], string> = {
+  US: "USD",
+  CA: "CAD",
+  MX: "MXN",
+  UK: "GBP",
+  DE: "EUR",
+  FR: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  JP: "JPY",
+  AU: "AUD"
+};
+
+const CURRENCY_CODE_TOKEN = /(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD)(?![A-Za-z])/;
+const DOLLAR_CURRENCIES = new Set(["USD", "CAD", "MXN", "AUD"]);
+
+function detectCurrency(text: string, marketCurrency: string): string {
+  if (text.includes("US$")) {
+    return "USD";
+  }
   if (text.includes("CA$") || text.includes("C$")) {
     return "CAD";
   }
@@ -39,16 +58,23 @@ function detectCurrency(text: string): string {
   if (text.includes("AU$")) {
     return "AUD";
   }
+  const code = CURRENCY_CODE_TOKEN.exec(text)?.[0];
+  if (code) {
+    return code;
+  }
   if (text.includes("£")) {
     return "GBP";
   }
   if (text.includes("€")) {
     return "EUR";
   }
-  if (text.includes("￥") || text.includes("¥")) {
+  if (text.includes("￥") || text.includes("¥") || text.includes("円")) {
     return "JPY";
   }
-  return "USD";
+  if (text.includes("$")) {
+    return DOLLAR_CURRENCIES.has(marketCurrency) ? marketCurrency : "USD";
+  }
+  return marketCurrency;
 }
 
 function isSponsored(element: Element): boolean {
@@ -81,6 +107,7 @@ export function extractSearchCandidates(
   const organicResults = results.filter((result) => !isSponsored(result));
 
   const limit = request.limit ?? 8;
+  const marketCurrency = MARKET_DEFAULT_CURRENCY[request.marketplace];
   return organicResults.slice(0, limit).flatMap((result) => {
     const title = result.querySelector("h2 span")?.textContent?.trim();
     const href = result.querySelector<HTMLAnchorElement>("h2 a")?.getAttribute("href");
@@ -97,7 +124,7 @@ export function extractSearchCandidates(
 
     const rawPrice = result.querySelector(".a-price .a-offscreen")?.textContent?.trim();
     const priceAmount = rawPrice ? parseLocalizedNumber(rawPrice) : undefined;
-    const currency = rawPrice ? detectCurrency(rawPrice) : undefined;
+    const currency = rawPrice ? detectCurrency(rawPrice, marketCurrency) : undefined;
 
     return [
       {

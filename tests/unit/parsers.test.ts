@@ -128,6 +128,46 @@ describe("content parsers", () => {
     }
   });
 
+  describe("search candidate currency", () => {
+    function candidatePrice(market: Marketplace, price: string) {
+      const html = `<!doctype html><html><body>
+        <div class="s-result-item" data-component-type="s-search-result" data-asin="B000000001">
+          <h2><a href="/dp/B000000001"><span>Acme Ultra Widget Model X100 2 Pack Blue</span></a></h2>
+          <span class="a-price"><span class="a-offscreen">${price}</span></span>
+        </div>
+      </body></html>`;
+      const dom = new JSDOM(html, { url: `https://${DOMAIN_BY_MARKET[market]}/s?k=acme` });
+      const [candidate] = extractSearchCandidates(dom.window.document, { marketplace: market, limit: 8 }, dom.window.location.origin);
+      return candidate?.price;
+    }
+
+    it.each([
+      { market: "CA", currency: "CAD" },
+      { market: "MX", currency: "MXN" },
+      { market: "AU", currency: "AUD" },
+      { market: "US", currency: "USD" }
+    ] as const)("reads a bare $64.99 on $market as $currency", ({ market, currency }) => {
+      expect(candidatePrice(market, "$64.99")).toEqual({ amount: 64.99, currency });
+    });
+
+    it.each([
+      { price: "US$12.00", market: "CA", amount: 12, currency: "USD" },
+      { price: "CA$5", market: "US", amount: 5, currency: "CAD" },
+      { price: "MX$899.00", market: "AU", amount: 899, currency: "MXN" },
+      { price: "AU$78.99", market: "US", amount: 78.99, currency: "AUD" }
+    ] as const)("lets the explicit prefix in $price win on $market", ({ price, market, amount, currency }) => {
+      expect(candidatePrice(market, price)).toEqual({ amount, currency });
+    });
+
+    it("keeps a dollar sign on a non-dollar marketplace as US dollars", () => {
+      expect(candidatePrice("UK", "$12.00")).toEqual({ amount: 12, currency: "USD" });
+    });
+
+    it("reads an amount without a currency marker in the marketplace currency", () => {
+      expect(candidatePrice("JP", "4,200")).toEqual({ amount: 4200, currency: "JPY" });
+    });
+  });
+
   it("reads the product image from the landing image on the source page", () => {
     const dom = loadFixture("source", "US");
     const extracted = extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname);

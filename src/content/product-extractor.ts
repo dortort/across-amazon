@@ -78,7 +78,16 @@ function parseLocalizedNumber(input: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function detectCurrency(text: string): string {
+type ParsedMoney = { amount: number; currency: string };
+
+const CURRENCY_CODE = String.raw`(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD)(?![A-Za-z])`;
+const CURRENCY_CODE_TOKEN = new RegExp(CURRENCY_CODE);
+const DOLLAR_CURRENCIES = new Set(["USD", "CAD", "MXN", "AUD"]);
+
+function detectCurrency(text: string, marketCurrency: string): string {
+  if (text.includes("US$")) {
+    return "USD";
+  }
   if (text.includes("CA$") || text.includes("C$")) {
     return "CAD";
   }
@@ -87,6 +96,10 @@ function detectCurrency(text: string): string {
   }
   if (text.includes("AU$")) {
     return "AUD";
+  }
+  const code = CURRENCY_CODE_TOKEN.exec(text)?.[0];
+  if (code) {
+    return code;
   }
   if (text.includes("£")) {
     return "GBP";
@@ -97,18 +110,18 @@ function detectCurrency(text: string): string {
   if (text.includes("￥") || text.includes("¥") || text.includes("円")) {
     return "JPY";
   }
-  return "USD";
+  if (text.includes("$")) {
+    return DOLLAR_CURRENCIES.has(marketCurrency) ? marketCurrency : "USD";
+  }
+  return marketCurrency;
 }
 
-type ParsedMoney = { amount: number; currency: string };
-
-const CURRENCY_CODE = String.raw`(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD)(?![A-Za-z])`;
 const AMOUNT = String.raw`(?:\d{1,3}(?:[\u00a0\u202f]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)*)`;
 const PREFIXED_MONEY = new RegExp(String.raw`(?:(?:CA|C|MX|AU|US)?\$|£|€|￥|¥|${CURRENCY_CODE}\s*)${AMOUNT}`);
 const SUFFIXED_MONEY = new RegExp(String.raw`${AMOUNT}\s*(?:€|£|￥|¥|円|\$|${CURRENCY_CODE})`);
 const BARE_AMOUNT = /^\d[\d\s.,]*$/;
 
-function parseMoney(text: string): ParsedMoney | undefined {
+function parseMoney(text: string, marketCurrency: string): ParsedMoney | undefined {
   const amount = parseLocalizedNumber(text);
   if (amount === undefined) {
     return undefined;
@@ -116,13 +129,13 @@ function parseMoney(text: string): ParsedMoney | undefined {
 
   return {
     amount,
-    currency: detectCurrency(text)
+    currency: detectCurrency(text, marketCurrency)
   };
 }
 
-function parseCurrencyMarkedMoney(text: string): ParsedMoney | undefined {
+function parseCurrencyMarkedMoney(text: string, marketCurrency: string): ParsedMoney | undefined {
   const token = PREFIXED_MONEY.exec(text)?.[0] ?? SUFFIXED_MONEY.exec(text)?.[0];
-  return token ? parseMoney(token) : undefined;
+  return token ? parseMoney(token, marketCurrency) : undefined;
 }
 
 function resolveDestinationCountryCode(documentRef: Document): string | undefined {
@@ -195,11 +208,12 @@ function findChargeBlock(documentRef: Document, keywords: string[]): Element | u
   return undefined;
 }
 
-function readPriceElement(block: Element): ParsedMoney | undefined {
+function readPriceElement(block: Element, marketCurrency: string): ParsedMoney | undefined {
   const priceElements = [...block.querySelectorAll(".a-color-price"), ...block.querySelectorAll(".a-offscreen")];
   for (const element of priceElements) {
     const text = element.textContent?.trim() ?? "";
-    const amount = parseCurrencyMarkedMoney(text) ?? (BARE_AMOUNT.test(text) ? parseMoney(text) : undefined);
+    const amount =
+      parseCurrencyMarkedMoney(text, marketCurrency) ?? (BARE_AMOUNT.test(text) ? parseMoney(text, marketCurrency) : undefined);
     if (amount) {
       return amount;
     }
@@ -208,13 +222,18 @@ function readPriceElement(block: Element): ParsedMoney | undefined {
   return undefined;
 }
 
-function readCharge(documentRef: Document, keywords: string[], isFreeText: (text: string) => boolean): ChargeReading {
+function readCharge(
+  documentRef: Document,
+  keywords: string[],
+  isFreeText: (text: string) => boolean,
+  marketCurrency: string
+): ChargeReading {
   const block = findChargeBlock(documentRef, keywords);
   if (!block) {
     return { isFree: false };
   }
 
-  const explicitAmount = readPriceElement(block);
+  const explicitAmount = readPriceElement(block, marketCurrency);
   if (explicitAmount) {
     return { amount: explicitAmount, isFree: false };
   }
@@ -224,7 +243,7 @@ function readCharge(documentRef: Document, keywords: string[], isFreeText: (text
     return { isFree: true };
   }
 
-  return { amount: parseCurrencyMarkedMoney(blockText), isFree: false };
+  return { amount: parseCurrencyMarkedMoney(blockText, marketCurrency), isFree: false };
 }
 
 function hasFreeMarker(text: string | undefined): boolean {
@@ -248,19 +267,22 @@ export function extractProductData(
   pageUrl: string
 ): ProductExtractionResult {
   const notes: string[] = [];
+  const marketCurrency = MARKET_DEFAULT_CURRENCY[request.marketplace];
 
   const itemPriceText = findPriceText(documentRef);
-  const itemPrice = itemPriceText ? parseMoney(itemPriceText) : undefined;
+  const itemPrice = itemPriceText ? parseMoney(itemPriceText, marketCurrency) : undefined;
 
   const { amount: shippingAmount, isFree: shippingIsFree } = readCharge(
     documentRef,
     ["shipping", "delivery", "envio", "livraison", "versand", "配達"],
-    hasFreeMarker
+    hasFreeMarker,
+    marketCurrency
   );
   const { amount: importAmount, isFree: importIsFree } = readCharge(
     documentRef,
     ["import fee", "import fees", "deposit", "税", "duty", "aduana"],
-    (text) => hasFreeMarker(text) || normalize(text).includes("no import fee")
+    (text) => hasFreeMarker(text) || normalize(text).includes("no import fee"),
+    marketCurrency
   );
 
   const hasShippingInfo = Boolean(shippingAmount || shippingIsFree);
@@ -274,7 +296,7 @@ export function extractProductData(
     notes.push("Import fees not displayed for destination");
   }
 
-  const currency = itemPrice?.currency ?? shippingAmount?.currency ?? importAmount?.currency ?? MARKET_DEFAULT_CURRENCY[request.marketplace];
+  const currency = itemPrice?.currency ?? shippingAmount?.currency ?? importAmount?.currency ?? marketCurrency;
 
   const destinationDetected = resolveDestinationCountryCode(documentRef);
   const destinationMatched = !destinationDetected || destinationDetected === request.sourceDestinationCountryCode;
@@ -292,7 +314,7 @@ export function extractProductData(
     documentRef.querySelector("#subtotals-marketplace-table .a-color-price")?.textContent?.trim() ??
     documentRef.querySelector("#atfRedesign_desktop_totalPrice")?.textContent?.trim();
 
-  const totalDisplayed = totalDisplayedText ? parseMoney(totalDisplayedText) : undefined;
+  const totalDisplayed = totalDisplayedText ? parseMoney(totalDisplayedText, marketCurrency) : undefined;
 
   const parseConfidence =
     (itemPrice ? 0.5 : 0) +
