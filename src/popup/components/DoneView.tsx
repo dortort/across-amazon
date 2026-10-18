@@ -37,7 +37,7 @@ export function DoneView({
   onRun
 }: DoneViewProps): ReactElement {
   return (
-    <div className="dB-scroll">
+    <div className="dB-scroll" tabIndex={-1}>
       <VerdictCard
         verdict={verdict}
         error={error}

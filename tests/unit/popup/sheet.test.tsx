@@ -1,10 +1,35 @@
-import { screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NBSP, productUrl, renderDone, rowElements, rowSummary, source } from "./harness";
+import { NBSP, baseline, productUrl, renderDone, resultPayload, rowElements, rowSummary, source } from "./harness";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+function sheetElement(container: HTMLElement): HTMLElement {
+  const sheet = container.querySelector<HTMLElement>(".dB-sheet");
+  if (!sheet) {
+    throw new Error("sheet missing");
+  }
+  return sheet;
+}
+
+function pressEscape(target: Element): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  act(() => {
+    target.dispatchEvent(event);
+  });
+  return event;
+}
+
+function endTransition(target: Element, propertyName: string): void {
+  const event = new Event("transitionend", { bubbles: true });
+  Object.defineProperty(event, "propertyName", { value: propertyName });
+  act(() => {
+    target.dispatchEvent(event);
+  });
+}
 
 function sheetLines(dialog: HTMLElement) {
   return Array.from(dialog.querySelectorAll(".dB-line")).map((line) => [
@@ -43,7 +68,7 @@ describe("detail sheet", () => {
     expect(dialog).toHaveFocus();
     expect(app.container.querySelector(".dB-scrim")).toHaveClass("is-on");
     expect(dialog.querySelector(".dB-grab")).not.toBeNull();
-    expect(dialog.querySelector(".sub")?.textContent).toBe("www.amazon.de");
+    expect(dialog.querySelector(".sub")?.textContent).toBe("amazon.de");
     expect(sheetLines(dialog)).toEqual([
       ["dB-line", "Item price", `279,00${NBSP}€`],
       ["dB-line", "Shipping to United States", `12,99${NBSP}€`],
@@ -54,8 +79,8 @@ describe("detail sheet", () => {
     const trust = dialog.querySelector(".dB-trust");
     expect(trust).not.toHaveClass("warn");
     expect(trust?.querySelector(".dot")).not.toBeNull();
-    expect(trust).toHaveTextContent(
-      "We are 91% sure this is the same product — title, brand and variant all line up. Import fees deposit quoted on the product page. Delivery 6–10 days."
+    expect(trust?.textContent).toBe(
+      "We are 91% sure this is the same product — title, brand and variant all line up."
     );
 
     await app.user.click(within(dialog).getByRole("button", { name: "Open on amazon.de" }));
@@ -70,9 +95,7 @@ describe("detail sheet", () => {
 
     const trust = screen.getByRole("dialog", { name: "🇮🇹 Italy" }).querySelector(".dB-trust");
     expect(trust).toHaveClass("warn");
-    expect(trust).toHaveTextContent(
-      "We are 76% sure this is the same product. Colour is not stated in the listing title — confirm it is the black variant before buying."
-    );
+    expect(trust?.textContent).toBe("We are 76% sure this is the same product.");
   });
 
   it("shows the page you are on with free shipping, no import fees and a Close button", async () => {
@@ -81,7 +104,11 @@ describe("detail sheet", () => {
     await app.user.click(rowFor(app.container, "United States"));
 
     const dialog = screen.getByRole("dialog", { name: "🇺🇸 United States" });
-    expect(dialog.querySelector(".sub")?.textContent).toBe(source.title);
+    expect(dialog.querySelector(".sub")?.textContent).toBe(`${source.title} — Black`);
+    expect(dialog.querySelector(".dB-trust")).not.toHaveClass("warn");
+    expect(dialog.querySelector(".dB-trust")?.textContent).toBe(
+      "This is the page you are on. Prices are what Amazon showed when we checked."
+    );
     expect(sheetLines(dialog)).toEqual([
       ["dB-line", "Item price", "$399.99"],
       ["dB-line", "Shipping to United States", "Free"],
@@ -95,6 +122,24 @@ describe("detail sheet", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(app.create).not.toHaveBeenCalled();
+  });
+
+  it("titles the page you are on with the product title alone when it has no variant", async () => {
+    const plain = { ...source, variationTokens: [] };
+    const app = await renderDone(resultPayload({ source: plain }), { loadSource: { source: plain, baseline } });
+
+    await app.user.click(rowFor(app.container, "United States"));
+
+    expect(screen.getByRole("dialog").querySelector(".sub")?.textContent).toBe(source.title);
+  });
+
+  it("joins several variant tokens in the subtitle of the page you are on", async () => {
+    const variant = { ...source, variationTokens: ["black", "2 pack"] };
+    const app = await renderDone(resultPayload({ source: variant }));
+
+    await app.user.click(rowFor(app.container, "United States"));
+
+    expect(screen.getByRole("dialog").querySelector(".sub")?.textContent).toBe(`${source.title} — Black · 2 pack`);
   });
 
   it("closes on Escape and returns focus to the row", async () => {
@@ -127,6 +172,33 @@ describe("detail sheet", () => {
     expect(scrim).not.toHaveClass("is-on");
   });
 
+  it("consumes Escape while open so the browser does not close the whole popup", async () => {
+    const app = await renderDone();
+    await app.user.click(rowFor(app.container, "Germany"));
+    const dialog = screen.getByRole("dialog", { name: "🇩🇪 Germany" });
+    const reachedWindow = vi.fn();
+    window.addEventListener("keydown", reachedWindow);
+
+    const event = pressEscape(dialog);
+
+    window.removeEventListener("keydown", reachedWindow);
+    expect(event.defaultPrevented).toBe(true);
+    expect(reachedWindow).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("leaves Escape to the browser while the sheet is closed", async () => {
+    const app = await renderDone();
+    const reachedWindow = vi.fn();
+    window.addEventListener("keydown", reachedWindow);
+
+    const event = pressEscape(rowFor(app.container, "Germany"));
+
+    window.removeEventListener("keydown", reachedWindow);
+    expect(event.defaultPrevented).toBe(false);
+    expect(reachedWindow).toHaveBeenCalledTimes(1);
+  });
+
   it("opens from the keyboard", async () => {
     const app = await renderDone();
     const row = rowFor(app.container, "Germany");
@@ -135,6 +207,70 @@ describe("detail sheet", () => {
     await app.user.keyboard("{Enter}");
 
     expect(screen.getByRole("dialog", { name: "🇩🇪 Germany" })).toHaveFocus();
+  });
+
+  describe("closing animation", () => {
+    it("keeps the last breakdown while the sheet slides down and clears it after 400 ms", async () => {
+      const app = await renderDone();
+      await app.user.click(rowFor(app.container, "Germany"));
+      const sheet = sheetElement(app.container);
+      vi.useFakeTimers();
+
+      pressEscape(sheet);
+
+      expect(sheet).not.toHaveClass("is-on");
+      expect(sheet).not.toHaveAttribute("role");
+      expect(sheet).not.toHaveAttribute("aria-modal");
+      expect(sheet).toHaveAttribute("aria-hidden", "true");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(sheet.querySelector("h4")?.textContent).toBe("🇩🇪 Germany");
+      expect(app.container.querySelector(".dB-scrim")).not.toHaveClass("is-on");
+
+      act(() => {
+        vi.advanceTimersByTime(399);
+      });
+      expect(sheet.querySelector("h4")?.textContent).toBe("🇩🇪 Germany");
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(sheet).toBeEmptyDOMElement();
+    });
+
+    it("clears the breakdown as soon as the slide-down transform transition ends", async () => {
+      const app = await renderDone();
+      await app.user.click(rowFor(app.container, "Canada"));
+      const sheet = sheetElement(app.container);
+      const openButton = within(sheet).getByRole("button", { name: "Open on amazon.ca" });
+      pressEscape(sheet);
+
+      endTransition(sheet, "opacity");
+      endTransition(openButton, "transform");
+      expect(sheet.querySelector("h4")?.textContent).toBe("🇨🇦 Canada");
+
+      endTransition(sheet, "transform");
+      expect(sheet).toBeEmptyDOMElement();
+    });
+
+    it("shows the newly chosen row when reopened mid-slide and keeps it", async () => {
+      const app = await renderDone();
+      await app.user.click(rowFor(app.container, "Germany"));
+      const sheet = sheetElement(app.container);
+      vi.useFakeTimers();
+      fireEvent.click(app.container.querySelector(".dB-scrim") ?? sheet);
+
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      fireEvent.click(rowFor(app.container, "Italy"));
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(screen.getByRole("dialog", { name: "🇮🇹 Italy" })).toBe(sheet);
+      expect(sheet).toHaveClass("is-on");
+      expect(sheet).not.toHaveAttribute("aria-hidden");
+    });
   });
 
   describe("focus trap", () => {

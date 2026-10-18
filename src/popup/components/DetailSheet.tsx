@@ -1,19 +1,20 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { MARKETPLACE_BY_CODE, marketDisplayDomain, marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
-import type { ComparisonResult, Money } from "../../shared/types";
-import { deliveredLocalTotal, formatLocal, needsMatchCheck, trustSentence } from "../view-model";
+import type { ComparisonResult, Money, SourceContext } from "../../shared/types";
+import { deliveredLocalTotal, formatLocal, formatVariantTokens, needsMatchCheck, trustSentence } from "../view-model";
 import type { RankedRow } from "../view-model";
 import { OpenButton } from "./OpenButton";
 
 const SHEET_TITLE_ID = "b-sheet-title";
+const CLOSE_FALLBACK_MS = 400;
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface DetailSheetProps {
   row?: RankedRow;
-  sourceTitle?: string;
+  source?: SourceContext;
   destination: string;
   onClose: () => void;
   onOpen: (result: ComparisonResult) => void;
@@ -29,12 +30,13 @@ interface SheetLineProps {
   variant?: "total" | "conv";
 }
 
-function productHost(result: ComparisonResult): string {
-  try {
-    return new URL(result.productUrl ?? "").hostname;
-  } catch {
-    return marketDisplayDomain(result.marketplace);
+function sourceSubtitle(source?: SourceContext): string {
+  if (!source) {
+    return "";
   }
+  return source.variationTokens.length > 0
+    ? `${source.title} — ${formatVariantTokens(source.variationTokens)}`
+    : source.title;
 }
 
 function cycleFocus(sheet: HTMLElement, backwards: boolean): void {
@@ -54,7 +56,7 @@ function SheetLine({ label, value, variant }: SheetLineProps): ReactElement {
   );
 }
 
-function SheetContent({ row, sourceTitle, destination, onClose, onOpen }: SheetContentProps): ReactElement {
+function SheetContent({ row, source, destination, onClose, onOpen }: SheetContentProps): ReactElement {
   const { result } = row;
   const breakdown = result.breakdown;
   const local = (value?: Money): string => (value ? formatLocal(value, result.marketplace) : "—");
@@ -65,7 +67,7 @@ function SheetContent({ row, sourceTitle, destination, onClose, onOpen }: SheetC
       <h4 id={SHEET_TITLE_ID}>
         {MARKETPLACE_BY_CODE[result.marketplace].flag} {marketLabel(result.marketplace)}
       </h4>
-      <p className="sub">{row.isSource ? sourceTitle : productHost(result)}</p>
+      <p className="sub">{row.isSource ? sourceSubtitle(source) : marketDisplayDomain(result.marketplace)}</p>
       <div className="dB-lines">
         <SheetLine label="Item price" value={local(breakdown?.item)} />
         <SheetLine
@@ -81,7 +83,7 @@ function SheetContent({ row, sourceTitle, destination, onClose, onOpen }: SheetC
       </div>
       <div className={`dB-trust${needsMatchCheck(result) ? " warn" : ""}`}>
         <span className="dot" />
-        <span>{trustSentence(result)}</span>
+        <span>{trustSentence(result, row.isSource)}</span>
       </div>
       {row.isSource ? (
         <button type="button" className="dB-cta secondary" id="b-close" onClick={onClose}>
@@ -98,6 +100,30 @@ export function DetailSheet(props: DetailSheetProps): ReactElement {
   const { row, onClose } = props;
   const open = row !== undefined;
   const sheetRef = useRef<HTMLDivElement>(null);
+  const [retained, setRetained] = useState<RankedRow | undefined>(row);
+  if (row && row !== retained) {
+    setRetained(row);
+  }
+  const content = row ?? retained;
+
+  useEffect(() => {
+    if (open || !retained) {
+      return undefined;
+    }
+    const sheet = sheetRef.current;
+    const release = (): void => setRetained(undefined);
+    const onTransitionEnd = (event: TransitionEvent): void => {
+      if (event.target === sheet && event.propertyName === "transform") {
+        release();
+      }
+    };
+    const timer = setTimeout(release, CLOSE_FALLBACK_MS);
+    sheet?.addEventListener("transitionend", onTransitionEnd);
+    return () => {
+      clearTimeout(timer);
+      sheet?.removeEventListener("transitionend", onTransitionEnd);
+    };
+  }, [open, retained]);
 
   useEffect(() => {
     if (!open) {
@@ -114,6 +140,8 @@ export function DetailSheet(props: DetailSheetProps): ReactElement {
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
         onClose();
       } else if (event.key === "Tab" && sheetRef.current) {
         event.preventDefault();
@@ -134,9 +162,10 @@ export function DetailSheet(props: DetailSheetProps): ReactElement {
         role={open ? "dialog" : undefined}
         aria-modal={open ? true : undefined}
         aria-labelledby={open ? SHEET_TITLE_ID : undefined}
+        aria-hidden={open ? undefined : true}
         tabIndex={open ? -1 : undefined}
       >
-        {row ? <SheetContent {...props} row={row} /> : null}
+        {content ? <SheetContent {...props} row={content} /> : null}
       </div>
     </>
   );
