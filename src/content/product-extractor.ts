@@ -80,7 +80,7 @@ function parseLocalizedNumber(input: string): number | undefined {
 
 type ParsedMoney = { amount: number; currency: string };
 
-const CURRENCY_CODE = String.raw`(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD)(?![A-Za-z])`;
+const CURRENCY_CODE = String.raw`(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD|BRL|CHF|CNY|CZK|DKK|HKD|HUF|IDR|ILS|INR|ISK|KRW|MYR|NOK|NZD|PHP|PLN|RON|SEK|SGD|THB|TRY|ZAR)(?![A-Za-z])`;
 const CURRENCY_CODE_TOKEN = new RegExp(CURRENCY_CODE);
 const DOLLAR_CURRENCIES = new Set(["USD", "CAD", "MXN", "AUD"]);
 

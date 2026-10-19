@@ -103,6 +103,25 @@ describe("product extractor currency detection", () => {
     expect(result.breakdown?.shipping).toEqual({ amount: 4.5, currency: "EUR" });
   });
 
+  it.each([
+    { item: "CHF78.27", market: "DE", amount: 78.27, currency: "CHF" },
+    { item: "CHF 12.90", market: "DE", amount: 12.9, currency: "CHF" },
+    { item: "INR 1,299.00", market: "UK", amount: 1299, currency: "INR" }
+  ] as const)("reads $item shown for a foreign delivery address on $market as $currency", ({ item, market, amount, currency }) => {
+    expect(extractPriced(market, item).breakdown?.item).toEqual({ amount, currency });
+  });
+
+  it("reads a Swiss franc delivery charge written as plain text with a non-breaking space", () => {
+    const result = extractPriced(
+      "DE",
+      "CHF78.27",
+      '<div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"><span> CHF&nbsp;41.36 delivery <span class="a-text-bold">Monday, 9 November</span></span></div>'
+    );
+
+    expect(result.breakdown?.item).toEqual({ amount: 78.27, currency: "CHF" });
+    expect(result.breakdown?.shipping).toEqual({ amount: 41.36, currency: "CHF" });
+  });
+
   it("reads an amount without any currency marker in the marketplace currency", () => {
     const result = extractPriced("JP", "4200", '<div id="deliveryBlockMessage">配達料 <span class="a-color-price">500</span></div>');
 

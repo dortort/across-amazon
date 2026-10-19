@@ -42,7 +42,8 @@ const MARKET_DEFAULT_CURRENCY: Record<SearchExtractionRequest["marketplace"], st
   AU: "AUD"
 };
 
-const CURRENCY_CODE_TOKEN = /(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD)(?![A-Za-z])/;
+const CURRENCY_CODE_TOKEN =
+  /(?<![A-Za-z])(?:USD|CAD|MXN|GBP|EUR|JPY|AUD|BRL|CHF|CNY|CZK|DKK|HKD|HUF|IDR|ILS|INR|ISK|KRW|MYR|NOK|NZD|PHP|PLN|RON|SEK|SGD|THB|TRY|ZAR)(?![A-Za-z])/;
 const DOLLAR_CURRENCIES = new Set(["USD", "CAD", "MXN", "AUD"]);
 
 function detectCurrency(text: string, marketCurrency: string): string {

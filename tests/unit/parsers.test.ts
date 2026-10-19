@@ -159,6 +159,14 @@ describe("content parsers", () => {
       expect(candidatePrice(market, price)).toEqual({ amount, currency });
     });
 
+    it.each([
+      { price: "CHF 733.45", market: "DE", amount: 733.45, currency: "CHF" },
+      { price: "CHF 698.48", market: "UK", amount: 698.48, currency: "CHF" },
+      { price: "CHF 21.50", market: "FR", amount: 21.5, currency: "CHF" }
+    ] as const)("reads $price on $market in the currency it names", ({ price, market, amount, currency }) => {
+      expect(candidatePrice(market, price)).toEqual({ amount, currency });
+    });
+
     it("keeps a dollar sign on a non-dollar marketplace as US dollars", () => {
       expect(candidatePrice("UK", "$12.00")).toEqual({ amount: 12, currency: "USD" });
     });
