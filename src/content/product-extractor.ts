@@ -138,16 +138,22 @@ function parseCurrencyMarkedMoney(text: string, marketCurrency: string): ParsedM
   return token ? parseMoney(token, marketCurrency) : undefined;
 }
 
-function resolveDestinationCountryCode(documentRef: Document): string | undefined {
-  const locationText = [
-    documentRef.querySelector("#glow-ingress-line2")?.textContent,
-    documentRef.querySelector("#glow-ingress-line1")?.textContent,
-    documentRef.querySelector("#contextualIngressPtLabel")?.textContent,
-    documentRef.querySelector("#delivery-block-message")?.textContent,
-    documentRef.querySelector("#deliveryBlockMessage")?.textContent
-  ]
+const DELIVER_TO_SELECTORS = ["#glow-ingress-line2", "#glow-ingress-line1", "#contextualIngressPtLabel"];
+const DELIVERY_MESSAGE_SELECTORS = ["#delivery-block-message", "#deliveryBlockMessage"];
+
+function readTexts(documentRef: Document, selectors: string[]): string {
+  return selectors
+    .map((selector) => documentRef.querySelector(selector)?.textContent)
     .filter(Boolean)
     .join(" ");
+}
+
+function resolveDestinationCountryCode(
+  documentRef: Document,
+  marketplace: ProductExtractionRequest["marketplace"]
+): string | undefined {
+  const deliverToText = readTexts(documentRef, DELIVER_TO_SELECTORS);
+  const locationText = [deliverToText, readTexts(documentRef, DELIVERY_MESSAGE_SELECTORS)].filter(Boolean).join(" ");
 
   if (!locationText) {
     return undefined;
@@ -160,7 +166,7 @@ function resolveDestinationCountryCode(documentRef: Document): string | undefine
     }
   }
 
-  return undefined;
+  return /\d/.test(deliverToText) ? marketplace : undefined;
 }
 
 function findPriceText(documentRef: Document): string | undefined {
@@ -395,7 +401,7 @@ export function extractProductData(
 
   const currency = itemPrice?.currency ?? shippingAmount?.currency ?? importAmount?.currency ?? marketCurrency;
 
-  const destinationDetected = resolveDestinationCountryCode(documentRef);
+  const destinationDetected = resolveDestinationCountryCode(documentRef, request.marketplace);
   const destinationMatched = !destinationDetected || destinationDetected === request.sourceDestinationCountryCode;
 
   if (!destinationMatched) {

@@ -956,6 +956,37 @@ describe("background orchestrator", () => {
     });
   });
 
+  describe("delivery address", () => {
+    it("reports a market whose page quotes delivery to an address in its own country as not shipping to the source's", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (group, market, document) => {
+          const line = document.querySelector("#glow-ingress-line2");
+          if (group === "product" && market === "DE" && line) {
+            line.textContent = "Delivering to Berlin 10115";
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "DESTINATION_MISMATCH",
+          confidence: 0.9,
+          productUrl: "https://www.amazon.de/dp/B000000005",
+          notes: [
+            "Matched by search",
+            "Match confidence: HIGH",
+            "Destination mismatch detected (DE)",
+            "Destination on product page does not match source destination"
+          ]
+        }
+      ]);
+    });
+  });
+
   describe("variant check", () => {
     const BLUE_VARIANT_ASIN = "B0000000B5";
     const RED_LISTING_URL = "https://www.amazon.de/dp/B000000005";

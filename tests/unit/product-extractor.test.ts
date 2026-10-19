@@ -368,6 +368,47 @@ describe("product extractor on pages for a delivery address in Switzerland", () 
   });
 });
 
+describe("product extractor delivery address", () => {
+  function deliveringTo(blocks: string): ProductExtractionResult {
+    const dom = new JSDOM(
+      `<!doctype html><html><body><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">$498.00</span></span></div>${blocks}</body></html>`,
+      { url: "https://www.amazon.ca/dp/B09XS7JWHH" }
+    );
+    return extractProductData(dom.window.document, { marketplace: "CA", sourceDestinationCountryCode: "US" }, dom.window.location.href);
+  }
+
+  it("reads an address given as a town and postcode as one in the marketplace's own country", () => {
+    const result = deliveringTo(
+      '<span id="glow-ingress-line1">Delivering to Balzac T4B 2T3</span><span id="glow-ingress-line2">Update location</span>' +
+        '<span id="contextualIngressPtLabel">Delivering to Balzac T4B 2T3 – Update location</span>' +
+        '<div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE">FREE delivery Friday, October 23</div>'
+    );
+
+    expect(result.destinationCountryCode).toBe("CA");
+    expect(result.destinationMatched).toBe(false);
+    expect(result.notes).toContain("Destination mismatch detected (CA)");
+  });
+
+  it("leaves a country it does not know unresolved, even beside a dated delivery message", () => {
+    const result = deliveringTo(
+      '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>' +
+        '<div id="deliveryBlockMessage">FREE delivery Friday, October 23</div>'
+    );
+
+    expect(result.destinationCountryCode).toBeUndefined();
+    expect(result.destinationMatched).toBe(true);
+  });
+
+  it("leaves the live amazon.de page for an address in Switzerland unresolved", () => {
+    const html = readFileSync(join(process.cwd(), "tests", "fixtures", "product-live", "DE-ships-to-switzerland.html"), "utf8");
+    const dom = new JSDOM(html, { url: "https://www.amazon.de/dp/B09LCMVB3F" });
+    const result = extractProductData(dom.window.document, { marketplace: "DE", sourceDestinationCountryCode: "US" }, dom.window.location.href);
+
+    expect(result.destinationCountryCode).toBeUndefined();
+    expect(result.destinationMatched).toBe(true);
+  });
+});
+
 describe("product extractor variants", () => {
   it("reads the selected variant and every variant the twister offers", () => {
     const result = extractLive("UK-other-colour.html", "UK");
