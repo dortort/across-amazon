@@ -258,6 +258,41 @@ function readCharge(
   return { amount: parseCurrencyMarkedMoney(blockText, marketCurrency), isFree: false };
 }
 
+interface GlobalCharges {
+  shipping?: ParsedMoney;
+  importFees?: ParsedMoney;
+  total?: ParsedMoney;
+}
+
+function readAmazonGlobalCharges(documentRef: Document, marketCurrency: string): GlobalCharges {
+  const charges: GlobalCharges = {};
+  for (const row of Array.from(documentRef.querySelectorAll("#amazonGlobal_feature_div table.a-lineitem tr"))) {
+    const cells = Array.from(row.querySelectorAll("td"));
+    if (cells.length < 2) {
+      continue;
+    }
+
+    const label = normalize(cells[0].textContent ?? "");
+    const valueText = cells[cells.length - 1].textContent?.trim() ?? "";
+    const amount =
+      parseCurrencyMarkedMoney(valueText, marketCurrency) ??
+      (BARE_AMOUNT.test(valueText) ? parseMoney(valueText, marketCurrency) : undefined);
+    if (!amount) {
+      continue;
+    }
+
+    if (label.includes("import")) {
+      charges.importFees ??= amount;
+    } else if (label.includes("shipping") || label.includes("delivery")) {
+      charges.shipping ??= amount;
+    } else if (label === "total") {
+      charges.total ??= amount;
+    }
+  }
+
+  return charges;
+}
+
 function hasFreeMarker(text: string | undefined): boolean {
   if (!text) {
     return false;
@@ -304,18 +339,18 @@ export function extractProductData(
     }
   }
 
-  const { amount: shippingAmount, isFree: shippingIsFree } = readCharge(
-    documentRef,
-    ["shipping", "delivery", "envio", "livraison", "versand", "配達"],
-    hasFreeMarker,
-    marketCurrency
-  );
-  const { amount: importAmount, isFree: importIsFree } = readCharge(
-    documentRef,
-    ["import fee", "import fees", "deposit", "税", "duty", "aduana"],
-    (text) => hasFreeMarker(text) || normalize(text).includes("no import fee"),
-    marketCurrency
-  );
+  const globalCharges = readAmazonGlobalCharges(documentRef, marketCurrency);
+  const { amount: shippingAmount, isFree: shippingIsFree } = globalCharges.shipping
+    ? { amount: globalCharges.shipping, isFree: false }
+    : readCharge(documentRef, ["shipping", "delivery", "envio", "livraison", "versand", "配達"], hasFreeMarker, marketCurrency);
+  const { amount: importAmount, isFree: importIsFree } = globalCharges.importFees
+    ? { amount: globalCharges.importFees, isFree: false }
+    : readCharge(
+        documentRef,
+        ["import fee", "import fees", "deposit", "税", "duty", "aduana"],
+        (text) => hasFreeMarker(text) || normalize(text).includes("no import fee"),
+        marketCurrency
+      );
 
   const hasShippingInfo = Boolean(shippingAmount || shippingIsFree);
   const hasImportInfo = Boolean(importAmount || importIsFree);
@@ -344,7 +379,7 @@ export function extractProductData(
     documentRef.querySelector("#subtotals-marketplace-table .a-color-price")?.textContent?.trim() ??
     documentRef.querySelector("#atfRedesign_desktop_totalPrice")?.textContent?.trim();
 
-  const totalDisplayed = totalDisplayedText ? parseMoney(totalDisplayedText, marketCurrency) : undefined;
+  const totalDisplayed = totalDisplayedText ? parseMoney(totalDisplayedText, marketCurrency) : globalCharges.total;
 
   const parseConfidence =
     (itemPrice ? 0.5 : 0) +
