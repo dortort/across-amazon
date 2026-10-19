@@ -99,6 +99,18 @@ describe("content parsers", () => {
     }
   });
 
+  it.each(MARKETS)("reads the %s product page ASIN and title", (market) => {
+    const dom = loadFixture("product", market);
+    const result = extractProductData(
+      dom.window.document,
+      { marketplace: market, sourceDestinationCountryCode: market },
+      dom.window.location.href
+    );
+
+    expect(result.asin).toBe(`B0000000${FIXTURE_NUMBER_BY_MARKET[market]}`);
+    expect(result.title).toBe("Acme Ultra Widget Model X100 2 Pack Blue");
+  });
+
   it.each(MARKETS)("reads every %s product charge in the marketplace currency", (market) => {
     const dom = loadFixture("product", market);
     const result = extractProductData(

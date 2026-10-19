@@ -68,6 +68,7 @@ export interface FxTable {
 export interface ProductExtractionResult {
   marketplace: Marketplace;
   asin?: string;
+  title?: string;
   canonicalUrl: string;
   destinationCountryCode?: string;
   destinationMatched: boolean;

@@ -261,6 +261,18 @@ function hasFreeMarker(text: string | undefined): boolean {
   );
 }
 
+const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
+const PRODUCT_PATH_ASIN = /\/(?:dp|gp\/product|clp)\/([A-Z0-9]{10})/i;
+
+function readDocumentAsin(documentRef: Document, canonicalHref?: string): string | undefined {
+  const asinInput = documentRef.querySelector<HTMLInputElement>("#ASIN, input[name='ASIN']")?.value?.trim();
+  if (asinInput && ASIN_PATTERN.test(asinInput)) {
+    return asinInput.toUpperCase();
+  }
+
+  return canonicalHref?.match(PRODUCT_PATH_ASIN)?.[1]?.toUpperCase();
+}
+
 export function extractProductData(
   documentRef: Document,
   request: ProductExtractionRequest,
@@ -305,10 +317,8 @@ export function extractProductData(
     notes.push(`Destination mismatch detected (${destinationDetected})`);
   }
 
-  const canonicalUrl =
-    documentRef.querySelector<HTMLLinkElement>("link[rel='canonical']")?.href ?? pageUrl.split("?")[0] ?? pageUrl;
-
-  const asin = canonicalUrl.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1]?.toUpperCase();
+  const canonicalHref = documentRef.querySelector<HTMLLinkElement>("link[rel='canonical']")?.href;
+  const canonicalUrl = canonicalHref ?? pageUrl.split("?")[0] ?? pageUrl;
 
   const totalDisplayedText =
     documentRef.querySelector("#subtotals-marketplace-table .a-color-price")?.textContent?.trim() ??
@@ -324,7 +334,8 @@ export function extractProductData(
 
   return {
     marketplace: request.marketplace,
-    asin,
+    asin: readDocumentAsin(documentRef, canonicalHref),
+    title: documentRef.querySelector("#productTitle")?.textContent?.replace(/\s+/g, " ").trim() || undefined,
     canonicalUrl,
     destinationCountryCode: destinationDetected,
     destinationMatched,

@@ -267,3 +267,55 @@ describe("product extractor delivery charges", () => {
     });
   });
 });
+
+describe("product extractor identity", () => {
+  function pageAt(url: string, head: string, body: string, marketplace: Marketplace = "US"): ProductExtractionResult {
+    const dom = new JSDOM(`<!doctype html><html><head>${head}</head><body>${body}</body></html>`, { url });
+    return extractProductData(dom.window.document, { marketplace, sourceDestinationCountryCode: marketplace }, dom.window.location.href);
+  }
+
+  it("reads the ASIN from the page's ASIN field ahead of a canonical link to another ASIN", () => {
+    const result = pageAt(
+      "https://www.amazon.de/dp/B09LCMVB3F",
+      '<link rel="canonical" href="https://www.amazon.de/-/en/Anker-100-Cable-Fast-Charging/dp/B0FC6LDVBP" />',
+      '<input type="hidden" id="ASIN" name="ASIN" value="b09lcmvb3f" />',
+      "DE"
+    );
+
+    expect(result.asin).toBe("B09LCMVB3F");
+    expect(result.canonicalUrl).toBe("https://www.amazon.de/-/en/Anker-100-Cable-Fast-Charging/dp/B0FC6LDVBP");
+  });
+
+  it("reads the ASIN from a /clp/ canonical link when the page has no ASIN field", () => {
+    const result = pageAt(
+      "https://www.amazon.com/dp/B09XS7JWHH",
+      '<link rel="canonical" href="https://www.amazon.com/clp/B09XS7JWHH" />',
+      '<span id="productTitle"> Sony WH-1000XM5 Premium Noise Cancelling Wireless Headphones, Black </span>'
+    );
+
+    expect(result).toMatchObject({
+      asin: "B09XS7JWHH",
+      title: "Sony WH-1000XM5 Premium Noise Cancelling Wireless Headphones, Black"
+    });
+  });
+
+  it("collapses the whitespace Amazon leaves inside the product title", () => {
+    const result = pageAt("https://www.amazon.com/dp/B09XS7JWHH", "", '<span id="productTitle">\n   Sony WH-1000XM5\n   Headphones   </span>');
+
+    expect(result.title).toBe("Sony WH-1000XM5 Headphones");
+  });
+
+  it("returns no ASIN and no title for a not-found page served at a product URL", () => {
+    const result = pageAt(
+      "https://www.amazon.co.uk/dp/B09XS7JWHH",
+      "<title>Page Not Found</title>",
+      '<a href="/ref=cs_404_logo"><img alt="Sorry! We couldn\'t find that page. Try searching or go to Amazon\'s home page." /></a>',
+      "UK"
+    );
+
+    expect(result.asin).toBeUndefined();
+    expect(result.title).toBeUndefined();
+    expect(result.breakdown).toBeUndefined();
+    expect(result.canonicalUrl).toBe("https://www.amazon.co.uk/dp/B09XS7JWHH");
+  });
+});
