@@ -658,6 +658,25 @@ describe("source brand and ASIN", () => {
     expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}<a id="bylineInfo">Brand: </a>${brandRow("Brand", "Sony")}`)?.brand).toBe("Sony");
   });
 
+  it("reads the selected variant from the inline twister that replaced the variation widgets", () => {
+    const source = sourceFrom(`${SONY_ASIN}${SONY_TITLE}
+      <div id="inline-twister-row-color_name">
+        <span id="inline-twister-dim-title-color_name">Color: Black</span>
+        <span id="inline-twister-expanded-dimension-text-color_name">Black</span>
+      </div>
+      <div id="inline-twister-row-size_name"><span id="inline-twister-expanded-dimension-text-size_name">16 oz</span></div>`);
+
+    expect(source?.variationTokens).toEqual(["16 oz", "black"]);
+  });
+
+  it("splits a combined twister colour into its colours", () => {
+    const source = sourceFrom(
+      `${SONY_ASIN}${SONY_TITLE}<span id="inline-twister-expanded-dimension-text-color_name">Black/White</span>`
+    );
+
+    expect(source?.variationTokens).toEqual(["black", "white"]);
+  });
+
   it("reads the ASIN from a /clp/ canonical link when neither the URL nor the page carries it", () => {
     const source = sourceFrom(
       SONY_TITLE,

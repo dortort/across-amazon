@@ -78,8 +78,14 @@ function extractVariationTokens(documentRef: Document): string[] {
     "#native_dropdown_selected_color_name"
   ];
 
-  const rawValues = variationSelectors
-    .map((selector) => documentRef.querySelector(selector)?.textContent?.trim() ?? "")
+  const selectedValues = variationSelectors.map((selector) => documentRef.querySelector(selector)?.textContent ?? "");
+  const twisterValues = Array.from(
+    documentRef.querySelectorAll('[id^="inline-twister-expanded-dimension-text-"]'),
+    (element) => element.textContent ?? ""
+  );
+
+  const rawValues = [...selectedValues, ...twisterValues]
+    .map((value) => value.trim())
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -88,7 +94,7 @@ function extractVariationTokens(documentRef: Document): string[] {
   const countMatches = rawValues.match(/\b\d+\s?(?:pack|count|ct|pcs|piece|pieces|pk)\b/g) ?? [];
   const sizeMatches = rawValues.match(/\b\d+(?:\.\d+)?\s?(?:oz|ml|l|kg|g|cm|mm|in)\b/g) ?? [];
   const colorMatches = rawValues
-    .split(/\s+/)
+    .split(/[\s/,]+/)
     .filter((token) => ["black", "white", "blue", "red", "green", "silver", "gold", "pink"].includes(token));
 
   return [...new Set([...modelMatches, ...countMatches, ...sizeMatches, ...colorMatches])];
