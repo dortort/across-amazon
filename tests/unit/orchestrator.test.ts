@@ -43,6 +43,7 @@ const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
       <Cube currency='CAD' rate='1.475'/>
       <Cube currency='AUD' rate='1.655'/>
       <Cube currency='MXN' rate='19.46'/>
+      <Cube currency='CHF' rate='0.94'/>
     </Cube>
   </Cube>
 </gesmes:Envelope>`;
@@ -50,7 +51,7 @@ const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
 const EXPECTED_FX_TABLE: FxTable = {
   base: "EUR",
   date: "2026-10-16",
-  rates: { EUR: 1, USD: 1.08, JPY: 155.52, GBP: 0.852, CAD: 1.475, AUD: 1.655, MXN: 19.46 },
+  rates: { EUR: 1, USD: 1.08, JPY: 155.52, GBP: 0.852, CAD: 1.475, AUD: 1.655, MXN: 19.46, CHF: 0.94 },
   source: "ECB"
 };
 
@@ -984,6 +985,98 @@ describe("background orchestrator", () => {
           ]
         }
       ]);
+    });
+  });
+
+  describe("pages that quote no import fees", () => {
+    it("quotes item and shipping when the page shows delivery but no import fees", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "DE") {
+            removeElement(document, "#exports_desktop_feature_div");
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          ...EXPECTED_DE_RESULT,
+          confidence: 0.88,
+          breakdown: {
+            item: { amount: 37.2, currency: "EUR" },
+            shipping: { amount: 4.5, currency: "EUR" },
+            totalDisplayed: { amount: 37.2, currency: "EUR" }
+          },
+          notes: ["Matched by search", "Match confidence: HIGH", "Import fees not displayed for destination"],
+          normalizedTotal: { amount: 45.04, currency: "USD" }
+        }
+      ]);
+    });
+
+    it("quotes the live amazon.de page of a cable that ships to an address in Switzerland", async () => {
+      const liveHtml = readFileSync(join(FIXTURE_ROOT, "product-live", "DE-ships-to-switzerland.html"), "utf8");
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "DE") {
+            for (const selector of [
+              "#glow-ingress-line2",
+              "#corePriceDisplay_desktop_feature_div",
+              "#deliveryBlockMessage",
+              "#exports_desktop_feature_div",
+              "#subtotals-marketplace-table"
+            ]) {
+              removeElement(document, selector);
+            }
+            document.body.insertAdjacentHTML("beforeend", new JSDOM(liveHtml).window.document.body.innerHTML);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "OK",
+          confidence: 0.88,
+          productUrl: "https://www.amazon.de/dp/B000000005",
+          breakdown: { item: { amount: 78.27, currency: "CHF" }, shipping: { amount: 41.36, currency: "CHF" } },
+          notes: ["Matched by search", "Match confidence: HIGH", "Import fees not displayed for destination"],
+          normalizedTotal: { amount: 137.45, currency: "USD" }
+        }
+      ]);
+    });
+
+    it("still reports a page that quotes no shipping as not quotable", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "DE") {
+            removeElement(document, "#deliveryBlockMessage");
+            removeElement(document, "#exports_desktop_feature_div");
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toMatchObject([
+        {
+          marketplace: "DE",
+          status: "UNAVAILABLE",
+          notes: [
+            "Matched by search",
+            "Match confidence: HIGH",
+            "Shipping not displayed for destination",
+            "Import fees not displayed for destination"
+          ]
+        }
+      ]);
+      expect(payload.results[0]).not.toHaveProperty("normalizedTotal");
     });
   });
 

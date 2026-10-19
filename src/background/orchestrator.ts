@@ -386,7 +386,7 @@ function buildProductResult(
     };
   }
 
-  if (!productData.breakdown || !productData.hasShippingInfo || !productData.hasImportInfo) {
+  if (!productData.breakdown || !productData.hasShippingInfo) {
     return {
       marketplace: targetMarket,
       status: "UNAVAILABLE",
