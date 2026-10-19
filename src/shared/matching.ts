@@ -194,6 +194,38 @@ function isSameModel(left: ModelNumber, right: ModelNumber): boolean {
   );
 }
 
+const MODEL_TITLE_FLOOR = 0.7;
+const MIN_DISTINCTIVE_MODEL_LENGTH = 5;
+const MEASUREMENT = /^\d+[a-z]+$/;
+const BUNDLE_MARKER = /\s[+&]\s|\bbundle\b/i;
+
+function isDistinctiveModel(model: ModelNumber): boolean {
+  const letters = model.whole.match(/[a-z]/g)?.length ?? 0;
+  const digits = model.whole.match(/\d/g)?.length ?? 0;
+  return (
+    model.whole.length >= MIN_DISTINCTIVE_MODEL_LENGTH && letters >= 2 && digits >= 2 && !MEASUREMENT.test(model.whole)
+  );
+}
+
+function sharesDistinctiveModel(sourceTitle: string, candidateTitle: string): boolean {
+  const sourceModels = readModelNumbers(sourceTitle).filter(isDistinctiveModel);
+  const candidateModels = readModelNumbers(candidateTitle).filter(isDistinctiveModel);
+  return (
+    candidateModels.length > 0 &&
+    candidateModels.every((candidate) => sourceModels.some((source) => isSameModel(source, candidate)))
+  );
+}
+
+function isSameBrandAndModel(source: SourceContext, candidate: SearchCandidate): boolean {
+  const brand = normalizeBrand(source.brand);
+  return (
+    brand !== "" &&
+    brand === normalizeBrand(candidate.brand) &&
+    !BUNDLE_MARKER.test(candidate.title) &&
+    sharesDistinctiveModel(source.title, candidate.title)
+  );
+}
+
 function hasModelConflict(sourceTitle: string, candidateTitle: string): boolean {
   const sourceModels = readModelNumbers(sourceTitle);
   const candidateModels = readModelNumbers(candidateTitle);
@@ -248,7 +280,11 @@ export function computeMatchScore(source: SourceContext, candidate: SearchCandid
   const sourceAttributes = sourceAttributeTokens(source);
   const candidateAttributes = extractAttributeTokens(candidate.title);
 
-  const titleScore = jaccardSimilarity(sourceTitleTokens, candidateTitleTokens);
+  const titleSimilarity = jaccardSimilarity(sourceTitleTokens, candidateTitleTokens);
+  const titleScore =
+    isSameBrandAndModel(source, candidate) && !attributesConflict(sourceAttributes, candidateAttributes)
+      ? Math.max(titleSimilarity, MODEL_TITLE_FLOOR)
+      : titleSimilarity;
   const brandScore = brandSimilarity(source.brand, candidate.brand, candidate.title);
   const variationScore = variationSimilarity(sourceAttributes, candidateAttributes);
 

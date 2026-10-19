@@ -304,12 +304,91 @@ describe("matching the current amazon search results", () => {
     });
   });
 
-  it.each(["DE", "FR", "JP"] as const)(
+  it.each(["DE", "FR"] as const)(
     "picks nothing on %s, where only other models, bundles and accessories are listed",
     (market) => {
       expect(pickBestCandidate(SONY_SOURCE, liveCandidates(market))).toBeUndefined();
     }
   );
+
+  it("picks the WH-1000XM5 card on JP by its brand and model number, although its title shares few words with the source", () => {
+    expect(pickBestCandidate(SONY_SOURCE, liveCandidates("JP"))).toMatchObject({
+      candidate: { asin: "B0DGKYNLWF" },
+      score: { total: 0.8071, titleScore: 0.7, confidenceLabel: "MEDIUM" }
+    });
+  });
+
+  it("keeps the WH-1000XM5 bundles with a SanDisk drive on UK below the plain headphones", () => {
+    const scores = liveCandidates("UK").map((candidate) => [candidate.asin, computeMatchScore(SONY_SOURCE, candidate).total]);
+
+    expect(scores).toEqual([
+      ["B09Y2LL45F", 0.8571],
+      ["B0BNNKXS18", 0.4212],
+      ["B0CRF2V57G", 0.655]
+    ]);
+  });
+});
+
+describe("a shared brand and model number", () => {
+  const BLACK_SONY: SourceContext = { ...SONY_SOURCE, variationTokens: ["black"] };
+  const sonyCard = (asin: string, title: string, brand = "Sony"): SearchCandidate =>
+    listing({ marketplace: "IT", asin, title, brand, url: `https://www.amazon.it/dp/${asin}` });
+  const ITALIAN_CARDS = [
+    sonyCard("B09Y2MYL5C", "WH-1000XM5 Premium Bluetooth Headphones with Noise Cancelling"),
+    sonyCard("B0BXM22X99", "WH-1000XM5 Premium Bluetooth Headphones with Noise Cancelling"),
+    sonyCard("B09Y2LL45F", "WH-1000XM5 Premium Bluetooth Headphones with Noise Cancelling"),
+    sonyCard("B0C4TLFZSZ", "WF-1000XM5 Premium Wireless Earphones with Noise Cancelling"),
+    sonyCard("B0F2TSQL21", "WH-1000XM6 Premium Bluetooth Headphones with Noise Cancelling"),
+    sonyCard("B0CX1TJXKV", "ULT WEAR Bluetooth Headphones with Noise Cancelling and Deep Bass")
+  ];
+
+  it("lifts the title score of a card with the source brand and model number to 0.7, as amazon.it lists the WH-1000XM5", () => {
+    expect(computeMatchScore(BLACK_SONY, ITALIAN_CARDS[0])).toEqual({
+      total: 0.8071,
+      titleScore: 0.7,
+      brandScore: 1,
+      variationScore: 0,
+      confidenceLabel: "MEDIUM"
+    });
+    expect(pickBestCandidate(BLACK_SONY, ITALIAN_CARDS)).toMatchObject({ candidate: { asin: "B09Y2MYL5C" } });
+  });
+
+  it("keeps a title that already scores above 0.7 as it is", () => {
+    expect(computeMatchScore(BLACK_SONY, sonyCard("B0BXM22X99", "WH-1000XM5 Premium Wireless Noise Cancelling Headphones")).titleScore).toBe(
+      7 / 9
+    );
+  });
+
+  it.each([
+    [
+      "has no brand of its own",
+      { ...sonyCard("B0H8N7F34T", "Replacement Hinge Repair Kit for Sony WH-1000XM5 Headphones (Black)"), brand: undefined }
+    ],
+    ["has another brand", sonyCard("B0BPM7F4S3", "Ear Pads for Sony WH-1000XM5 Replacement Ear Cushions - Black", "SOULWIT")],
+    [
+      "is a bundle",
+      sonyCard("B0CRF2V57G", "WH-1000XM5 Wireless Headphones - Black & SanDisk Extreme Portable SSD 2TB up to 550MB/s read")
+    ],
+    ["is a bundle named as one", sonyCard("B0FMXS12CR", "Bundle Deal: Sony WH-1000XM5 Black Wireless Headphones with Stand")],
+    ["names another colour", sonyCard("B09Y2LL45F", "WH-1000XM5 Wireless Headphones, Silver")],
+    ["names a second model number", sonyCard("B0C4TLFZSZ", "WH-1000XM5 Wireless Headphones and WF-1000XM5 Earbuds, Black")]
+  ])("does not lift a card that %s", (_case, card) => {
+    expect(computeMatchScore(BLACK_SONY, card).total).toBeLessThan(0.78);
+  });
+
+  it("does not lift a card for a source page without a brand", () => {
+    expect(computeMatchScore({ ...BLACK_SONY, brand: undefined }, ITALIAN_CARDS[0]).total).toBeLessThan(0.78);
+  });
+
+  it.each([
+    ["a short model number", "Acme Ultra Widget Model X100 2 Pack Blue", "X100 Garden Hose Reel Wall Mounted Blue"],
+    ["a capacity", "Acme Portable SSD 128GB Blue", "Acme 128GB Memory Card Blue"],
+    ["a single letter and digits", "Acme Ultra Widget A2337 Blue", "A2337 Garden Hose Reel Wall Mounted Blue"]
+  ])("does not treat %s as a model number", (_case, sourceTitle, cardTitle) => {
+    const source: SourceContext = { ...ACME_SOURCE, title: sourceTitle, variationTokens: [] };
+
+    expect(computeMatchScore(source, listing({ title: cardTitle, brand: "Acme" })).titleScore).toBeLessThan(0.7);
+  });
 });
 
 describe("variant check", () => {
