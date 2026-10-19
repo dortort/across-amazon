@@ -115,6 +115,24 @@ export function confidenceLabel(score: number): "HIGH" | "MEDIUM" | "LOW" {
   return "LOW";
 }
 
+export function normalizeAsin(asin?: string): string {
+  return asin?.trim().toUpperCase() ?? "";
+}
+
+export function sharesSourceAsin(
+  source: SourceContext,
+  listing: { marketplace: Marketplace; asin?: string; title?: string }
+): boolean {
+  const asin = normalizeAsin(listing.asin);
+  if (!asin || asin !== normalizeAsin(source.asin) || !listing.title) {
+    return false;
+  }
+
+  const sourceTitleTokens = tokenizeTitle(source.title, source.marketplace);
+  const listingTitleTokens = tokenizeTitle(listing.title, listing.marketplace);
+  return jaccardSimilarity(sourceTitleTokens, listingTitleTokens) > 0;
+}
+
 export function computeMatchScore(source: SourceContext, candidate: SearchCandidate): MatchScore {
   const sourceTitleTokens = tokenizeTitle(source.title, source.marketplace);
   const candidateTitleTokens = tokenizeTitle(candidate.title, candidate.marketplace);
@@ -124,6 +142,10 @@ export function computeMatchScore(source: SourceContext, candidate: SearchCandid
   const titleScore = jaccardSimilarity(sourceTitleTokens, candidateTitleTokens);
   const brandScore = brandSimilarity(source.brand, candidate.brand);
   const variationScore = variationSimilarity(sourceVariation, candidateVariation);
+
+  if (sharesSourceAsin(source, candidate)) {
+    return { total: 1, titleScore, brandScore, variationScore, confidenceLabel: "HIGH" };
+  }
 
   const total =
     Number((titleScore * TITLE_WEIGHT + brandScore * BRAND_WEIGHT + variationScore * VARIATION_WEIGHT).toFixed(4));
@@ -141,12 +163,19 @@ export function pickBestCandidate(
   source: SourceContext,
   candidates: SearchCandidate[]
 ): { candidate: SearchCandidate; score: MatchScore } | undefined {
+  const sourceAsin = normalizeAsin(source.asin);
+  const carriesSourceAsin = (candidate: SearchCandidate): number =>
+    sourceAsin && normalizeAsin(candidate.asin) === sourceAsin ? 1 : 0;
+
   const scored = candidates
     .map((candidate) => ({
       candidate,
       score: computeMatchScore(source, candidate)
     }))
-    .sort((left, right) => right.score.total - left.score.total);
+    .sort(
+      (left, right) =>
+        right.score.total - left.score.total || carriesSourceAsin(right.candidate) - carriesSourceAsin(left.candidate)
+    );
 
   const best = scored[0];
   if (!best || best.score.total < MATCH_THRESHOLD) {
