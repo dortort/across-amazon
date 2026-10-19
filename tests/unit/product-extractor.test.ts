@@ -555,6 +555,109 @@ describe("product extractor pages without a price", () => {
   });
 });
 
+describe("product extractor listing availability", () => {
+  function unpriced(body: string): ProductExtractionResult {
+    const dom = new JSDOM(`<!doctype html><html><body><span id="productTitle">Sony WH-1000XM5</span>${body}</body></html>`, {
+      url: "https://www.amazon.de/dp/B09XS7JWHH"
+    });
+    return extractProductData(dom.window.document, { marketplace: "DE", sourceDestinationCountryCode: "DE" }, dom.window.location.href);
+  }
+
+  function availabilityMessage(text: string): string {
+    return `<div id="availability"><span class="a-size-medium a-color-base primary-availability-message"> ${text} </span></div>`;
+  }
+
+  it("reports the live amazon.de page of a dead listing as unavailable", () => {
+    const result = extractLive("DE-currently-unavailable.html", "DE");
+
+    expect(result).toMatchObject({
+      asin: "B09XS7JWHH",
+      title: "Sony WH-1000XM5 Wireless Industry Leading",
+      availability: "unavailable",
+      breakdown: undefined
+    });
+    expect(result.notes).toEqual([
+      "Price not displayed for destination",
+      "Amazon says: Currently unavailable.",
+      "Shipping not displayed for destination",
+      "Import fees not displayed for destination"
+    ]);
+  });
+
+  it.each([
+    ["US-cannot-ship-to-switzerland.html", "US"],
+    ["UK-other-colour.html", "UK"]
+  ] as const)("reports the live page %s that cannot reach the address as undeliverable", (file, market) => {
+    expect(extractLive(file, market).availability).toBe("undeliverable");
+  });
+
+  it.each([
+    ["US-ships-to-switzerland.html", "US"],
+    ["DE-ships-to-switzerland.html", "DE"]
+  ] as const)("reports the priced live page %s as available", (file, market) => {
+    expect(extractLive(file, market).availability).toBe("available");
+  });
+
+  it("reports a priced page as available", () => {
+    expect(extract("").availability).toBe("available");
+  });
+
+  it.each([
+    ["English", "Currently unavailable."],
+    ["German", "Derzeit nicht verfügbar."],
+    ["French", "Actuellement indisponible."],
+    ["Italian", "Attualmente non disponibile."],
+    ["Spanish", "No disponible por el momento."],
+    ["Japanese", "現在在庫切れです。"]
+  ])("reads the %s notice %s as unavailable", (_language, text) => {
+    expect(unpriced(availabilityMessage(text)).availability).toBe("unavailable");
+  });
+
+  it("reads an out-of-stock box in the buy box as unavailable", () => {
+    const result = unpriced(
+      '<div id="outOfStock" class="a-box"><span class="a-color-base a-text-bold">在庫切れ</span><br>入荷時期は未定です。</div>'
+    );
+
+    expect(result.availability).toBe("unavailable");
+  });
+
+  it.each([
+    ["English", "This item cannot be shipped to your selected delivery location. Please choose a different delivery location."],
+    ["British English", "This item cannot be dispatched to your selected delivery location. Please choose a different delivery location."],
+    ["German", "Dieser Artikel kann nicht an den ausgewählten Lieferort versendet werden."],
+    ["French", "Cet article ne peut pas être expédié à l'adresse de livraison sélectionnée."],
+    ["Italian", "Questo articolo non può essere spedito all'indirizzo di consegna selezionato."],
+    ["Spanish", "Este producto no se puede enviar a la dirección de entrega seleccionada."],
+    ["Japanese", "この商品は、選択したお届け先に発送できません。"]
+  ])("reads the %s notice %s as undeliverable", (_language, text) => {
+    expect(unpriced(availabilityMessage(text)).availability).toBe("undeliverable");
+  });
+
+  it("leaves a page without a price whose notice it does not recognise unknown", () => {
+    expect(unpriced(availabilityMessage("Usually dispatched within 1 to 2 months.")).availability).toBe("unknown");
+  });
+
+  it("leaves a page without a price but with a way to buy unknown", () => {
+    expect(unpriced('<input id="add-to-cart-button" type="submit" value="Add to basket">').availability).toBe("unknown");
+    expect(unpriced('<span id="buybox-see-all-buying-choices"><a href="/gp/offer-listing/B09XS7JWHH">See All Buying Options</a></span>').availability).toBe(
+      "unknown"
+    );
+  });
+
+  it("reports a page with no price, no notice and no way to buy as unavailable", () => {
+    expect(unpriced("").availability).toBe("unavailable");
+    expect(unpriced('<div id="buybox"><form id="addToCart"></form></div>').availability).toBe("unavailable");
+  });
+
+  it("does not read the script Amazon keeps in the availability block as a notice", () => {
+    const result = unpriced(
+      '<div id="availability"><script>var notice = "This item cannot be shipped to your selected delivery location";</script>In stock</div>'
+    );
+
+    expect(result.availability).toBe("unknown");
+  });
+});
+
 describe("product extractor AmazonGlobal details", () => {
   function globalDetails(rows: Array<[string, string]>): string {
     const cells = rows

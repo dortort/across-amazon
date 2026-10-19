@@ -71,6 +71,8 @@ export interface VariantOption {
   label: string;
 }
 
+export type ListingAvailability = "available" | "unavailable" | "undeliverable" | "unknown";
+
 export interface ProductExtractionResult {
   marketplace: Marketplace;
   asin?: string;
@@ -83,6 +85,7 @@ export interface ProductExtractionResult {
   hasShippingInfo: boolean;
   hasImportInfo: boolean;
   isDeliverable: boolean;
+  availability: ListingAvailability;
   parseConfidence: number;
   breakdown?: PriceBreakdown;
   notes: string[];

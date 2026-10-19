@@ -1,4 +1,4 @@
-import type { ProductExtractionRequest, ProductExtractionResult, VariantOption } from "../shared/types";
+import type { ListingAvailability, ProductExtractionRequest, ProductExtractionResult, VariantOption } from "../shared/types";
 
 interface CountryAlias {
   code: string;
@@ -218,6 +218,56 @@ function readAvailabilityMessage(documentRef: Document): string | undefined {
   }
 
   return undefined;
+}
+
+const UNDELIVERABLE_NOTICES = [
+  "cannot be shipped to your selected delivery location",
+  "cannot be dispatched to your selected delivery location",
+  "kann nicht an den ausgewählten Lieferort",
+  "ne peut pas être expédié",
+  "non può essere spedito",
+  "no se puede enviar",
+  "お届け先に発送できません"
+].map(normalize);
+
+const UNAVAILABLE_NOTICES = [
+  "currently unavailable",
+  "derzeit nicht verfügbar",
+  "actuellement indisponible",
+  "non disponibile",
+  "no disponible por el momento",
+  "在庫切れ"
+].map(normalize);
+
+const AVAILABILITY_BLOCK_SELECTORS = ["#availability", "#outOfStock"];
+const OFFER_SELECTORS = ["#add-to-cart-button", "#buy-now-button", "#buybox-see-all-buying-choices"];
+
+function readBlockText(documentRef: Document, selector: string): string {
+  const element = documentRef.querySelector(selector);
+  if (!element) {
+    return "";
+  }
+
+  const copy = element.cloneNode(true) as Element;
+  copy.querySelectorAll("script, style").forEach((node) => node.remove());
+  return copy.textContent ?? "";
+}
+
+function readAvailability(documentRef: Document, priced: boolean): ListingAvailability {
+  if (priced) {
+    return "available";
+  }
+
+  const notice = normalize(AVAILABILITY_BLOCK_SELECTORS.map((selector) => readBlockText(documentRef, selector)).join(" "));
+  if (UNDELIVERABLE_NOTICES.some((text) => notice.includes(text))) {
+    return "undeliverable";
+  }
+  if (UNAVAILABLE_NOTICES.some((text) => notice.includes(text))) {
+    return "unavailable";
+  }
+
+  const offered = OFFER_SELECTORS.some((selector) => documentRef.querySelector(selector));
+  return notice || offered ? "unknown" : "unavailable";
 }
 
 const CHARGE_BLOCK_SELECTORS = [
@@ -455,6 +505,7 @@ export function extractProductData(
     hasShippingInfo,
     hasImportInfo,
     isDeliverable: Boolean(itemPrice) && destinationMatched,
+    availability: readAvailability(documentRef, Boolean(itemPrice)),
     parseConfidence: Number(parseConfidence.toFixed(2)),
     breakdown: itemPrice
       ? {
