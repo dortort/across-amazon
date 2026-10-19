@@ -493,12 +493,13 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-function cacheKeyFor(targetMarkets: Marketplace[]): string {
+function cacheKeyFor(targetMarkets: Marketplace[], deliverTo = EXPECTED_SOURCE.deliverTo): string {
   return buildComparisonCacheKey({
     asin: EXPECTED_SOURCE.asin,
     variationTokens: EXPECTED_SOURCE.variationTokens,
     sourceMarketplace: "US",
     destinationCountryCode: "US",
+    deliverTo,
     targetMarkets
   });
 }
@@ -1238,7 +1239,8 @@ describe("background orchestrator", () => {
 
     it.each([
       ["the unversioned key of the first builds", undefined],
-      ["the key of version 2, before variant checks and import-free quotes", 2]
+      ["the key of version 2, before variant checks and import-free quotes", 2],
+      ["the key of version 3, before model-number matching and the delivery address", 3]
     ])("ignores a comparison cached under %s", async (_key, version) => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
       const staleKey = earlierCacheKeyFor(["DE"], version);
@@ -1256,6 +1258,22 @@ describe("background orchestrator", () => {
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
       expect(harness.tabsCreate).toHaveBeenCalled();
       expect(harness.storage[cacheKeyFor(["DE"])]).toMatchObject({ results: [EXPECTED_DE_RESULT] });
+    });
+
+    it("ignores a comparison cached for another delivery address with the same destination country", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+      const otherAddress = cacheKeyFor(["DE"], "Deliver to Switzerland");
+      harness.storage[otherAddress] = {
+        createdAt: new Date().toISOString(),
+        source: { ...EXPECTED_SOURCE, deliverTo: "Deliver to Switzerland" },
+        results: [{ marketplace: "DE", status: "UNAVAILABLE", confidence: 0.82, notes: ["Price not displayed for destination"] }]
+      };
+
+      const payload = await runViaWorker(harness);
+
+      expect(otherAddress).not.toBe(cacheKeyFor(["DE"]));
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.tabsCreate).toHaveBeenCalled();
     });
 
     it("tolerates cache records written before baseline and FX were stored", async () => {

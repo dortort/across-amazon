@@ -520,6 +520,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       variationTokens: source.variationTokens,
       sourceMarketplace: source.marketplace,
       destinationCountryCode: source.destinationCountryCode,
+      deliverTo: source.deliverTo,
       targetMarkets
     });
 

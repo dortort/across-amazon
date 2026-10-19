@@ -2,7 +2,7 @@ import { MARKETPLACE_CODES } from "./markets";
 import type { CachedComparisonRecord, ExtensionSettings, Marketplace } from "./types";
 
 const SETTINGS_KEY = "settings:v1";
-const COMPARISON_CACHE_VERSION = 3;
+const COMPARISON_CACHE_VERSION = 4;
 
 const DEFAULT_SETTINGS: ExtensionSettings = {
   enabledMarketplaces: [...MARKETPLACE_CODES],
@@ -51,6 +51,7 @@ export function buildComparisonCacheKey(input: {
   variationTokens: string[];
   sourceMarketplace: Marketplace;
   destinationCountryCode: string;
+  deliverTo?: string;
   targetMarkets: Marketplace[];
 }): string {
   const value = [
@@ -59,6 +60,7 @@ export function buildComparisonCacheKey(input: {
     [...input.variationTokens].sort().join("|"),
     input.sourceMarketplace,
     input.destinationCountryCode,
+    (input.deliverTo ?? "").replace(/\s+/g, " ").trim().toLowerCase(),
     [...input.targetMarkets].sort().join("|")
   ].join("::");
 
