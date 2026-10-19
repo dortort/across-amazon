@@ -132,6 +132,86 @@ describe("product extractor currency detection", () => {
   });
 });
 
+describe("product extractor item price", () => {
+  function itemPrice(body: string, marketplace: Marketplace = "US"): ProductExtractionResult["breakdown"] {
+    const host = HOST_BY_MARKET[marketplace] ?? "www.amazon.com";
+    const dom = new JSDOM(`<!doctype html><html><body>${body}</body></html>`, { url: `https://${host}/dp/B000000001` });
+    return extractProductData(dom.window.document, { marketplace, sourceDestinationCountryCode: marketplace }, dom.window.location.href).breakdown;
+  }
+
+  function priceToPay(symbol: string, whole: string, fraction?: string): string {
+    const fractionPart = fraction === undefined ? "" : `<span class="a-price-decimal">.</span></span><span class="a-price-fraction">${fraction}</span>`;
+    return `<span class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay apex-pricetopay-value"><span class="a-offscreen"> </span><span><span class="a-price-symbol">${symbol}</span><span class="a-price-whole">${whole}${fraction === undefined ? "</span>" : fractionPart}</span></span>`;
+  }
+
+  const PER_UNIT = '<span class="a-size-mini a-color-base aok-align-center pricePerUnit">(<span class="a-price a-text-price apex-priceperunit-value"><span class="a-offscreen">$0.98</span><span>$0.98</span></span> / Foot)</span>';
+
+  it("assembles the price to pay from its visible parts when its offscreen copy is blank, skipping the per-unit price", () => {
+    const breakdown = itemPrice(`<div id="corePriceDisplay_desktop_feature_div">${priceToPay("$", "18", "99")}${PER_UNIT}</div>`);
+
+    expect(breakdown?.item).toEqual({ amount: 18.99, currency: "USD" });
+  });
+
+  it("assembles a yen price without a fraction and skips the struck-through list price", () => {
+    const breakdown = itemPrice(
+      `<div id="corePriceDisplay_desktop_feature_div">${priceToPay("¥", "804")}<span class="a-size-small a-color-secondary aok-align-center basisPrice">List Price: <span class="a-price a-text-price apex-basisprice-value" data-a-strike="true"><span class="a-offscreen">¥1,133</span></span></span></div>`,
+      "JP"
+    );
+
+    expect(breakdown?.item).toEqual({ amount: 804, currency: "JPY" });
+  });
+
+  it("reads the Swiss franc price to pay of a foreign delivery address from its visible parts", () => {
+    const breakdown = itemPrice(`<div id="apex_desktop">${priceToPay("CHF", "78", "27")}</div>`, "DE");
+
+    expect(breakdown?.item).toEqual({ amount: 78.27, currency: "CHF" });
+  });
+
+  it("reads a price to pay outside the price blocks it knows", () => {
+    const breakdown = itemPrice(`<div id="newer_price_feature_div">${priceToPay("$", "18", "99")}</div>`);
+
+    expect(breakdown?.item).toEqual({ amount: 18.99, currency: "USD" });
+  });
+
+  it("prefers the buy box price to the centre column price", () => {
+    const breakdown = itemPrice(
+      '<div id="centerCol"><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">$19.49</span></span></div></div>' +
+        `<div id="qualifiedBuybox"><div id="corePrice_feature_div"><span class="a-price aok-align-center apex-pricetopay-value"><span class="a-offscreen">$18.99</span></span>${PER_UNIT}</div></div>`
+    );
+
+    expect(breakdown?.item).toEqual({ amount: 18.99, currency: "USD" });
+  });
+
+  it("reads the price to pay of an older layout that marks it as a text price", () => {
+    const breakdown = itemPrice(
+      '<div id="corePrice_desktop"><span class="a-price a-text-price a-size-base" data-a-strike="true"><span class="a-offscreen">$29.99</span></span><span class="a-price a-text-price a-size-medium apexPriceToPay"><span class="a-offscreen">$24.99</span></span></div>'
+    );
+
+    expect(breakdown?.item).toEqual({ amount: 24.99, currency: "USD" });
+  });
+
+  it.each([
+    ["#price_inside_buybox", '<span id="price_inside_buybox" class="a-size-medium a-color-price"> $24.99 </span>'],
+    ["#priceblock_ourprice", '<span id="priceblock_ourprice" class="a-size-medium a-color-price">$24.99</span>'],
+    ["#priceblock_dealprice", '<span id="priceblock_dealprice" class="a-size-medium a-color-price">$24.99</span>'],
+    [
+      "#tp_price_block_total_price_ww",
+      '<div id="tp_price_block_total_price_ww"><span class="a-price"><span class="a-offscreen">$24.99</span></span></div>'
+    ]
+  ])("reads the item price from %s", (_selector, body) => {
+    expect(itemPrice(body)?.item).toEqual({ amount: 24.99, currency: "USD" });
+  });
+
+  it("reads no item price from per-unit, list or twister prices alone", () => {
+    const breakdown = itemPrice(
+      `<div id="corePriceDisplay_desktop_feature_div">${PER_UNIT}<span class="a-price a-text-price apex-basisprice-value"><span class="a-offscreen">$29.99</span></span></div>` +
+        '<div id="inline-twister-row-size_name"><span class="a-price aok-align-center"><span class="a-offscreen">$9.99</span></span></div>'
+    );
+
+    expect(breakdown).toBeUndefined();
+  });
+});
+
 describe("product extractor delivery charges", () => {
   describe("free delivery", () => {
     it("treats FREE delivery followed by a date as free shipping", () => {

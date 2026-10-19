@@ -189,19 +189,59 @@ function resolveDestinationCountryCode(documentRef: Document, request: ProductEx
   return postcode && !shownOnSource ? request.marketplace : undefined;
 }
 
-function findPriceText(documentRef: Document): string | undefined {
-  const selectors = [
-    "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
-    "#apex_desktop .a-price .a-offscreen",
-    "#priceblock_ourprice",
-    "#priceblock_dealprice",
-    ".a-price.aok-align-center .a-offscreen"
-  ];
+const ITEM_PRICE_SOURCES = [
+  "#corePrice_feature_div .a-price",
+  "#price_inside_buybox",
+  "#corePriceDisplay_desktop_feature_div .a-price",
+  "#apex_desktop .a-price",
+  ".a-price.priceToPay, .a-price.apexPriceToPay, .a-price.apex-pricetopay-value",
+  "#priceblock_ourprice",
+  "#priceblock_dealprice",
+  "#tp_price_block_total_price_ww .a-price",
+  ".a-price.aok-align-center"
+];
 
-  for (const selector of selectors) {
-    const text = documentRef.querySelector(selector)?.textContent?.trim();
-    if (text) {
-      return text;
+const PRICE_TO_PAY = ".priceToPay, .apexPriceToPay, .apex-pricetopay-value";
+const OTHER_PRICE = [
+  ".apex-priceperunit-value",
+  ".pricePerUnit",
+  ".apex-basisprice-value",
+  ".basisPrice",
+  "[data-a-strike='true']",
+  "#twister_feature_div",
+  "[id^='inline-twister-row-']"
+].join(", ");
+
+function isOtherPrice(price: Element): boolean {
+  return Boolean(price.closest(OTHER_PRICE)) || (!price.matches(PRICE_TO_PAY) && Boolean(price.closest(".a-text-price")));
+}
+
+function readPricePart(price: Element, selector: string): string {
+  return price.querySelector(selector)?.textContent?.replace(/\s+/g, "") ?? "";
+}
+
+function readPriceText(price: Element): string | undefined {
+  const offscreen = collapseText(price.querySelector(".a-offscreen"));
+  if (offscreen) {
+    return offscreen;
+  }
+
+  const whole = readPricePart(price, ".a-price-whole");
+  if (whole) {
+    return `${readPricePart(price, ".a-price-symbol")}${whole}${readPricePart(price, ".a-price-fraction")}`;
+  }
+
+  return collapseText(price);
+}
+
+function findItemPrice(documentRef: Document, marketCurrency: string): ParsedMoney | undefined {
+  for (const selector of ITEM_PRICE_SOURCES) {
+    for (const price of Array.from(documentRef.querySelectorAll(selector))) {
+      const text = isOtherPrice(price) ? undefined : readPriceText(price);
+      const amount = text ? parseMoney(text, marketCurrency) : undefined;
+      if (amount) {
+        return amount;
+      }
     }
   }
 
@@ -434,8 +474,7 @@ export function extractProductData(
   const notes: string[] = [];
   const marketCurrency = MARKET_DEFAULT_CURRENCY[request.marketplace];
 
-  const itemPriceText = findPriceText(documentRef);
-  const itemPrice = itemPriceText ? parseMoney(itemPriceText, marketCurrency) : undefined;
+  const itemPrice = findItemPrice(documentRef, marketCurrency);
 
   if (!itemPrice) {
     notes.push("Price not displayed for destination");
