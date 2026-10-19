@@ -502,8 +502,9 @@ function cacheKeyFor(targetMarkets: Marketplace[]): string {
   });
 }
 
-function unversionedCacheKeyFor(targetMarkets: Marketplace[]): string {
+function earlierCacheKeyFor(targetMarkets: Marketplace[], version?: number): string {
   const value = [
+    ...(version === undefined ? [] : [version]),
     EXPECTED_SOURCE.asin,
     [...EXPECTED_SOURCE.variationTokens].sort().join("|"),
     "US",
@@ -1197,9 +1198,12 @@ describe("background orchestrator", () => {
       expect(progressPayloads(harness)).toHaveLength(progressBefore);
     });
 
-    it("ignores a comparison cached under the unversioned key of earlier builds", async () => {
+    it.each([
+      ["the unversioned key of the first builds", undefined],
+      ["the key of version 2, before variant checks and import-free quotes", 2]
+    ])("ignores a comparison cached under %s", async (_key, version) => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
-      const staleKey = unversionedCacheKeyFor(["DE"]);
+      const staleKey = earlierCacheKeyFor(["DE"], version);
       harness.storage[staleKey] = {
         createdAt: new Date().toISOString(),
         source: EXPECTED_SOURCE,
