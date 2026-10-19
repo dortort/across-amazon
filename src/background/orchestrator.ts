@@ -1,7 +1,7 @@
-import { buildSearchUrl } from "../shared/markets";
+import { buildProductUrl, buildSearchUrl } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
-import { pickBestCandidate } from "../shared/matching";
+import { computeMatchScore, pickBestCandidate, sharesSourceAsin } from "../shared/matching";
 import { convertMoney, deliveredTotal, getDefaultCurrencyForMarketplace } from "../shared/money";
 import { sortComparisonResults } from "../shared/comparison";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
@@ -12,6 +12,7 @@ import type {
   FxTable,
   LoadSourcePayload,
   Marketplace,
+  MatchScore,
   ProductExtractionRequest,
   ProductExtractionResult,
   RunComparisonProgressPayload,
@@ -292,6 +293,71 @@ async function extractBaseline(activeTabId: number, source: SourceContext): Prom
   }
 }
 
+async function lookUpSourceAsin(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  token: RunToken
+): Promise<ProductExtractionResult | undefined> {
+  let tabId: number | undefined;
+  try {
+    tabId = await openInactiveTab(buildProductUrl(targetMarket, source.asin), token);
+    await waitForTabComplete(tabId);
+    const productData = await extractProductData(tabId, {
+      marketplace: targetMarket,
+      sourceDestinationCountryCode: source.destinationCountryCode
+    });
+    const listing = { marketplace: targetMarket, asin: productData?.asin, title: productData?.title };
+    return productData && sharesSourceAsin(source, listing) ? productData : undefined;
+  } catch {
+    assertNotCancelled(token);
+    return undefined;
+  } finally {
+    if (tabId !== undefined) {
+      await closeTempTab(tabId, token);
+    }
+  }
+}
+
+function buildProductResult(
+  targetMarket: Marketplace,
+  productData: ProductExtractionResult,
+  match: MatchScore,
+  matchNotes: string[],
+  productUrl: string
+): ComparisonResult {
+  const baseConfidence = Number((match.total * 0.8 + productData.parseConfidence * 0.2).toFixed(4));
+
+  if (!productData.destinationMatched) {
+    return {
+      marketplace: targetMarket,
+      status: "DESTINATION_MISMATCH",
+      confidence: baseConfidence,
+      productUrl,
+      notes: [...matchNotes, ...productData.notes, "Destination on product page does not match source destination"]
+    };
+  }
+
+  if (!productData.breakdown || !productData.hasShippingInfo || !productData.hasImportInfo) {
+    return {
+      marketplace: targetMarket,
+      status: "UNAVAILABLE",
+      confidence: baseConfidence,
+      productUrl,
+      breakdown: productData.breakdown,
+      notes: [...matchNotes, ...productData.notes]
+    };
+  }
+
+  return {
+    marketplace: targetMarket,
+    status: "OK",
+    confidence: baseConfidence,
+    productUrl,
+    breakdown: productData.breakdown,
+    notes: [...matchNotes, ...productData.notes.filter((note) => note.toLowerCase().includes("shipping") === false)]
+  };
+}
+
 async function compareMarket(
   source: SourceContext,
   targetMarket: Marketplace,
@@ -300,6 +366,19 @@ async function compareMarket(
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<ComparisonResult> {
   enterPhase("OPEN");
+  const asinData = await lookUpSourceAsin(source, targetMarket, token);
+  if (asinData) {
+    enterPhase("READ");
+    const productUrl = buildProductUrl(targetMarket, source.asin);
+    const match = computeMatchScore(source, {
+      marketplace: targetMarket,
+      asin: asinData.asin,
+      title: asinData.title ?? "",
+      url: productUrl
+    });
+    return buildProductResult(targetMarket, asinData, match, ["Matched by ASIN"], productUrl);
+  }
+
   const searchTabId = await openInactiveTab(buildSearchUrl(targetMarket, query), token);
   await waitForTabComplete(searchTabId);
 
@@ -330,40 +409,14 @@ async function compareMarket(
     return buildFailedResult(targetMarket, "No product extraction data returned");
   }
 
-  const baseConfidence = Number((best.score.total * 0.8 + productData.parseConfidence * 0.2).toFixed(4));
-
-  if (!productData.destinationMatched) {
-    return {
-      marketplace: targetMarket,
-      status: "DESTINATION_MISMATCH",
-      confidence: baseConfidence,
-      productUrl: productData.canonicalUrl,
-      notes: [...productData.notes, "Destination on product page does not match source destination"]
-    };
-  }
-
-  if (!productData.breakdown || !productData.hasShippingInfo || !productData.hasImportInfo) {
-    return {
-      marketplace: targetMarket,
-      status: "UNAVAILABLE",
-      confidence: baseConfidence,
-      productUrl: productData.canonicalUrl,
-      breakdown: productData.breakdown,
-      notes: productData.notes
-    };
-  }
-
-  return {
-    marketplace: targetMarket,
-    status: "OK",
-    confidence: baseConfidence,
-    productUrl: productData.canonicalUrl,
-    breakdown: productData.breakdown,
-    notes: [
-      `Match confidence: ${best.score.confidenceLabel}`,
-      ...productData.notes.filter((note) => note.toLowerCase().includes("shipping") === false)
-    ]
-  };
+  const productUrl = best.candidate.asin ? buildProductUrl(targetMarket, best.candidate.asin) : productData.canonicalUrl;
+  return buildProductResult(
+    targetMarket,
+    productData,
+    best.score,
+    ["Matched by search", `Match confidence: ${best.score.confidenceLabel}`],
+    productUrl
+  );
 }
 
 export async function cancelComparison(activeTabId: number): Promise<void> {

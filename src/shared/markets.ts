@@ -42,6 +42,10 @@ export function buildSearchUrl(marketplace: Marketplace, query: string): string 
   return `https://${domain}/s?k=${encodeURIComponent(query)}`;
 }
 
+export function buildProductUrl(marketplace: Marketplace, asin: string): string {
+  return `https://${MARKETPLACE_BY_CODE[marketplace].domain}/dp/${encodeURIComponent(asin)}`;
+}
+
 export function marketLabel(code: Marketplace): string {
   return MARKETPLACE_BY_CODE[code].label;
 }

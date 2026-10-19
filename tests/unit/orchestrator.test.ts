@@ -94,11 +94,11 @@ const EXPECTED_DE_RESULT: ComparisonResult = {
     importFees: { amount: 3.2, currency: "EUR" },
     totalDisplayed: { amount: 37.2, currency: "EUR" }
   },
-  notes: ["Match confidence: HIGH"],
+  notes: ["Matched by search", "Match confidence: HIGH"],
   normalizedTotal: { amount: 48.49, currency: "USD" }
 };
 
-type FixtureGroup = "source" | "search" | "product";
+type FixtureGroup = "source" | "search" | "product" | "missing";
 type WindowScope = Record<string, unknown>;
 type Prepare = (group: FixtureGroup, market: Marketplace, document: Document) => void;
 type SendResponse = (response?: unknown) => void;
@@ -139,6 +139,8 @@ interface HarnessOptions {
   popupClosed?: boolean;
   onTabCreated?: (tab: FakeTab, harness: Harness) => void;
   holdFx?: Promise<void>;
+  sourceAsinOn?: Marketplace[];
+  redirectAsinOn?: Marketplace[];
 }
 
 interface Harness {
@@ -163,8 +165,20 @@ function setDeliveryCountry(document: Document, country: string): void {
   }
 }
 
+function setPageAsin(document: Document, asin: string): void {
+  const input = document.querySelector<HTMLInputElement>("#ASIN");
+  if (input) {
+    input.value = asin;
+  }
+  const canonical = document.querySelector<HTMLLinkElement>("link[rel='canonical']");
+  if (canonical) {
+    canonical.href = new URL(`/dp/${asin}`, canonical.href).href;
+  }
+}
+
 function loadFixtureDom(group: FixtureGroup, market: Marketplace, url: string, prepare?: Prepare): JSDOM {
-  const html = readFileSync(join(FIXTURE_ROOT, group, `${market}.html`), "utf8");
+  const file = group === "missing" ? join("product", "not-found.html") : join(group, `${market}.html`);
+  const html = readFileSync(join(FIXTURE_ROOT, file), "utf8");
   const dom = new JSDOM(html, { url });
   setDeliveryCountry(dom.window.document, "United States");
   prepare?.(group, market, dom.window.document);
@@ -228,18 +242,35 @@ function createHarness(options: HarnessOptions): Harness {
     tabs.set(ACTIVE_TAB_ID, { id: ACTIVE_TAB_ID, url, label, dom, scope: {}, status: "complete" });
   }
 
+  function loadProductPage(market: Marketplace, url: string, requestedAsin?: string): { group: FixtureGroup; dom: JSDOM } {
+    const dom = loadFixtureDom("product", market, url, options.prepare);
+    const pageAsin = dom.window.document.querySelector<HTMLInputElement>("#ASIN")?.value;
+    if (requestedAsin === pageAsin || options.redirectAsinOn?.includes(market)) {
+      return { group: "product", dom };
+    }
+    if (requestedAsin === EXPECTED_SOURCE.asin && options.sourceAsinOn?.includes(market)) {
+      setPageAsin(dom.window.document, requestedAsin);
+      return { group: "product", dom };
+    }
+    return { group: "missing", dom: loadFixtureDom("missing", market, url, options.prepare) };
+  }
+
   function openTempTab(url: string): FakeTab {
     const parsed = new URL(url);
     const market = getMarketplaceByDomain(parsed.hostname);
     if (!market) {
       throw new Error(`No fixture for ${url}`);
     }
-    const group: FixtureGroup = parsed.pathname === "/s" ? "search" : "product";
+    const requestedAsin = /\/dp\/([A-Z0-9]{10})/i.exec(parsed.pathname)?.[1]?.toUpperCase();
+    const { group, dom } =
+      parsed.pathname === "/s"
+        ? { group: "search" as const, dom: loadFixtureDom("search", market, url, options.prepare) }
+        : loadProductPage(market, url, requestedAsin);
     const tab: FakeTab = {
       id: nextTabId,
       url,
       label: `${group}/${market}`,
-      dom: loadFixtureDom(group, market, url, options.prepare),
+      dom,
       scope: {},
       status: "complete"
     };
@@ -485,6 +516,14 @@ function removeElement(document: Document, selector: string): void {
   document.querySelector(selector)?.remove();
 }
 
+function marketEvents(harness: Harness, market: Marketplace): string[] {
+  const start = harness.events.indexOf(`progress OPEN ${market}`);
+  const end = harness.events.findIndex(
+    (event, index) => index > start && (event.startsWith("progress OPEN ") || event === "progress DONE")
+  );
+  return harness.events.slice(start, end === -1 ? undefined : end);
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -493,6 +532,8 @@ describe("background orchestrator", () => {
   describe("full run", () => {
     const fullRunOptions: HarnessOptions = {
       enabledMarketplaces: ["US", "UK", "DE", "FR", "IT", "ES", "JP"],
+      sourceAsinOn: ["UK", "JP"],
+      redirectAsinOn: ["ES"],
       prepare: (group, market, document) => {
         if (group === "search" && market === "FR") {
           removeElement(document, "[data-asin='B000000006']");
@@ -544,14 +585,35 @@ describe("background orchestrator", () => {
         expect(result.normalizedTotal?.currency).toBe("USD");
       }
 
+      expect(payload.results.find((result) => result.marketplace === "UK")).toMatchObject({
+        confidence: 1,
+        productUrl: "https://www.amazon.co.uk/dp/B000000001",
+        notes: ["Matched by ASIN"]
+      });
       expect(payload.results.find((result) => result.marketplace === "JP")).toEqual({
         marketplace: "JP",
         status: "DESTINATION_MISMATCH",
-        confidence: 0.9,
-        productUrl: "https://www.amazon.co.jp/dp/B000000009",
-        notes: ["Destination mismatch detected (JP)", "Destination on product page does not match source destination"]
+        confidence: 0.98,
+        productUrl: "https://www.amazon.co.jp/dp/B000000001",
+        notes: [
+          "Matched by ASIN",
+          "Destination mismatch detected (JP)",
+          "Destination on product page does not match source destination"
+        ]
       });
-      expect(harness.events).not.toContain("open product/FR");
+      expect(payload.results.find((result) => result.marketplace === "ES")).toMatchObject({
+        productUrl: "https://www.amazon.es/dp/B000000008",
+        notes: ["Matched by search", "Match confidence: HIGH"]
+      });
+
+      const opened = (market: Marketplace) =>
+        marketEvents(harness, market).filter((event) => event.startsWith("open ")).map((event) => event.slice("open ".length));
+      expect(opened("UK")).toEqual(["product/UK"]);
+      expect(opened("DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
+      expect(opened("FR")).toEqual(["missing/FR", "search/FR"]);
+      expect(opened("IT")).toEqual(["missing/IT", "search/IT", "product/IT"]);
+      expect(opened("ES")).toEqual(["product/ES", "search/ES", "product/ES"]);
+      expect(opened("JP")).toEqual(["product/JP"]);
       expect(harness.openTempTabs()).toEqual([]);
 
       const jpOpen = progressPayloads(harness).find(
@@ -665,6 +727,10 @@ describe("background orchestrator", () => {
         "inject content/product-extractor.js source/US",
         "fx www.ecb.europa.eu",
         "progress OPEN DE",
+        "open missing/DE",
+        "ready missing/DE",
+        "inject content/product-extractor.js missing/DE",
+        "close missing/DE",
         "open search/DE",
         "ready search/DE",
         "progress SEARCH DE",
@@ -678,6 +744,200 @@ describe("background orchestrator", () => {
         "close product/DE",
         "progress DONE"
       ]);
+    });
+  });
+
+  describe("ASIN lookup", () => {
+    const ASIN_DE_RESULT: ComparisonResult = {
+      ...EXPECTED_DE_RESULT,
+      confidence: 1,
+      productUrl: "https://www.amazon.de/dp/B000000001",
+      notes: ["Matched by ASIN"]
+    };
+
+    it("reads a marketplace that carries the source ASIN straight from its product page, in one tab", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], sourceAsinOn: ["DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([ASIN_DE_RESULT]);
+      expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+      expect(harness.tabsCreate).toHaveBeenCalledWith({ url: "https://www.amazon.de/dp/B000000001", active: false });
+      expect(harness.events).toEqual([
+        "inject content/source-extractor.js source/US",
+        "inject content/product-extractor.js source/US",
+        "fx www.ecb.europa.eu",
+        "progress OPEN DE",
+        "open product/DE",
+        "ready product/DE",
+        "inject content/product-extractor.js product/DE",
+        "close product/DE",
+        "progress READ DE",
+        "progress DONE"
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reports OPEN then READ for a marketplace matched by ASIN and the full search phases for the others", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"], sourceAsinOn: ["UK"] });
+
+      await runViaWorker(harness);
+
+      expect(progressPayloads(harness).map((progress) => [progress.currentMarketplace, progress.phase])).toEqual([
+        ["UK", "OPEN"],
+        ["UK", "READ"],
+        ["DE", "OPEN"],
+        ["DE", "SEARCH"],
+        ["DE", "MATCH"],
+        ["DE", "READ"],
+        [undefined, undefined]
+      ]);
+    });
+
+    it("searches a marketplace that has no page for the source ASIN", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+        "https://www.amazon.de/dp/B000000001",
+        "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20Model%20X100%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue",
+        "https://www.amazon.de/dp/B000000005"
+      ]);
+    });
+
+    it("searches a marketplace whose page for the source ASIN shows another product", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], redirectAsinOn: ["DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(marketEvents(harness, "DE").filter((event) => event.startsWith("open "))).toEqual([
+        "open product/DE",
+        "open search/DE",
+        "open product/DE"
+      ]);
+    });
+
+    it("does not trust the source ASIN on a page whose title has nothing in common with the source", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        prepare: (group, _market, document) => {
+          const title = document.querySelector("#productTitle");
+          if (group === "product" && title) {
+            title.textContent = "Garden Hose Reel Wall Mounted";
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.events).toContain("open search/DE");
+    });
+
+    it("reports a page for the source ASIN that shows no price as unavailable, with Amazon's reason, instead of searching", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        prepare: (group, _market, document) => {
+          if (group !== "product") {
+            return;
+          }
+          for (const selector of [
+            "#corePriceDisplay_desktop_feature_div",
+            "#deliveryBlockMessage",
+            "#exports_desktop_feature_div",
+            "#subtotals-marketplace-table"
+          ]) {
+            removeElement(document, selector);
+          }
+          document.body.insertAdjacentHTML(
+            "beforeend",
+            '<div id="availability"><span class="primary-availability-message">This item cannot be shipped to your selected delivery location.</span></div>'
+          );
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "UNAVAILABLE",
+          confidence: 0.82,
+          productUrl: "https://www.amazon.de/dp/B000000001",
+          notes: [
+            "Matched by ASIN",
+            "Price not displayed for destination",
+            "Amazon says: This item cannot be shipped to your selected delivery location.",
+            "Shipping not displayed for destination",
+            "Import fees not displayed for destination"
+          ]
+        }
+      ]);
+      expect(harness.events).not.toContain("open search/DE");
+    });
+
+    it("searches when the page for the source ASIN cannot be scripted", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], failScriptOn: "missing/DE" });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("searches when the page for the source ASIN is closed while it loads", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        onTabCreated: (tab, self) => {
+          if (tab.label === "missing/DE") {
+            tab.status = "loading";
+            setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    it("stops without searching when Stop arrives while the page for the source ASIN loads", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        sourceAsinOn: ["DE"],
+        onTabCreated: (tab) => {
+          if (tab.label === "product/DE") {
+            tab.status = "loading";
+          }
+        }
+      });
+
+      const run = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("loading product/DE"));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      await run;
+
+      expect(resultPayloads(harness, "run-1")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
+      ]);
+      expect(harness.events.slice(harness.events.indexOf("progress OPEN DE"))).toEqual([
+        "progress OPEN DE",
+        "open product/DE",
+        "loading product/DE",
+        "close product/DE"
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.tabListenerCount()).toBe(0);
     });
   });
 
@@ -794,12 +1054,12 @@ describe("background orchestrator", () => {
       });
 
       const firstRun = startRunViaWorker(harness, "run-1");
-      await vi.waitFor(() => expect(harness.events).toContain("loading search/DE"));
+      await vi.waitFor(() => expect(harness.events).toContain("loading missing/DE"));
       const progressBeforeCancel = progressPayloads(harness, "run-1");
 
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       expect(harness.openTempTabs()).toEqual([]);
-      expect(harness.events).toContain("close search/DE");
+      expect(harness.events).toContain("close missing/DE");
 
       const second = await runViaWorker(harness, "run-2");
       await firstRun;
@@ -815,6 +1075,7 @@ describe("background orchestrator", () => {
         ["UK", "OK"],
         ["DE", "OK"]
       ]);
+      expect(harness.events.filter((event) => event === "open search/DE")).toHaveLength(1);
       expect(harness.openTempTabs()).toEqual([]);
     });
 
@@ -837,7 +1098,7 @@ describe("background orchestrator", () => {
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
 
       const secondRun = startRunViaWorker(harness, "run-2");
-      await vi.waitFor(() => expect(harness.events).toContain("loading search/DE"));
+      await vi.waitFor(() => expect(harness.events).toContain("loading missing/DE"));
 
       fx.resolve();
       await firstRun;
@@ -846,7 +1107,7 @@ describe("background orchestrator", () => {
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-1" })
       ]);
       expect(progressPayloads(harness, "run-1")).toEqual([]);
-      expect(harness.openTempTabs()).toEqual(["search/DE"]);
+      expect(harness.openTempTabs()).toEqual(["missing/DE"]);
 
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       await secondRun;
@@ -872,7 +1133,7 @@ describe("background orchestrator", () => {
       });
 
       const firstRun = startRunViaWorker(harness, "run-1");
-      await vi.waitFor(() => expect(harness.events).toContain("loading search/DE"));
+      await vi.waitFor(() => expect(harness.events).toContain("loading missing/DE"));
 
       const second = await runViaWorker(harness, "run-2");
       await firstRun;
@@ -918,15 +1179,21 @@ describe("background orchestrator", () => {
 
       expect(payload.error).toBeUndefined();
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-      expect(harness.events.filter((event) => event.startsWith("loading "))).toEqual(["loading search/DE", "loading product/DE"]);
+      expect(harness.events.filter((event) => event.startsWith("loading "))).toEqual([
+        "loading missing/DE",
+        "loading search/DE",
+        "loading product/DE"
+      ]);
       expect(harness.tabListenerCount()).toBe(0);
     });
 
     it("records a market whose tab is closed while loading as PARSE_FAILED without waiting for the timeout", async () => {
+      let closedTabId: number | undefined;
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab, self) => {
           if (tab.label === "search/DE") {
+            closedTabId = tab.id;
             tab.status = "loading";
             setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
           }
@@ -940,7 +1207,7 @@ describe("background orchestrator", () => {
         ["UK", "OK"],
         ["DE", "PARSE_FAILED"]
       ]);
-      expect(payload.results[1].notes).toEqual(["Tab 100 was closed before it finished loading"]);
+      expect(payload.results[1].notes).toEqual([`Tab ${closedTabId} was closed before it finished loading`]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(harness.tabListenerCount()).toBe(0);
     });
