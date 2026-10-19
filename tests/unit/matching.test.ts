@@ -201,6 +201,21 @@ describe("scoring without every signal on the source page", () => {
     );
   });
 
+  it("caps earbuds whose model number differs from the headphones' only in its prefix at 0.5", () => {
+    const blackSource: SourceContext = { ...SONY_SOURCE, variationTokens: ["black"] };
+    const earbuds = sony({ asin: "B0C4TLFZSZ", title: "WF-1000XM5 Wireless Noise Cancelling Headphones Black" });
+
+    expect(computeMatchScore(blackSource, earbuds).total).toBe(0.5);
+    expect(pickBestCandidate(blackSource, [earbuds])).toBeUndefined();
+  });
+
+  it.each([
+    ["the listing", SONY_SOURCE.title, "Sony 1000XM5 Premium Noise Cancelling Wireless Headphones, Black"],
+    ["the source", "Sony 1000XM5 Premium Noise Cancelling Wireless Headphones, Black", SONY_SOURCE.title]
+  ])("does not cap a listing when %s writes the model number without its prefix", (_side, sourceTitle, listingTitle) => {
+    expect(computeMatchScore({ ...SONY_SOURCE, title: sourceTitle }, sony({ title: listingTitle })).total).toBe(0.95);
+  });
+
   it("rejects an accessory made for the same model", () => {
     const earPads = sony({ title: "Ear Pads Replacement for Sony WH-1000XM5 Headphones, Black", brand: "Generic" });
 

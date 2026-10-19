@@ -70,8 +70,12 @@ function isModelPart(part: string): boolean {
   return part.length >= MIN_MODEL_TOKEN_LENGTH && /\d/.test(part) && /[a-z]/.test(part);
 }
 
+function foldText(value: string): string {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
 export function extractModelTokens(value: string): string[] {
-  const folded = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const folded = foldText(value);
   const tokens = new Set<string>();
 
   for (const match of folded.match(MODEL_TOKEN) ?? []) {
@@ -128,10 +132,37 @@ function brandSimilarity(sourceBrand: string | undefined, candidateBrand: string
   return jaccardSimilarity(sourceTokens, candidateTokens) * 0.7;
 }
 
+interface ModelNumber {
+  whole: string;
+  parts: string[];
+  isBare: boolean;
+}
+
+function readModelNumbers(value: string): ModelNumber[] {
+  return (foldText(value).match(MODEL_TOKEN) ?? [])
+    .map((match) => {
+      const segments = match.split("-");
+      return { whole: segments.join(""), parts: segments.filter(isModelPart), isBare: segments.length === 1 };
+    })
+    .filter((model) => model.whole.length >= MIN_MODEL_TOKEN_LENGTH);
+}
+
+function isSameModel(left: ModelNumber, right: ModelNumber): boolean {
+  return (
+    left.whole === right.whole ||
+    (right.isBare && left.parts.includes(right.whole)) ||
+    (left.isBare && right.parts.includes(left.whole))
+  );
+}
+
 function hasModelConflict(sourceTitle: string, candidateTitle: string): boolean {
-  const sourceModels = extractModelTokens(sourceTitle);
-  const candidateModels = new Set(extractModelTokens(candidateTitle));
-  return sourceModels.length > 0 && candidateModels.size > 0 && !sourceModels.some((token) => candidateModels.has(token));
+  const sourceModels = readModelNumbers(sourceTitle);
+  const candidateModels = readModelNumbers(candidateTitle);
+  return (
+    sourceModels.length > 0 &&
+    candidateModels.length > 0 &&
+    !sourceModels.some((source) => candidateModels.some((candidate) => isSameModel(source, candidate)))
+  );
 }
 
 function variationSimilarity(sourceTokens: string[], candidateTokens: string[]): number {
