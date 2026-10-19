@@ -825,6 +825,26 @@ describe("background orchestrator", () => {
       ]);
     });
 
+    it("searches by brand and model number when the source title carries a distinctive one", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (_group, _market, document) => {
+          for (const element of document.querySelectorAll("#productTitle, h2 span")) {
+            element.textContent = element.textContent?.replace("Model X100", "AW-2400X") ?? null;
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+        "https://www.amazon.de/dp/B000000001",
+        "https://www.amazon.de/s?k=Acme%20AW-2400X",
+        "https://www.amazon.de/dp/B000000005"
+      ]);
+      expect(payload.results).toMatchObject([{ marketplace: "DE", status: "OK", productUrl: "https://www.amazon.de/dp/B000000005" }]);
+    });
+
     it("searches a marketplace whose page for the source ASIN shows another product", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], redirectAsinOn: ["DE"] });
 

@@ -226,6 +226,20 @@ function isSameBrandAndModel(source: SourceContext, candidate: SearchCandidate):
   );
 }
 
+const MODEL_WORD = /\b(?=[a-z0-9-]*\d)(?=[a-z0-9-]*[a-z])[a-z0-9]+(?:-[a-z0-9]+)*\b/gi;
+
+export function buildSearchQuery(source: SourceContext): string {
+  const models = new Map<string, string>();
+  for (const word of source.title.match(MODEL_WORD) ?? []) {
+    if (!models.has(word.toLowerCase()) && readModelNumbers(word).some(isDistinctiveModel)) {
+      models.set(word.toLowerCase(), word);
+    }
+  }
+
+  const parts = models.size > 0 ? [source.brand, ...models.values()] : [source.title, source.brand, ...source.variationTokens];
+  return parts.filter(Boolean).join(" ");
+}
+
 function hasModelConflict(sourceTitle: string, candidateTitle: string): boolean {
   const sourceModels = readModelNumbers(sourceTitle);
   const candidateModels = readModelNumbers(candidateTitle);

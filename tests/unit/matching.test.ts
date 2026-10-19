@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import {
+  buildSearchQuery,
   computeMatchScore,
   extractAttributeTokens,
   findSourceVariant,
@@ -428,5 +429,28 @@ describe("variant check", () => {
   it("finds nothing when no variant carries the source colour", () => {
     expect(findSourceVariant(BLACK_SONY, UK_TWISTER.filter((option) => option.label !== "Black"))).toBeUndefined();
     expect(findSourceVariant({ ...BLACK_SONY, title: "Sony WH-1000XM5", variationTokens: [] }, UK_TWISTER)).toBeUndefined();
+  });
+});
+
+describe("search query", () => {
+  it("searches by brand and model number when the title carries a distinctive model number", () => {
+    expect(buildSearchQuery({ ...SONY_SOURCE, variationTokens: ["black"] })).toBe("Sony WH-1000XM5");
+  });
+
+  it("names each model number once and leaves the brand out when the source page has none", () => {
+    expect(buildSearchQuery({ ...SONY_SOURCE, brand: undefined, title: "WH-1000XM5 Headphones, wh-1000xm5 Black" })).toBe(
+      "WH-1000XM5"
+    );
+  });
+
+  it.each([
+    ["a short model number", ACME_SOURCE, "Acme Ultra Widget Model X100 2 Pack Blue Acme x100 2 pack blue"],
+    [
+      "only measurements",
+      { ...ACME_SOURCE, title: "Acme USB C Cable 100W 2M 128GB", variationTokens: [] },
+      "Acme USB C Cable 100W 2M 128GB Acme"
+    ]
+  ])("searches by the title, brand and variant tokens when the title has %s", (_case, source, query) => {
+    expect(buildSearchQuery(source)).toBe(query);
   });
 });

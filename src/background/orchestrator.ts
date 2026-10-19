@@ -1,7 +1,14 @@
 import { buildProductUrl, buildSearchUrl } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
-import { computeMatchScore, findSourceVariant, pickBestCandidate, sharesSourceAsin, variantConflicts } from "../shared/matching";
+import {
+  buildSearchQuery,
+  computeMatchScore,
+  findSourceVariant,
+  pickBestCandidate,
+  sharesSourceAsin,
+  variantConflicts
+} from "../shared/matching";
 import { convertMoney, deliveredTotal, getDefaultCurrencyForMarketplace } from "../shared/money";
 import { sortComparisonResults } from "../shared/comparison";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
@@ -533,8 +540,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
     const comparisonCurrency = resolveComparisonCurrency(settings, source);
     baseline = baseline && normalizeResult(baseline, comparisonCurrency, table);
 
-    const queryParts = [source.title, source.brand, ...source.variationTokens].filter(Boolean);
-    const query = queryParts.join(" ");
+    const query = buildSearchQuery(source);
     const total = targetMarkets.length;
 
     for (const [index, targetMarket] of targetMarkets.entries()) {
