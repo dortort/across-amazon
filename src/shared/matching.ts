@@ -257,7 +257,7 @@ export function computeMatchScore(source: SourceContext, candidate: SearchCandid
   }
 
   const brandWeight = normalizeBrand(source.brand) ? BRAND_WEIGHT : 0;
-  const variationWeight = sourceAttributes.length > 0 ? VARIATION_WEIGHT : 0;
+  const variationWeight = sourceAttributes.length > 0 && candidateAttributes.length > 0 ? VARIATION_WEIGHT : 0;
   const weighted =
     (titleScore * TITLE_WEIGHT + brandScore * brandWeight + variationScore * variationWeight) /
     (TITLE_WEIGHT + brandWeight + variationWeight);

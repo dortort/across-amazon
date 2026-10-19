@@ -203,6 +203,27 @@ describe("scoring without every signal on the source page", () => {
     );
   });
 
+  it("scores a listing whose title names no colour on its title and brand alone", () => {
+    const colourless = sony({ asin: "B09Y2MYL5C", title: "WH-1000XM5 Premium Wireless Noise Cancelling Headphones" });
+
+    expect(computeMatchScore({ ...SONY_SOURCE, variationTokens: ["black"] }, colourless)).toMatchObject({
+      total: 0.8571,
+      variationScore: 0,
+      confidenceLabel: "MEDIUM"
+    });
+  });
+
+  it("picks a colourless WH-1000XM5 card over black WF-1000XM5 earbuds, as amazon.es lists them", () => {
+    const blackSource: SourceContext = { ...SONY_SOURCE, variationTokens: ["black"] };
+    const cards = [
+      sony({ asin: "B0C4TLFZSZ", title: "WF-1000XM5 Wireless Noise Cancelling Headphones Black" }),
+      sony({ asin: "B0BXM22X99", title: "WH-1000XM5 Premium Wireless Noise Cancelling Headphones" }),
+      sony({ asin: "B09Y2MYL5C", title: "WH-1000XM5 Premium Wireless Noise Cancelling Headphones" })
+    ];
+
+    expect(pickBestCandidate(blackSource, cards)).toMatchObject({ candidate: { asin: "B0BXM22X99" }, score: { total: 0.8571 } });
+  });
+
   it("caps earbuds whose model number differs from the headphones' only in its prefix at 0.5", () => {
     const blackSource: SourceContext = { ...SONY_SOURCE, variationTokens: ["black"] };
     const earbuds = sony({ asin: "B0C4TLFZSZ", title: "WF-1000XM5 Wireless Noise Cancelling Headphones Black" });
@@ -276,8 +297,15 @@ describe("matching the current amazon search results", () => {
     });
   });
 
-  it.each(["UK", "DE", "FR", "JP"] as const)(
-    "picks nothing on %s, where only other colours, models, bundles and accessories are listed",
+  it("picks the WH-1000XM5 card on UK, whose title names no colour, and leaves its colour to the product page check", () => {
+    expect(pickBestCandidate(SONY_SOURCE, liveCandidates("UK"))).toMatchObject({
+      candidate: { asin: "B09Y2LL45F", title: "WH-1000XM5 Premium Wireless Noise Cancelling Headphones" },
+      score: { total: 0.8571, variationScore: 0, confidenceLabel: "MEDIUM" }
+    });
+  });
+
+  it.each(["DE", "FR", "JP"] as const)(
+    "picks nothing on %s, where only other models, bundles and accessories are listed",
     (market) => {
       expect(pickBestCandidate(SONY_SOURCE, liveCandidates(market))).toBeUndefined();
     }
