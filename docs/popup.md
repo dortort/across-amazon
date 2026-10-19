@@ -57,9 +57,10 @@ Each marketplace is first looked up by your product's ASIN, Amazon's own product
 
 The card at the top gives the answer:
 
-- **Cheapest delivered to United States** names the destination the prices were quoted for: the country in Amazon's "Deliver to" box on the page you are on, or the marketplace's own country when the page does not show one. A "Deliver to" country outside the ten marketplaces, such as Switzerland, is not recognised yet: the card then names the marketplace's country, while the prices are the ones Amazon showed for the address set on each marketplace. A marketplace whose page quotes delivery to a town and postcode, which is how Amazon shows an address in its own country (for example a default address in Canada on amazon.ca), is reported as "Does not ship here" instead of being compared.
+- **Cheapest delivered to United States** names the destination the prices were quoted for: the country in Amazon's "Deliver to" box on the page you are on, or the marketplace's own country when the page does not show one. A "Deliver to" country outside the ten marketplaces, such as Switzerland, is not recognised yet: the card then names the marketplace's country, while the prices are the ones Amazon showed for the address set on each marketplace. A marketplace whose page quotes delivery to a town and a postcode in that marketplace's own format, which is how Amazon shows an address in its own country (for example a default address in Canada on amazon.ca, "Balzac T4B 2T3"), is reported as "Does not ship here" instead of being compared. A postcode that the page you are on also shows is your own address, so that marketplace is still compared.
 - **Save $50.94** is the difference between the cheapest delivered total ($349.05 from Germany) and the delivered total on the page you are on ($399.99).
 - **13% less** is that saving as a share of what you would pay here.
+- **Item, shipping and import fees included.** says what the cheapest total covers. When that marketplace's page showed no import fees for your destination, the card reads "Item and shipping included. Amazon showed no import fees, so duties may still be due on delivery." instead: the saving then leaves out any duties collected on delivery, while the page you are on may include them.
 - **Open on amazon.de** opens that product page in a new tab. You review it and buy there, on Amazon. The extension never adds to cart or checks out.
 
 ### The ranked list
@@ -70,7 +71,7 @@ Below the card, **Every marketplace** ranks every marketplace that returned a de
 
 Each row shows:
 
-- **Left**: the marketplace and its delivered total in its own currency, formatted the way that marketplace formats prices (for example `323,19 €` on amazon.de).
+- **Left**: the marketplace and its delivered total in its own currency, formatted the way that marketplace formats prices (for example `323,19 €` on amazon.de), followed by "incl. shipping & import", or "incl. shipping, import fees not shown" when the page showed no import fees for your destination.
 - **Right, bold**: the same delivered total converted to your display currency (the column header shows which, here USD).
 - **Right, below**: the delta against the page you are on. A green `−$50.94` is that much cheaper. A brown `+$38.73` is that much more expensive. The row for the current page reads "the page you are on".
 
@@ -78,7 +79,7 @@ The cheapest row is highlighted. Click any row to open its [breakdown sheet](#4-
 
 ### What "Check match" means
 
-Every listing in the list passed the product-matching threshold. A listing found under your product's ASIN is the same product by Amazon's own identifier, so it counts as an exact match and never shows the pill. A listing found by searching is scored, not certain: its confidence combines how closely the listing's title, brand and variant match your product with how cleanly its product page could be read. When that confidence is below 90%, the row (and the verdict card, if it is the cheapest) shows a **Check match** pill. In the example Italy scored 76% because its listing title does not state the colour.
+Every listing in the list passed the product-matching threshold. A listing found under your product's ASIN is the same product by Amazon's own identifier, so it counts as an exact match and never shows the pill. A listing found by searching is scored, not certain: its confidence combines how closely the listing's title, brand and variant match your product with how cleanly its product page could be read. A listing from your product's brand with the same model number (for example WH-1000XM5) counts as a close title match even when the marketplace words its title differently, but it still scores below 90%, so it carries the pill. When that confidence is below 90%, the row (and the verdict card, if it is the cheapest) shows a **Check match** pill. In the example Italy scored 76% because its listing title does not state the colour.
 
 Before a listing found by searching is ranked, its product page is checked for the variant it shows. When the page shows another colour, pack or size than yours, the extension switches to your variant through the page's own variant selector, or reports the marketplace as "No confident match" when the page does not offer it.
 
@@ -94,7 +95,7 @@ Clicking a row slides up its breakdown, in the marketplace's own currency:
 | --- | --- |
 | Item price | The price on the product page. |
 | Shipping to United States | Shipping to your destination, or "Free". |
-| Import fees deposit | The import fees Amazon quotes for your destination, or "—" when there are none. |
+| Import fees deposit | The import fees Amazon quotes for your destination, "—" when there are none, or "Not shown" when the page showed no import fees for your destination. |
 | Delivered total | Item + shipping + import fees. |
 | Roughly | The delivered total converted to your display currency at the day's rate. |
 
@@ -145,9 +146,9 @@ On any other site, or on an Amazon page that is not a product page (search resul
 
 ## What the numbers mean
 
-- **Delivered total** = item price + shipping to your destination + import fees deposit, as quoted on the Amazon product page, in the currency the page shows. If Amazon displays a total that is higher than that sum, the displayed total is used. Amazon quotes import fees for an address abroad only on some pages (amazon.com shows them in its AmazonGlobal details). When a page prices the item and the delivery but shows no import fees, the delivered total is the item price plus shipping, and any import charges collected on delivery are not included.
+- **Delivered total** = item price + shipping to your destination + import fees deposit, as quoted on the Amazon product page, in the currency the page shows. If Amazon displays a total that is higher than that sum, the displayed total is used. Amazon quotes import fees for an address abroad only on some pages (amazon.com shows them in its AmazonGlobal details). When a page prices the item and the delivery but shows no import fees, the delivered total is the item price plus shipping, any import charges collected on delivery are not included, and the verdict card, the row and the breakdown sheet say so.
 - **Conversion**: totals are converted to your display currency with the European Central Bank daily reference rates (with [Frankfurter](https://frankfurter.dev/) as a fallback when the ECB feed is unavailable). Rates are fetched at most once a day, and the footer shows their date. Amazon charges you in the marketplace's own currency, so your card or bank's rate decides what you actually pay.
 - **Delta**: the converted delivered total minus the converted delivered total of the page you are on. The page you are on is always the reference.
 - **Saving percentage**: the saving divided by the delivered total on the page you are on.
 - **Confidence**: how sure the extension is that a listing is the same product. See [What "Check match" means](#what-check-match-means).
-- **30-minute cache**: a finished check is stored in the extension's local storage, keyed by product, variant, destination and the set of marketplaces checked. **Check again** within 30 minutes returns that result instantly instead of opening the background tabs again. After 30 minutes a fresh check runs.
+- **30-minute cache**: a finished check is stored in the extension's local storage, keyed by product, variant, destination, the "Deliver to" text on the page you are on and the set of marketplaces checked. **Check again** within 30 minutes returns that result instantly instead of opening the background tabs again. After 30 minutes a fresh check runs.
