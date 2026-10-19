@@ -144,19 +144,19 @@ function parseCurrencyMarkedMoney(text: string, marketCurrency: string): ParsedM
 const DELIVER_TO_SELECTORS = ["#glow-ingress-line2", "#glow-ingress-line1", "#contextualIngressPtLabel"];
 const DELIVERY_MESSAGE_SELECTORS = ["#delivery-block-message", "#deliveryBlockMessage"];
 
-const FIVE_DIGITS = /(?:^|\D)\d{5}(?:\D|$)/;
+const FIVE_DIGITS = /(?:^|\D)(\d{5})(?:\D|$)/;
 
 const DOMESTIC_POSTCODE: Record<ProductExtractionRequest["marketplace"], RegExp> = {
-  US: /(?:^|\D)\d{5}(?:-\d{4})?(?:\D|$)/,
-  CA: /(?:^|[^a-z0-9])[a-z]\d[a-z] ?\d[a-z]\d(?:[^a-z0-9]|$)/,
+  US: /(?:^|\D)(\d{5}(?:-\d{4})?)(?:\D|$)/,
+  CA: /(?:^|[^a-z0-9])([a-z]\d[a-z] ?\d[a-z]\d)(?:[^a-z0-9]|$)/,
   MX: FIVE_DIGITS,
-  UK: /(?:^|[^a-z0-9])[a-z]{1,2}\d[a-z\d]? ?\d[a-z]{2}(?:[^a-z0-9]|$)/,
+  UK: /(?:^|[^a-z0-9])([a-z]{1,2}\d[a-z\d]? ?\d[a-z]{2})(?:[^a-z0-9]|$)/,
   DE: FIVE_DIGITS,
   FR: FIVE_DIGITS,
   IT: FIVE_DIGITS,
   ES: FIVE_DIGITS,
-  JP: /(?:^|\D)\d{3}-\d{4}(?:\D|$)/,
-  AU: /(?:^|\D)\d{4}(?:\D|$)/
+  JP: /(?:^|\D)(\d{3}-\d{4})(?:\D|$)/,
+  AU: /(?:^|\D)(\d{4})(?:\D|$)/
 };
 
 function readTexts(documentRef: Document, selectors: string[]): string {
@@ -166,10 +166,7 @@ function readTexts(documentRef: Document, selectors: string[]): string {
     .join(" ");
 }
 
-function resolveDestinationCountryCode(
-  documentRef: Document,
-  marketplace: ProductExtractionRequest["marketplace"]
-): string | undefined {
+function resolveDestinationCountryCode(documentRef: Document, request: ProductExtractionRequest): string | undefined {
   const deliverToText = readTexts(documentRef, DELIVER_TO_SELECTORS);
   const deliverTo = normalize(deliverToText);
   const message = normalize(readTexts(documentRef, DELIVERY_MESSAGE_SELECTORS));
@@ -187,7 +184,9 @@ function resolveDestinationCountryCode(
     }
   }
 
-  return DOMESTIC_POSTCODE[marketplace].test(deliverTo) ? marketplace : undefined;
+  const postcode = DOMESTIC_POSTCODE[request.marketplace].exec(deliverTo)?.[1];
+  const shownOnSource = postcode !== undefined && normalize(request.sourceDeliverTo ?? "").includes(postcode);
+  return postcode && !shownOnSource ? request.marketplace : undefined;
 }
 
 function findPriceText(documentRef: Document): string | undefined {
@@ -422,7 +421,7 @@ export function extractProductData(
 
   const currency = itemPrice?.currency ?? shippingAmount?.currency ?? importAmount?.currency ?? marketCurrency;
 
-  const destinationDetected = resolveDestinationCountryCode(documentRef, request.marketplace);
+  const destinationDetected = resolveDestinationCountryCode(documentRef, request);
   const destinationMatched = !destinationDetected || destinationDetected === request.sourceDestinationCountryCode;
 
   if (!destinationMatched) {

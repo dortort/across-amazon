@@ -124,6 +124,16 @@ function resolveDestinationCountryCode(documentRef: Document): string | undefine
   return undefined;
 }
 
+function readDeliverTo(documentRef: Document): string | undefined {
+  const text = ["#glow-ingress-line2", "#glow-ingress-line1", "#contextualIngressPtLabel"]
+    .map((selector) => documentRef.querySelector(selector)?.textContent)
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || undefined;
+}
+
 const BRAND_LABELS = new Set(["brand", "brand name", "marke", "marque", "marca", "marchio", "ブランド"]);
 
 function cleanBrand(rawBrand?: string): string | undefined {
@@ -221,6 +231,11 @@ export function extractSourceContext(documentRef: Document, href: string, hostna
     destinationCountryCode: resolveDestinationCountryCode(documentRef) ?? marketplace,
     sourceUrl: href
   };
+
+  const deliverTo = readDeliverTo(documentRef);
+  if (deliverTo) {
+    source.deliverTo = deliverTo;
+  }
 
   const imageUrl = extractImageUrl(documentRef, href);
   if (imageUrl) {

@@ -12,6 +12,7 @@ export interface SourceContext {
   brand?: string;
   variationTokens: string[];
   destinationCountryCode: string;
+  deliverTo?: string;
   sourceUrl: string;
   imageUrl?: string;
 }
@@ -100,6 +101,7 @@ export interface SearchExtractionRequest {
 export interface ProductExtractionRequest {
   marketplace: Marketplace;
   sourceDestinationCountryCode: string;
+  sourceDeliverTo?: string;
 }
 
 export type ComparisonPhase = "OPEN" | "SEARCH" | "MATCH" | "READ";

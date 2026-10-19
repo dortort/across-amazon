@@ -428,6 +428,22 @@ describe("product extractor delivery address", () => {
     expect(result.destinationMatched).toBe(true);
   });
 
+  it("leaves the town and postcode the source page also shows unresolved", () => {
+    const dom = new JSDOM(`<!doctype html><html><body>${deliverToBox("Paris 75001")}</body></html>`, {
+      url: "https://www.amazon.de/dp/B09XS7JWHH"
+    });
+    const read = (sourceDeliverTo?: string) =>
+      extractProductData(
+        dom.window.document,
+        { marketplace: "DE", sourceDestinationCountryCode: "US", sourceDeliverTo },
+        dom.window.location.href
+      );
+
+    expect(read("Deliver to Francis Paris 75001")).toMatchObject({ destinationCountryCode: undefined, destinationMatched: true });
+    expect(read("Deliver to Francis New York 10001")).toMatchObject({ destinationCountryCode: "DE", destinationMatched: false });
+    expect(read(undefined)).toMatchObject({ destinationCountryCode: "DE", destinationMatched: false });
+  });
+
   it("leaves a country it does not know unresolved, even beside a dated delivery message", () => {
     const result = deliveringTo(
       '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>' +

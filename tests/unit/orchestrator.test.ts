@@ -62,6 +62,7 @@ const EXPECTED_SOURCE: SourceContext = {
   brand: "Acme",
   variationTokens: ["2 pack", "16 oz", "blue"],
   destinationCountryCode: "US",
+  deliverTo: "Deliver to United States",
   sourceUrl: SOURCE_URL,
   imageUrl: "https://m.media-amazon.com/images/I/41acme-widget._AC_SX425_.jpg"
 };
@@ -1006,6 +1007,23 @@ describe("background orchestrator", () => {
           ]
         }
       ]);
+    });
+
+    it("compares a market whose page shows the same town and postcode as the source page", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (_group, _market, document) => {
+          const line = document.querySelector("#glow-ingress-line2");
+          if (line) {
+            line.textContent = "Paris 75001";
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.source?.deliverTo).toBe("Paris 75001");
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
     });
   });
 

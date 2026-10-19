@@ -273,7 +273,8 @@ async function extractBaseline(activeTabId: number, source: SourceContext): Prom
   try {
     const extraction = await extractProductData(activeTabId, {
       marketplace: source.marketplace,
-      sourceDestinationCountryCode: source.destinationCountryCode
+      sourceDestinationCountryCode: source.destinationCountryCode,
+      sourceDeliverTo: source.deliverTo
     });
 
     const breakdown = extraction?.breakdown;
@@ -311,7 +312,8 @@ async function readProductPage(
     await waitForTabComplete(tabId);
     return await extractProductData(tabId, {
       marketplace: targetMarket,
-      sourceDestinationCountryCode: source.destinationCountryCode
+      sourceDestinationCountryCode: source.destinationCountryCode,
+      sourceDeliverTo: source.deliverTo
     });
   } finally {
     await closeTempTab(tabId, token);
@@ -457,7 +459,8 @@ async function compareMarket(
   enterPhase("READ");
   const productData = await extractProductData(productTabId, {
     marketplace: targetMarket,
-    sourceDestinationCountryCode: source.destinationCountryCode
+    sourceDestinationCountryCode: source.destinationCountryCode,
+    sourceDeliverTo: source.deliverTo
   });
   await closeTempTab(productTabId, token);
 

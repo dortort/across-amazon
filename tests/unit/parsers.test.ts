@@ -625,6 +625,13 @@ describe("source brand and ASIN", () => {
     </tr></table>`;
   }
 
+  it("keeps the delivery address the source page shows, and leaves it out when there is none", () => {
+    const deliverTo = '<span id="glow-ingress-line1">Deliver to Francis</span><span id="glow-ingress-line2">\n  Paris 75001 </span>';
+
+    expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}${deliverTo}`)?.deliverTo).toBe("Paris 75001 Deliver to Francis");
+    expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}`)).not.toHaveProperty("deliverTo");
+  });
+
   it.each(MARKETS)("reads the brand from the %s source page", (market) => {
     const dom = loadFixture("source", market);
     const extracted = extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname);
