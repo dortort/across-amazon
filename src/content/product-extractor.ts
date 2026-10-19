@@ -1,4 +1,4 @@
-import type { ProductExtractionRequest, ProductExtractionResult } from "../shared/types";
+import type { ProductExtractionRequest, ProductExtractionResult, VariantOption } from "../shared/types";
 
 interface CountryAlias {
   code: string;
@@ -320,6 +320,36 @@ function readDocumentAsin(documentRef: Document, canonicalHref?: string): string
   return canonicalHref?.match(PRODUCT_PATH_ASIN)?.[1]?.toUpperCase();
 }
 
+const SELECTED_VARIANT_SELECTORS = [
+  '[id^="inline-twister-expanded-dimension-text-"]',
+  "#variation_color_name .selection",
+  "#variation_size_name .selection",
+  "#variation_style_name .selection",
+  "#variation_pattern_name .selection",
+  "#variation_item_package_quantity .selection"
+];
+
+function collapseText(element: Element | null | undefined): string | undefined {
+  return element?.textContent?.replace(/\s+/g, " ").trim() || undefined;
+}
+
+function readSelectedVariants(documentRef: Document): string[] {
+  const values = SELECTED_VARIANT_SELECTORS.flatMap((selector) =>
+    Array.from(documentRef.querySelectorAll(selector), (element) => collapseText(element))
+  );
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+function readVariantOptions(documentRef: Document): VariantOption[] {
+  return Array.from(documentRef.querySelectorAll('[id^="inline-twister-row-"] li[data-asin]')).flatMap((item) => {
+    const asin = item.getAttribute("data-asin")?.trim().toUpperCase();
+    const label =
+      item.querySelector("img.swatch-image")?.getAttribute("alt")?.replace(/\s+/g, " ").trim() ||
+      collapseText(item.querySelector(".swatch-title-text-display"));
+    return asin && ASIN_PATTERN.test(asin) && label ? [{ asin, label }] : [];
+  });
+}
+
 export function extractProductData(
   documentRef: Document,
   request: ProductExtractionRequest,
@@ -390,7 +420,9 @@ export function extractProductData(
   return {
     marketplace: request.marketplace,
     asin: readDocumentAsin(documentRef, canonicalHref),
-    title: documentRef.querySelector("#productTitle")?.textContent?.replace(/\s+/g, " ").trim() || undefined,
+    title: collapseText(documentRef.querySelector("#productTitle")),
+    selectedVariants: readSelectedVariants(documentRef),
+    variantOptions: readVariantOptions(documentRef),
     canonicalUrl,
     destinationCountryCode: destinationDetected,
     destinationMatched,

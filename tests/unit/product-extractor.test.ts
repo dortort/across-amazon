@@ -368,6 +368,39 @@ describe("product extractor on pages for a delivery address in Switzerland", () 
   });
 });
 
+describe("product extractor variants", () => {
+  it("reads the selected variant and every variant the twister offers", () => {
+    const result = extractLive("UK-other-colour.html", "UK");
+
+    expect(result.asin).toBe("B09Y2LL45F");
+    expect(result.selectedVariants).toEqual(["With Hard Case", "Silver"]);
+    expect(result.variantOptions).toEqual([
+      { asin: "B09Y2LL45F", label: "With Hard Case" },
+      { asin: "B0F38PL24W", label: "With Soft Case" },
+      { asin: "B09Y2LL45F", label: "Silver" },
+      { asin: "B09Y2MYL5C", label: "Black" },
+      { asin: "B0BXM22X99", label: "Midnight Blue" },
+      { asin: "B0DBLP647C", label: "Smoky Pink" }
+    ]);
+  });
+
+  it("reads the selected variant from the older variation selectors", () => {
+    const result = extract(
+      '<div id="variation_color_name"><span class="selection"> Blue </span></div><div id="variation_size_name"><span class="selection">16 oz</span></div>'
+    );
+
+    expect(result.selectedVariants).toEqual(["Blue", "16 oz"]);
+    expect(result.variantOptions).toEqual([]);
+  });
+
+  it("returns no variants for a page without a twister", () => {
+    const result = extract("");
+
+    expect(result.selectedVariants).toEqual([]);
+    expect(result.variantOptions).toEqual([]);
+  });
+});
+
 describe("product extractor pages without a price", () => {
   function priceless(body: string): ProductExtractionResult {
     const dom = new JSDOM(`<!doctype html><html><body><span id="productTitle">Sony WH-1000XM5</span>${body}</body></html>`, {

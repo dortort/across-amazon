@@ -65,10 +65,17 @@ export interface FxTable {
   source: "ECB" | "FRANKFURTER";
 }
 
+export interface VariantOption {
+  asin: string;
+  label: string;
+}
+
 export interface ProductExtractionResult {
   marketplace: Marketplace;
   asin?: string;
   title?: string;
+  selectedVariants: string[];
+  variantOptions: VariantOption[];
   canonicalUrl: string;
   destinationCountryCode?: string;
   destinationMatched: boolean;
