@@ -2,7 +2,7 @@ import { MARKETPLACE_CODES } from "./markets";
 import type { CachedComparisonRecord, ExtensionSettings, Marketplace } from "./types";
 
 const SETTINGS_KEY = "settings:v1";
-const COMPARISON_CACHE_VERSION = 4;
+const COMPARISON_CACHE_VERSION = 5;
 
 const DEFAULT_SETTINGS: ExtensionSettings = {
   enabledMarketplaces: [...MARKETPLACE_CODES],

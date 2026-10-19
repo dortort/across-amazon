@@ -511,6 +511,7 @@ function earlierCacheKeyFor(targetMarkets: Marketplace[], version?: number): str
     [...EXPECTED_SOURCE.variationTokens].sort().join("|"),
     "US",
     "US",
+    ...(version !== undefined && version >= 4 ? [(EXPECTED_SOURCE.deliverTo ?? "").toLowerCase()] : []),
     [...targetMarkets].sort().join("|")
   ].join("::");
   let hash = 0;
@@ -1475,7 +1476,8 @@ describe("background orchestrator", () => {
     it.each([
       ["the unversioned key of the first builds", undefined],
       ["the key of version 2, before variant checks and import-free quotes", 2],
-      ["the key of version 3, before model-number matching and the delivery address", 3]
+      ["the key of version 3, before model-number matching and the delivery address", 3],
+      ["the key of version 4, before dead listings fell back to a search", 4]
     ])("ignores a comparison cached under %s", async (_key, version) => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
       const staleKey = earlierCacheKeyFor(["DE"], version);
