@@ -1851,6 +1851,55 @@ describe("background orchestrator", () => {
       expect(harness.storage[cacheKeyFor(["DE"])]).not.toHaveProperty("baseline");
     });
 
+    describe("on the live amazon.com page of a cable that ships to an address in Switzerland", () => {
+      const LIVE_SOURCE_URL = "https://www.amazon.com/dp/B09LCMVB3F";
+      const LIVE_BASELINE: ComparisonResult = {
+        marketplace: "US",
+        status: "OK",
+        confidence: 1,
+        productUrl: LIVE_SOURCE_URL,
+        breakdown: {
+          item: { amount: 18.99, currency: "USD" },
+          shipping: { amount: 17.88, currency: "USD" },
+          importFees: { amount: 0, currency: "USD" },
+          totalDisplayed: { amount: 36.87, currency: "USD" }
+        },
+        notes: []
+      };
+
+      function livePage(prepare?: (document: Document) => void): string {
+        const dom = new JSDOM(readFileSync(join(FIXTURE_ROOT, "product-live", "US-no-import-charges.html"), "utf8"));
+        prepare?.(dom.window.document);
+        return dom.serialize();
+      }
+
+      it.each([
+        ["as captured", livePage()],
+        [
+          "without its buy box price",
+          livePage((document) => document.querySelectorAll("#corePrice_feature_div").forEach((element) => element.remove()))
+        ]
+      ])("LOAD_SOURCE reads the item, shipping and zero import fees of the page %s", async (_label, activeHtml) => {
+        const harness = await bootServiceWorker({ enabledMarketplaces: ["US"], activeUrl: LIVE_SOURCE_URL, activeHtml });
+
+        const response = await loadSourceViaWorker(harness);
+
+        expect(response.error).toBeUndefined();
+        expect(response.source?.asin).toBe("B09LCMVB3F");
+        expect(response.baseline).toEqual(LIVE_BASELINE);
+      });
+
+      it("totals the run's baseline at the displayed $36.87", async () => {
+        const harness = await bootServiceWorker({ enabledMarketplaces: ["US"], activeUrl: LIVE_SOURCE_URL, activeHtml: livePage() });
+
+        const payload = await runViaWorker(harness);
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.baseline).toEqual({ ...LIVE_BASELINE, normalizedTotal: { amount: 36.87, currency: "USD" } });
+        expect(payload.results).toEqual([]);
+      });
+    });
+
     it("normalizes the run's baseline and results into a fixed comparison currency while LOAD_SOURCE stays raw", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"], comparisonCurrency: "EUR" });
 

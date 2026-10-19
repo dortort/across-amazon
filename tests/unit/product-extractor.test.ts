@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { extractProductData } from "../../src/content/product-extractor";
-import type { Marketplace, ProductExtractionResult } from "../../src/shared/types";
+import { deliveredTotal } from "../../src/shared/money";
+import type { ListingAvailability, Marketplace, Money, PriceBreakdown, ProductExtractionResult } from "../../src/shared/types";
 
 const PAGE_BY_MARKET: Partial<Record<Marketplace, { url: string; item: string }>> = {
   US: { url: "https://www.amazon.com/dp/B000000001", item: "$49.99" },
@@ -442,12 +443,18 @@ describe("product extractor identity", () => {
   });
 });
 
-function extractLive(file: string, marketplace: Marketplace): ProductExtractionResult {
+function extractLive(
+  file: string,
+  marketplace: Marketplace,
+  sourceDestinationCountryCode: string = marketplace,
+  prepare?: (document: Document) => void
+): ProductExtractionResult {
   const html = readFileSync(join(process.cwd(), "tests", "fixtures", "product-live", file), "utf8");
   const probe = new JSDOM(html);
   const url = probe.window.document.querySelector("meta[name='source-url']")?.getAttribute("content") ?? "";
   const dom = new JSDOM(html, { url });
-  return extractProductData(dom.window.document, { marketplace, sourceDestinationCountryCode: marketplace }, dom.window.location.href);
+  prepare?.(dom.window.document);
+  return extractProductData(dom.window.document, { marketplace, sourceDestinationCountryCode }, dom.window.location.href);
 }
 
 describe("product extractor on pages for a delivery address in Switzerland", () => {
@@ -485,6 +492,154 @@ describe("product extractor on pages for a delivery address in Switzerland", () 
     expect(result.breakdown?.item).toEqual({ amount: 78.27, currency: "CHF" });
     expect(result.breakdown?.shipping).toEqual({ amount: 41.36, currency: "CHF" });
     expect(result.notes).toEqual(["Import fees not displayed for destination"]);
+  });
+});
+
+describe("product extractor on live pages of one cable for a delivery address in Switzerland", () => {
+  interface LivePage {
+    file: string;
+    market: Marketplace;
+    asin: string;
+    breakdown?: PriceBreakdown;
+    delivered?: Money;
+    availability: ListingAvailability;
+    notes: string[];
+  }
+
+  const NO_IMPORT_FEES_NOTE = "Import fees not displayed for destination";
+  const priceless = (notice: string): string[] => [
+    "Price not displayed for destination",
+    `Amazon says: ${notice}`,
+    "Shipping not displayed for destination",
+    NO_IMPORT_FEES_NOTE
+  ];
+
+  const LIVE_PAGES: LivePage[] = [
+    {
+      file: "US-no-import-charges.html",
+      market: "US",
+      asin: "B09LCMVB3F",
+      breakdown: {
+        item: { amount: 18.99, currency: "USD" },
+        shipping: { amount: 17.88, currency: "USD" },
+        importFees: { amount: 0, currency: "USD" },
+        totalDisplayed: { amount: 36.87, currency: "USD" }
+      },
+      delivered: { amount: 36.87, currency: "USD" },
+      availability: "available",
+      notes: []
+    },
+    {
+      file: "DE-new-and-used-offers.html",
+      market: "DE",
+      asin: "B09LCMVB3F",
+      breakdown: { item: { amount: 78.27, currency: "CHF" }, shipping: { amount: 41.36, currency: "CHF" } },
+      delivered: { amount: 119.63, currency: "CHF" },
+      availability: "available",
+      notes: [NO_IMPORT_FEES_NOTE]
+    },
+    {
+      file: "UK-deal-ships-to-switzerland.html",
+      market: "UK",
+      asin: "B0F62PGJSM",
+      breakdown: { item: { amount: 32.8, currency: "CHF" }, shipping: { amount: 36.34, currency: "CHF" } },
+      delivered: { amount: 69.14, currency: "CHF" },
+      availability: "available",
+      notes: [NO_IMPORT_FEES_NOTE]
+    },
+    {
+      file: "JP-deal-ships-to-switzerland.html",
+      market: "JP",
+      asin: "B0FJ1XPCTR",
+      breakdown: { item: { amount: 804, currency: "JPY" }, shipping: { amount: 4716, currency: "JPY" } },
+      delivered: { amount: 5520, currency: "JPY" },
+      availability: "available",
+      notes: [NO_IMPORT_FEES_NOTE]
+    },
+    {
+      file: "UK-cannot-dispatch-to-switzerland.html",
+      market: "UK",
+      asin: "B09LCMVB3F",
+      availability: "undeliverable",
+      notes: priceless("This item cannot be dispatched to your selected delivery location. Please choose a different delivery location.")
+    },
+    {
+      file: "JP-cannot-ship-to-switzerland.html",
+      market: "JP",
+      asin: "B09LCMVB3F",
+      availability: "undeliverable",
+      notes: priceless("This item cannot be shipped to your selected delivery location. Please choose a different delivery location.")
+    }
+  ];
+
+  it.each(LIVE_PAGES)("reads the cost stack of $file", ({ file, market, asin, breakdown, delivered, availability, notes }) => {
+    const result = extractLive(file, market, "US");
+
+    expect(result.asin).toBe(asin);
+    expect(result.breakdown).toEqual(breakdown);
+    expect(deliveredTotal(result.breakdown)).toEqual(delivered);
+    expect(result).toMatchObject({
+      destinationCountryCode: undefined,
+      destinationMatched: true,
+      isDeliverable: breakdown !== undefined,
+      availability
+    });
+    expect(result.notes).toEqual(notes);
+  });
+
+  it.each(LIVE_PAGES.filter((page) => page.breakdown))(
+    "still reads the item price of $file from the centre column when the buy box shows none",
+    ({ file, market, breakdown }) => {
+      const result = extractLive(file, market, "US", (document) => {
+        document.querySelectorAll("#corePrice_feature_div").forEach((element) => element.remove());
+      });
+
+      expect(result.breakdown?.item).toEqual(breakdown?.item);
+    }
+  );
+
+  it.each([
+    {
+      without: "its AmazonGlobal details",
+      selector: "#amazonGlobal_feature_div .a-popover-preload",
+      importFees: { amount: 0, currency: "USD" },
+      notes: []
+    },
+    { without: "any AmazonGlobal block", selector: "#amazonGlobal_feature_div", importFees: undefined, notes: [NO_IMPORT_FEES_NOTE] }
+  ])("still reads the amazon.com shipping without $without", ({ selector, importFees, notes }) => {
+    const result = extractLive("US-no-import-charges.html", "US", "US", (document) => {
+      document.querySelectorAll(selector).forEach((element) => element.remove());
+    });
+
+    expect(result.breakdown).toEqual({
+      item: { amount: 18.99, currency: "USD" },
+      shipping: { amount: 17.88, currency: "USD" },
+      importFees
+    });
+    expect(result.notes).toEqual(notes);
+  });
+
+  it("reads the amazon.ca page that kept an address in Canada as a destination mismatch", () => {
+    const result = extractLive("CA-domestic-address.html", "CA", "US");
+
+    expect(result.asin).toBe("B09LCD851Z");
+    expect(result.breakdown).toEqual({ item: { amount: 16.99, currency: "CAD" }, shipping: { amount: 0, currency: "CAD" } });
+    expect(deliveredTotal(result.breakdown)).toEqual({ amount: 16.99, currency: "CAD" });
+    expect(result).toMatchObject({
+      destinationCountryCode: "CA",
+      destinationMatched: false,
+      isDeliverable: false,
+      availability: "available"
+    });
+    expect(result.notes).toEqual([NO_IMPORT_FEES_NOTE, "Destination mismatch detected (CA)"]);
+  });
+
+  it("reads the centre column price of the amazon.ca page, not its per-unit price, when the buy box shows none", () => {
+    const result = extractLive("CA-domestic-address.html", "CA", "US", (document) => {
+      document.querySelectorAll("#corePrice_feature_div").forEach((element) => element.remove());
+    });
+
+    expect(result.breakdown?.item).toEqual({ amount: 16.99, currency: "CAD" });
   });
 });
 
