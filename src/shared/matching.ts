@@ -228,7 +228,7 @@ function isSameBrandAndModel(source: SourceContext, candidate: SearchCandidate):
 
 const MODEL_WORD = /\b(?=[a-z0-9-]*\d)(?=[a-z0-9-]*[a-z])[a-z0-9]+(?:-[a-z0-9]+)*\b/gi;
 
-export function buildSearchQuery(source: SourceContext): string {
+export function buildSearchQueries(source: SourceContext): string[] {
   const models = new Map<string, string>();
   for (const word of source.title.match(MODEL_WORD) ?? []) {
     if (!models.has(word.toLowerCase()) && readModelNumbers(word).some(isDistinctiveModel)) {
@@ -236,8 +236,9 @@ export function buildSearchQuery(source: SourceContext): string {
     }
   }
 
-  const parts = models.size > 0 ? [source.brand, ...models.values()] : [source.title, source.brand, ...source.variationTokens];
-  return parts.filter(Boolean).join(" ");
+  const titleQuery = [source.title, source.brand, ...source.variationTokens].filter(Boolean).join(" ");
+  const modelQuery = [source.brand, ...models.values()].filter(Boolean).join(" ");
+  return models.size > 0 ? [modelQuery, titleQuery] : [titleQuery];
 }
 
 function hasModelConflict(sourceTitle: string, candidateTitle: string): boolean {

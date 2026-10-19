@@ -2,7 +2,7 @@ import { buildProductUrl, buildSearchUrl } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
 import {
-  buildSearchQuery,
+  buildSearchQueries,
   computeMatchScore,
   findSourceVariant,
   pickBestCandidate,
@@ -416,10 +416,38 @@ function buildProductResult(
   };
 }
 
+async function searchForMatch(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  queries: string[],
+  token: RunToken,
+  enterPhase: (phase: ComparisonPhase) => void
+): Promise<{ candidate: SearchCandidate; score: MatchScore } | undefined> {
+  for (const query of queries) {
+    const searchTabId = await openInactiveTab(buildSearchUrl(targetMarket, query), token);
+    await waitForTabComplete(searchTabId);
+
+    enterPhase("SEARCH");
+    const candidates = await extractSearchCandidates(searchTabId, {
+      marketplace: targetMarket,
+      limit: 8
+    });
+    await closeTempTab(searchTabId, token);
+
+    enterPhase("MATCH");
+    const best = pickBestCandidate(source, candidates);
+    if (best) {
+      return best;
+    }
+  }
+
+  return undefined;
+}
+
 async function compareMarket(
   source: SourceContext,
   targetMarket: Marketplace,
-  query: string,
+  queries: string[],
   token: RunToken,
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<ComparisonResult> {
@@ -437,18 +465,7 @@ async function compareMarket(
     return buildProductResult(targetMarket, asinData, match, ["Matched by ASIN"], productUrl);
   }
 
-  const searchTabId = await openInactiveTab(buildSearchUrl(targetMarket, query), token);
-  await waitForTabComplete(searchTabId);
-
-  enterPhase("SEARCH");
-  const candidates = await extractSearchCandidates(searchTabId, {
-    marketplace: targetMarket,
-    limit: 8
-  });
-  await closeTempTab(searchTabId, token);
-
-  enterPhase("MATCH");
-  const best = pickBestCandidate(source, candidates);
+  const best = await searchForMatch(source, targetMarket, queries, token, enterPhase);
   if (!best) {
     return buildNoMatchResult(targetMarket);
   }
@@ -544,7 +561,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
     const comparisonCurrency = resolveComparisonCurrency(settings, source);
     baseline = baseline && normalizeResult(baseline, comparisonCurrency, table);
 
-    const query = buildSearchQuery(source);
+    const queries = buildSearchQueries(source);
     const total = targetMarkets.length;
 
     for (const [index, targetMarket] of targetMarkets.entries()) {
@@ -562,7 +579,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
         });
       };
 
-      const result = await compareMarket(source, targetMarket, query, token, enterPhase).catch((error: unknown) =>
+      const result = await compareMarket(source, targetMarket, queries, token, enterPhase).catch((error: unknown) =>
         buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"))
       );
       assertNotCancelled(token);

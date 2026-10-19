@@ -847,6 +847,41 @@ describe("background orchestrator", () => {
       expect(payload.results).toMatchObject([{ marketplace: "DE", status: "OK", productUrl: "https://www.amazon.de/dp/B000000005" }]);
     });
 
+    it("searches by the title when the brand and model number search lists no match", async () => {
+      const modelQueryUrl = "https://www.amazon.de/s?k=Acme%20AW-2400X";
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (group, _market, document) => {
+          for (const element of document.querySelectorAll("#productTitle, h2 span")) {
+            element.textContent = element.textContent?.replace("Model X100", "AW-2400X") ?? null;
+          }
+          if (group === "search" && document.URL === modelQueryUrl) {
+            document.querySelector("[data-asin='B000000005']")?.remove();
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+        "https://www.amazon.de/dp/B000000001",
+        modelQueryUrl,
+        "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20AW-2400X%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue",
+        "https://www.amazon.de/dp/B000000005"
+      ]);
+      expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual([
+        "OPEN",
+        "SEARCH",
+        "MATCH",
+        "SEARCH",
+        "MATCH",
+        "READ",
+        undefined
+      ]);
+      expect(payload.results).toMatchObject([{ marketplace: "DE", status: "OK", productUrl: "https://www.amazon.de/dp/B000000005" }]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
     it("searches a marketplace whose page for the source ASIN shows another product", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], redirectAsinOn: ["DE"] });
 

@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import {
-  buildSearchQuery,
+  buildSearchQueries,
   computeMatchScore,
   extractAttributeTokens,
   findSourceVariant,
@@ -432,13 +432,15 @@ describe("variant check", () => {
   });
 });
 
-describe("search query", () => {
-  it("searches by brand and model number when the title carries a distinctive model number", () => {
-    expect(buildSearchQuery({ ...SONY_SOURCE, variationTokens: ["black"] })).toBe("Sony WH-1000XM5");
+describe("search queries", () => {
+  const SONY_TITLE_QUERY = "Sony WH-1000XM5 Premium Noise Cancelling Wireless Headphones, Black Sony black";
+
+  it("searches by brand and model number first, then by the title, when the title carries a distinctive model number", () => {
+    expect(buildSearchQueries({ ...SONY_SOURCE, variationTokens: ["black"] })).toEqual(["Sony WH-1000XM5", SONY_TITLE_QUERY]);
   });
 
   it("names each model number once and leaves the brand out when the source page has none", () => {
-    expect(buildSearchQuery({ ...SONY_SOURCE, brand: undefined, title: "WH-1000XM5 Headphones, wh-1000xm5 Black" })).toBe(
+    expect(buildSearchQueries({ ...SONY_SOURCE, brand: undefined, title: "WH-1000XM5 Headphones, wh-1000xm5 Black" })[0]).toBe(
       "WH-1000XM5"
     );
   });
@@ -450,7 +452,7 @@ describe("search query", () => {
       { ...ACME_SOURCE, title: "Acme USB C Cable 100W 2M 128GB", variationTokens: [] },
       "Acme USB C Cable 100W 2M 128GB Acme"
     ]
-  ])("searches by the title, brand and variant tokens when the title has %s", (_case, source, query) => {
-    expect(buildSearchQuery(source)).toBe(query);
+  ])("searches by the title, brand and variant tokens alone when the title has %s", (_case, source, query) => {
+    expect(buildSearchQueries(source)).toEqual([query]);
   });
 });
