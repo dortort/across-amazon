@@ -535,6 +535,27 @@ function removeElement(document: Document, selector: string): void {
   document.querySelector(selector)?.remove();
 }
 
+const OFFER_SELECTORS = [
+  "#corePriceDisplay_desktop_feature_div",
+  "#deliveryBlockMessage",
+  "#exports_desktop_feature_div",
+  "#subtotals-marketplace-table"
+];
+
+function replaceOfferWithLiveBlocks(document: Document, file: string, blocks: string[]): void {
+  for (const selector of OFFER_SELECTORS) {
+    removeElement(document, selector);
+  }
+  const live = new JSDOM(readFileSync(join(FIXTURE_ROOT, "product-live", file), "utf8")).window.document;
+  for (const block of blocks) {
+    const section = live.querySelector(`section[data-live-block='${block}']`);
+    if (!section) {
+      throw new Error(`No ${block} block in ${file}`);
+    }
+    document.body.insertAdjacentHTML("beforeend", section.innerHTML);
+  }
+}
+
 function marketEvents(harness: Harness, market: Marketplace): string[] {
   const start = harness.events.indexOf(`progress OPEN ${market}`);
   const end = harness.events.findIndex(
@@ -954,6 +975,97 @@ describe("background orchestrator", () => {
         }
       ]);
       expect(harness.events).not.toContain("open search/DE");
+      expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+      expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "READ", undefined]);
+    });
+
+    describe("dead listings", () => {
+      const SOURCE_ASIN_URL = "https://www.amazon.de/dp/B000000001";
+      const TITLE_QUERY_URL =
+        "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20Model%20X100%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue";
+
+      function onSourceAsinPage(file: string, blocks: string[]): Prepare {
+        return (group, _market, document) => {
+          if (group === "product" && document.URL === SOURCE_ASIN_URL) {
+            replaceOfferWithLiveBlocks(document, file, blocks);
+          }
+        };
+      }
+
+      it("searches a marketplace whose page for the source ASIN is a dead listing and quotes the listing the search finds", async () => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          sourceAsinOn: ["DE"],
+          prepare: onSourceAsinPage("DE-currently-unavailable.html", ["availability", "buybox"])
+        });
+
+        const payload = await runViaWorker(harness);
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+        expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+          SOURCE_ASIN_URL,
+          TITLE_QUERY_URL,
+          "https://www.amazon.de/dp/B000000005"
+        ]);
+        expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "SEARCH", "MATCH", "READ", undefined]);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
+
+      it("skips the dead listing's own card in the search results", async () => {
+        const deadListingPage = onSourceAsinPage("DE-currently-unavailable.html", ["availability", "buybox"]);
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          sourceAsinOn: ["DE"],
+          prepare: (group, market, document) => {
+            deadListingPage(group, market, document);
+            if (group === "search") {
+              document.body.insertAdjacentHTML(
+                "afterbegin",
+                '<div class="s-result-item" data-component-type="s-search-result" data-asin="B000000001"><h2><a href="/dp/B000000001"><span>Acme Ultra Widget Model X100 2 Pack Blue</span></a></h2><div class="a-row a-size-base a-color-secondary"><span class="a-size-base-plus">Acme</span></div></div>'
+              );
+            }
+          }
+        });
+
+        const payload = await runViaWorker(harness);
+
+        expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+        expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+          SOURCE_ASIN_URL,
+          TITLE_QUERY_URL,
+          "https://www.amazon.de/dp/B000000005"
+        ]);
+      });
+
+      it("quotes a page for the source ASIN that cannot be dispatched to the address in one tab, without searching", async () => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          sourceAsinOn: ["DE"],
+          prepare: onSourceAsinPage("UK-other-colour.html", ["availability"])
+        });
+
+        const payload = await runViaWorker(harness);
+
+        expect(payload.results).toEqual([
+          {
+            marketplace: "DE",
+            status: "UNAVAILABLE",
+            confidence: 0.82,
+            productUrl: SOURCE_ASIN_URL,
+            notes: [
+              "Matched by ASIN",
+              "Price not displayed for destination",
+              "Amazon says: This item cannot be dispatched to your selected delivery location. Please choose a different delivery location.",
+              "Shipping not displayed for destination",
+              "Import fees not displayed for destination"
+            ]
+          }
+        ]);
+        expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+        expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "READ", undefined]);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
     });
 
     it("searches when the page for the source ASIN cannot be scripted", async () => {

@@ -5,6 +5,7 @@ import {
   buildSearchQueries,
   computeMatchScore,
   findSourceVariant,
+  normalizeAsin,
   pickBestCandidate,
   sharesSourceAsin,
   variantConflicts
@@ -320,19 +321,22 @@ async function readProductPage(
   }
 }
 
-async function lookUpSourceAsin(
-  source: SourceContext,
-  targetMarket: Marketplace,
-  token: RunToken
-): Promise<ProductExtractionResult | undefined> {
+type AsinLookup = { status: "MATCHED"; productData: ProductExtractionResult } | { status: "DEAD" | "MISSED" };
+
+async function lookUpSourceAsin(source: SourceContext, targetMarket: Marketplace, token: RunToken): Promise<AsinLookup> {
+  let productData: ProductExtractionResult | undefined;
   try {
-    const productData = await readProductPage(source, targetMarket, source.asin, token);
-    const listing = { marketplace: targetMarket, asin: productData?.asin, title: productData?.title };
-    return productData && sharesSourceAsin(source, listing) ? productData : undefined;
+    productData = await readProductPage(source, targetMarket, source.asin, token);
   } catch {
     assertNotCancelled(token);
-    return undefined;
+    return { status: "MISSED" };
   }
+
+  if (!productData || !sharesSourceAsin(source, { marketplace: targetMarket, asin: productData.asin, title: productData.title })) {
+    return { status: "MISSED" };
+  }
+
+  return productData.availability === "unavailable" ? { status: "DEAD" } : { status: "MATCHED", productData };
 }
 
 interface ResolvedVariant {
@@ -420,6 +424,7 @@ async function searchForMatch(
   source: SourceContext,
   targetMarket: Marketplace,
   queries: string[],
+  skippedAsins: string[],
   token: RunToken,
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<{ candidate: SearchCandidate; score: MatchScore } | undefined> {
@@ -435,7 +440,10 @@ async function searchForMatch(
     await closeTempTab(searchTabId, token);
 
     enterPhase("MATCH");
-    const best = pickBestCandidate(source, candidates);
+    const best = pickBestCandidate(
+      source,
+      candidates.filter((candidate) => !skippedAsins.includes(normalizeAsin(candidate.asin)))
+    );
     if (best) {
       return best;
     }
@@ -452,20 +460,21 @@ async function compareMarket(
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<ComparisonResult> {
   enterPhase("OPEN");
-  const asinData = await lookUpSourceAsin(source, targetMarket, token);
-  if (asinData) {
+  const lookup = await lookUpSourceAsin(source, targetMarket, token);
+  if (lookup.status === "MATCHED") {
     enterPhase("READ");
     const productUrl = buildProductUrl(targetMarket, source.asin);
     const match = computeMatchScore(source, {
       marketplace: targetMarket,
-      asin: asinData.asin,
-      title: asinData.title ?? "",
+      asin: lookup.productData.asin,
+      title: lookup.productData.title ?? "",
       url: productUrl
     });
-    return buildProductResult(targetMarket, asinData, match, ["Matched by ASIN"], productUrl);
+    return buildProductResult(targetMarket, lookup.productData, match, ["Matched by ASIN"], productUrl);
   }
 
-  const best = await searchForMatch(source, targetMarket, queries, token, enterPhase);
+  const skippedAsins = lookup.status === "DEAD" ? [normalizeAsin(source.asin)] : [];
+  const best = await searchForMatch(source, targetMarket, queries, skippedAsins, token, enterPhase);
   if (!best) {
     return buildNoMatchResult(targetMarket);
   }
