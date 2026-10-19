@@ -314,11 +314,51 @@ describe("product extractor delivery charges", () => {
       expect(result.notes).not.toContain("Import fees not displayed for destination");
     });
 
+    it.each(["No Import Fees Deposit", "No Import Charges"])(
+      "reads %s beside a shipping price element in the same block as zero import fees",
+      (marker) => {
+        const result = extract(`<div id="deliveryBlockMessage">${marker} &amp; <span class="a-color-price">$12.99</span> Shipping to Canada</div>`);
+
+        expect(result.breakdown?.shipping).toEqual({ amount: 12.99, currency: "USD" });
+        expect(result.breakdown?.importFees).toEqual({ amount: 0, currency: "USD" });
+      }
+    );
+
     it("splits a combined No Import Fees Deposit and shipping line into zero import fees and the shipping price", () => {
       const result = extract('<div id="deliveryBlockMessage">No Import Fees Deposit &amp; $12.99 Shipping to Canada</div>');
 
       expect(result.breakdown?.shipping).toEqual({ amount: 12.99, currency: "USD" });
       expect(result.breakdown?.importFees).toEqual({ amount: 0, currency: "USD" });
+    });
+  });
+
+  describe("the delivery message's price attribute", () => {
+    function deliveryBlock(primary: string, secondary = 'data-csa-c-delivery-price="fastest"'): string {
+      return `<div id="deliveryBlockMessage"><div id="mir-layout-DELIVERY_BLOCK"><div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"><span ${primary}> Delivery <span class="a-text-bold">Thursday, November 5</span> to Switzerland. Order within 7 hrs 52 mins</span></div><div id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"><span ${secondary}> Or fastest delivery <span class="a-text-bold">Wednesday, October 28</span></span></div></div></div>`;
+    }
+
+    it("reads the delivery charge from the attribute when the message text shows none", () => {
+      const result = extract(deliveryBlock('data-csa-c-delivery-price="$17.88" data-csa-c-delivery-destination="Switzerland"'));
+
+      expect(result.breakdown?.shipping).toEqual({ amount: 17.88, currency: "USD" });
+      expect(result.hasShippingInfo).toBe(true);
+    });
+
+    it.each([
+      { value: "CHF&nbsp;41.36", market: "DE", shipping: { amount: 41.36, currency: "CHF" } },
+      { value: "¥4716", market: "JP", shipping: { amount: 4716, currency: "JPY" } },
+      { value: "FREE", market: "US", shipping: { amount: 0, currency: "USD" } }
+    ] as const)("reads the attribute value $value on $market", ({ value, market, shipping }) => {
+      const result = extract(deliveryBlock(`data-csa-c-delivery-price="${value}"`), market);
+
+      expect(result.breakdown?.shipping).toEqual(shipping);
+    });
+
+    it("does not quote the price of the fastest delivery option", () => {
+      const result = extract(deliveryBlock("", 'data-csa-c-delivery-price="$29.99"'));
+
+      expect(result.hasShippingInfo).toBe(false);
+      expect(result.breakdown?.shipping).toBeUndefined();
     });
   });
 
@@ -546,6 +586,17 @@ describe("product extractor delivery address", () => {
     expect(result.destinationMatched).toBe(true);
   });
 
+  it("reads the country the delivery message names in its destination attribute", () => {
+    const result = readDestination(
+      "US",
+      "www.amazon.com",
+      '<div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"><span data-csa-c-delivery-destination="Canada"> Delivery Friday, October 23</span></div>'
+    );
+
+    expect(result.destinationCountryCode).toBe("CA");
+    expect(result.destinationMatched).toBe(false);
+  });
+
   it("still reads a country a delivery message names in full", () => {
     const result = readDestination(
       "DE",
@@ -766,6 +817,49 @@ describe("product extractor AmazonGlobal details", () => {
       importFees: { amount: 8.53, currency: "USD" },
       totalDisplayed: { amount: 71.51, currency: "USD" }
     });
+  });
+
+  function globalLine(text: string): string {
+    return `<div id="amazonGlobal_feature_div"><span class="a-size-base a-color-secondary"> ${text} </span><span class="a-declarative"><a class="a-popover-trigger"><span class="a-size-base"> Details </span></a></span></div>`;
+  }
+
+  it("reads No Import Charges and the shipping from the AmazonGlobal line when its details are missing", () => {
+    const result = extract(globalLine("No Import Charges &amp; $17.88 Shipping to Switzerland"));
+
+    expect(result.breakdown?.shipping).toEqual({ amount: 17.88, currency: "USD" });
+    expect(result.breakdown?.importFees).toEqual({ amount: 0, currency: "USD" });
+    expect(result.notes).toEqual([]);
+  });
+
+  it("reads the shipping and import charges the AmazonGlobal line quotes", () => {
+    const result = extract(globalLine("$12.99 Shipping &amp; $8.53 Import Charges to Switzerland"));
+
+    expect(result.breakdown?.shipping).toEqual({ amount: 12.99, currency: "USD" });
+    expect(result.breakdown?.importFees).toEqual({ amount: 8.53, currency: "USD" });
+  });
+
+  it("prefers the AmazonGlobal line to a conditional free delivery in the delivery message", () => {
+    const result = extract(
+      `<div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"><span data-csa-c-delivery-price="FREE"> FREE delivery Thursday, November 5 to Switzerland on eligible orders over $49</span></div>${globalLine(
+        "No Import Charges &amp; $17.30 Shipping to Switzerland"
+      )}`
+    );
+
+    expect(result.breakdown?.shipping).toEqual({ amount: 17.3, currency: "USD" });
+  });
+
+  it("lets the AmazonGlobal details win over the AmazonGlobal line", () => {
+    const result = extract(
+      globalDetails([
+        ["Price", "$49.99"],
+        ["AmazonGlobal Shipping", "$12.99"],
+        ["Estimated Import Charges", "$8.53"],
+        ["Total", "$71.51"]
+      ]).replace("$12.99 Shipping &amp; $8.53 Import Charges", "No Import Charges &amp; $11.00 Shipping")
+    );
+
+    expect(result.breakdown?.shipping).toEqual({ amount: 12.99, currency: "USD" });
+    expect(result.breakdown?.importFees).toEqual({ amount: 8.53, currency: "USD" });
   });
 
   it("keeps reading the delivery block when the AmazonGlobal details are empty", () => {

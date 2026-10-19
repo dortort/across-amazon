@@ -166,10 +166,17 @@ function readTexts(documentRef: Document, selectors: string[]): string {
     .join(" ");
 }
 
+function readDeliveryDestinations(documentRef: Document): string[] {
+  return Array.from(
+    documentRef.querySelectorAll("[data-csa-c-delivery-destination]"),
+    (element) => element.getAttribute("data-csa-c-delivery-destination") ?? ""
+  );
+}
+
 function resolveDestinationCountryCode(documentRef: Document, request: ProductExtractionRequest): string | undefined {
   const deliverToText = readTexts(documentRef, DELIVER_TO_SELECTORS);
   const deliverTo = normalize(deliverToText);
-  const message = normalize(readTexts(documentRef, DELIVERY_MESSAGE_SELECTORS));
+  const message = normalize([readTexts(documentRef, DELIVERY_MESSAGE_SELECTORS), ...readDeliveryDestinations(documentRef)].join(" "));
 
   if (!deliverTo && !message) {
     return undefined;
@@ -336,12 +343,14 @@ function findChargeBlock(documentRef: Document, keywords: string[]): Element | u
   return undefined;
 }
 
+function readAmount(text: string, marketCurrency: string): ParsedMoney | undefined {
+  return parseCurrencyMarkedMoney(text, marketCurrency) ?? (BARE_AMOUNT.test(text) ? parseMoney(text, marketCurrency) : undefined);
+}
+
 function readPriceElement(block: Element, marketCurrency: string): ParsedMoney | undefined {
   const priceElements = [...block.querySelectorAll(".a-color-price"), ...block.querySelectorAll(".a-offscreen")];
   for (const element of priceElements) {
-    const text = element.textContent?.trim() ?? "";
-    const amount =
-      parseCurrencyMarkedMoney(text, marketCurrency) ?? (BARE_AMOUNT.test(text) ? parseMoney(text, marketCurrency) : undefined);
+    const amount = readAmount(element.textContent?.trim() ?? "", marketCurrency);
     if (amount) {
       return amount;
     }
@@ -389,10 +398,7 @@ function readAmazonGlobalCharges(documentRef: Document, marketCurrency: string):
     }
 
     const label = normalize(cells[0].textContent ?? "");
-    const valueText = cells[cells.length - 1].textContent?.trim() ?? "";
-    const amount =
-      parseCurrencyMarkedMoney(valueText, marketCurrency) ??
-      (BARE_AMOUNT.test(valueText) ? parseMoney(valueText, marketCurrency) : undefined);
+    const amount = readAmount(cells[cells.length - 1].textContent?.trim() ?? "", marketCurrency);
     if (!amount) {
       continue;
     }
@@ -407,6 +413,77 @@ function readAmazonGlobalCharges(documentRef: Document, marketCurrency: string):
   }
 
   return charges;
+}
+
+const IMPORT_CHARGE = /import (?:fee|charge)/;
+const NO_IMPORT_CHARGE = /(?:^|[^a-z])no import (?:fee|charge)/;
+const SHIPPING_CHARGE = /shipping|delivery/;
+
+interface ChargeLine {
+  shipping?: ChargeReading;
+  importFees?: ChargeReading;
+}
+
+function readChargeClause(clause: string, isFree: boolean, marketCurrency: string): ChargeReading | undefined {
+  if (isFree) {
+    return { isFree: true };
+  }
+
+  const amount = parseCurrencyMarkedMoney(clause, marketCurrency);
+  return amount ? { amount, isFree: false } : undefined;
+}
+
+function readAmazonGlobalLine(documentRef: Document, marketCurrency: string): ChargeLine {
+  for (const line of Array.from(documentRef.querySelectorAll("#amazonGlobal_feature_div > .a-color-secondary"))) {
+    const charges: ChargeLine = {};
+    for (const clause of (line.textContent ?? "").split("&")) {
+      const text = normalize(clause);
+      if (IMPORT_CHARGE.test(text)) {
+        charges.importFees ??= readChargeClause(clause, NO_IMPORT_CHARGE.test(text), marketCurrency);
+      } else if (SHIPPING_CHARGE.test(text)) {
+        charges.shipping ??= readChargeClause(clause, hasFreeMarker(clause), marketCurrency);
+      }
+    }
+
+    if (charges.shipping || charges.importFees) {
+      return charges;
+    }
+  }
+
+  return {};
+}
+
+const PRIMARY_DELIVERY_PRICE = "[id^='mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE'] [data-csa-c-delivery-price]";
+
+function readDeliveryPrice(documentRef: Document, marketCurrency: string): ChargeReading | undefined {
+  for (const message of Array.from(documentRef.querySelectorAll(PRIMARY_DELIVERY_PRICE))) {
+    const value = message.getAttribute("data-csa-c-delivery-price")?.trim() ?? "";
+    const amount = readAmount(value, marketCurrency);
+    if (amount) {
+      return { amount, isFree: false };
+    }
+    if (hasFreeMarker(value)) {
+      return { isFree: true };
+    }
+  }
+
+  return undefined;
+}
+
+const SHIPPING_KEYWORDS = ["shipping", "delivery", "envio", "livraison", "versand", "配達"];
+const IMPORT_KEYWORDS = ["import fee", "import charge", "deposit", "税", "duty", "aduana"];
+
+function readImportCharge(documentRef: Document, marketCurrency: string): ChargeReading {
+  const block = findChargeBlock(documentRef, IMPORT_KEYWORDS);
+  if (block && NO_IMPORT_CHARGE.test(normalize(block.textContent ?? ""))) {
+    return { isFree: true };
+  }
+
+  return readCharge(documentRef, IMPORT_KEYWORDS, hasFreeMarker, marketCurrency);
+}
+
+function tableCharge(amount: ParsedMoney | undefined): ChargeReading | undefined {
+  return amount ? { amount, isFree: false } : undefined;
 }
 
 function hasFreeMarker(text: string | undefined): boolean {
@@ -485,17 +562,14 @@ export function extractProductData(
   }
 
   const globalCharges = readAmazonGlobalCharges(documentRef, marketCurrency);
-  const { amount: shippingAmount, isFree: shippingIsFree } = globalCharges.shipping
-    ? { amount: globalCharges.shipping, isFree: false }
-    : readCharge(documentRef, ["shipping", "delivery", "envio", "livraison", "versand", "配達"], hasFreeMarker, marketCurrency);
-  const { amount: importAmount, isFree: importIsFree } = globalCharges.importFees
-    ? { amount: globalCharges.importFees, isFree: false }
-    : readCharge(
-        documentRef,
-        ["import fee", "import fees", "deposit", "税", "duty", "aduana"],
-        (text) => hasFreeMarker(text) || normalize(text).includes("no import fee"),
-        marketCurrency
-      );
+  const globalLine = readAmazonGlobalLine(documentRef, marketCurrency);
+  const { amount: shippingAmount, isFree: shippingIsFree } =
+    tableCharge(globalCharges.shipping) ??
+    globalLine.shipping ??
+    readDeliveryPrice(documentRef, marketCurrency) ??
+    readCharge(documentRef, SHIPPING_KEYWORDS, hasFreeMarker, marketCurrency);
+  const { amount: importAmount, isFree: importIsFree } =
+    tableCharge(globalCharges.importFees) ?? globalLine.importFees ?? readImportCharge(documentRef, marketCurrency);
 
   const hasShippingInfo = Boolean(shippingAmount || shippingIsFree);
   const hasImportInfo = Boolean(importAmount || importIsFree);
