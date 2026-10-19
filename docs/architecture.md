@@ -7,7 +7,7 @@ Across Amazon is a Manifest V3 extension with four parts:
 - **Content scripts** (`src/content`): small extractors injected on demand into Amazon pages with `chrome.scripting.executeScript`. None is declared in the manifest, so nothing runs on a page until a comparison asks for it.
 - **Options page** (`options.html`, `src/options`): the full settings form.
 
-The manifest asks for `activeTab`, `scripting`, `storage` and `tabs`, plus host permissions for the ten Amazon domains.
+The manifest asks for `activeTab`, `scripting`, `storage` and `tabs`, plus host permissions for the ten Amazon domains and the two exchange rate hosts, `www.ecb.europa.eu` and `api.frankfurter.dev`.
 
 ## How a comparison runs
 
@@ -70,7 +70,7 @@ The background (`runComparison`) then:
 2. **Extracts the source context** again on the active tab and **loads the settings** (`settings:v1`). The target marketplaces are the enabled ones minus the source marketplace.
 3. **Checks the cache.** The key (`cmp:<hash>`) is built from the ASIN, variation tokens, source marketplace, destination country and target marketplaces. A record younger than 30 minutes is returned as the result immediately, with no progress messages and no tabs.
 4. **Extracts the baseline** on the active tab. Missing shipping or import fees on the page you are on count as zero.
-5. **Fetches the FX table** (`fx-service.ts`). The table is stored per UTC day as `fx:YYYY-MM-DD`. When today's table is missing, the worker fetches the ECB daily reference rates XML and falls back to the Frankfurter API. If both fail the run ends with an error.
+5. **Fetches the FX table** (`fx-service.ts`). The table is stored per UTC day as `fx:YYYY-MM-DD`. When today's table is missing, the worker fetches the ECB daily reference rates XML and falls back to the Frankfurter API (`api.frankfurter.dev/v1/latest`). Both rate hosts are host permissions: the ECB feed sends no CORS headers, and listing Frankfurter keeps the fallback independent of its CORS headers. If both fail the run ends with an error.
 6. **Checks each target marketplace in turn**, one at a time:
    - **OPEN**: opens `https://<domain>/s?k=<title brand variant>` in an inactive tab and waits up to 15 seconds for it to finish loading.
    - **SEARCH**: injects `content/search-extractor.js`, reads up to eight result cards, and closes the tab.
@@ -123,7 +123,7 @@ Everything lives in `chrome.storage.local`:
 | --- | --- |
 | `src/background/service-worker.ts` | Message router for `RUN_COMPARISON`, `LOAD_SOURCE` and `CANCEL_COMPARISON`; sends the result message. |
 | `src/background/orchestrator.ts` | Run tokens, temporary tabs, script injection, the OPEN/SEARCH/MATCH/READ loop, normalization, caching and progress. |
-| `src/background/fx-service.ts` | Daily FX table: storage per UTC day, ECB XML first, Frankfurter as a fallback. |
+| `src/background/fx-service.ts` | Daily FX table: storage per UTC day, ECB XML first, Frankfurter as a fallback; exports both endpoint URLs. |
 | `src/content/source-extractor.ts` | Reads the source context from the active product page. |
 | `src/content/search-extractor.ts` | Reads search result cards (ASIN, title, brand, price, URL). |
 | `src/content/product-extractor.ts` | Reads item price, shipping, import fees, displayed total, destination and deliverability from a product page. |

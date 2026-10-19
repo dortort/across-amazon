@@ -144,7 +144,7 @@ On any other site, or on an Amazon page that is not a product page (search resul
 ## What the numbers mean
 
 - **Delivered total** = item price + shipping to your destination + import fees deposit, as quoted on the Amazon product page, in that marketplace's currency. If Amazon displays a total that is higher than that sum, the displayed total is used.
-- **Conversion**: totals are converted to your display currency with the European Central Bank daily reference rates (with [Frankfurter](https://www.frankfurter.app/) as a fallback when the ECB feed is unavailable). Rates are fetched at most once a day, and the footer shows their date. Amazon charges you in the marketplace's own currency, so your card or bank's rate decides what you actually pay.
+- **Conversion**: totals are converted to your display currency with the European Central Bank daily reference rates (with [Frankfurter](https://frankfurter.dev/) as a fallback when the ECB feed is unavailable). Rates are fetched at most once a day, and the footer shows their date. Amazon charges you in the marketplace's own currency, so your card or bank's rate decides what you actually pay.
 - **Delta**: the converted delivered total minus the converted delivered total of the page you are on. The page you are on is always the reference.
 - **Saving percentage**: the saving divided by the delivered total on the page you are on.
 - **Confidence**: how sure the extension is that a listing is the same product. See [What "Check match" means](#what-check-match-means).
