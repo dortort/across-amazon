@@ -23,6 +23,8 @@
     "https://www.amazon.it/*",
     "https://www.amazon.es/*",
     "https://www.amazon.co.jp/*",
-    "https://www.amazon.com.au/*"
+    "https://www.amazon.com.au/*",
+    "https://www.ecb.europa.eu/*",
+    "https://api.frankfurter.dev/*"
   ]
 }
