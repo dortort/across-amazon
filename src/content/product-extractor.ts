@@ -415,8 +415,8 @@ function readAmazonGlobalCharges(documentRef: Document, marketCurrency: string):
   return charges;
 }
 
-const IMPORT_CHARGE = /import (?:fee|charge)/;
-const NO_IMPORT_CHARGE = /(?:^|[^a-z])no import (?:fee|charge)/;
+const IMPORT_CHARGE = /import fee|import charge/;
+const NO_IMPORT_CHARGE = /\bno import fee|\bno import charge/;
 const SHIPPING_CHARGE = /shipping|delivery/;
 
 interface ChargeLine {
