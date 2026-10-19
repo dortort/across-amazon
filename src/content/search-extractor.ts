@@ -78,25 +78,112 @@ function detectCurrency(text: string, marketCurrency: string): string {
   return marketCurrency;
 }
 
-function isSponsored(element: Element): boolean {
-  const labels = [
-    element.querySelector("span.s-label-popover-default")?.textContent,
-    element.querySelector("span.puis-sponsored-label-text")?.textContent,
-    element.querySelector("span.a-color-secondary")?.textContent,
-    element.getAttribute("data-cel-widget")
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+const SPONSORED_LABELS = new Set(["sponsored", "patrocinado", "gesponsert", "sponsorisé", "sponsorizzato", "スポンサー", "広告"]);
+const SPONSORED_LABEL_SELECTOR = "span.s-label-popover-default, span.puis-sponsored-label-text";
+const PRODUCT_PATH = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:\/|$)/i;
+const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
-  return labels.includes("sponsored") || labels.includes("patrocinado") || labels.includes("広告");
+interface ProductLink {
+  url: string;
+  asin: string;
 }
 
-function absoluteUrl(href: string, origin: string): string {
-  if (href.startsWith("http://") || href.startsWith("https://")) {
-    return href;
+function labelText(element: Element): string {
+  return (element.textContent ?? "").normalize("NFC").trim().toLowerCase();
+}
+
+function isSponsored(card: Element): boolean {
+  if (card.classList.contains("AdHolder")) {
+    return true;
   }
-  return `${origin}${href}`;
+
+  const labelled = Array.from(card.querySelectorAll(SPONSORED_LABEL_SELECTOR)).some((label) => {
+    const text = labelText(label);
+    return [...SPONSORED_LABELS].some((sponsoredLabel) => text.includes(sponsoredLabel));
+  });
+
+  return labelled || Array.from(card.querySelectorAll("span")).some((span) => SPONSORED_LABELS.has(labelText(span)));
+}
+
+function readProductLink(anchor: Element | null | undefined, origin: string): ProductLink | undefined {
+  const href = anchor?.getAttribute("href")?.trim();
+  if (!href) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(href, origin);
+    const asin = PRODUCT_PATH.exec(url.pathname)?.[1];
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || !asin) {
+      return undefined;
+    }
+    return { url: url.href, asin: asin.toUpperCase() };
+  } catch {
+    return undefined;
+  }
+}
+
+function collapseText(element: Element | null | undefined): string | undefined {
+  return element?.textContent?.replace(/\s+/g, " ").trim() || undefined;
+}
+
+interface TitleHeading {
+  heading: Element;
+  title: string;
+  link: ProductLink;
+}
+
+function findTitleHeading(card: Element, origin: string): TitleHeading | undefined {
+  for (const heading of Array.from(card.querySelectorAll("h2"))) {
+    const link =
+      readProductLink(heading.closest("a[href]"), origin) ?? readProductLink(heading.querySelector("a[href]"), origin);
+    const title = collapseText(heading);
+    if (link && title) {
+      return { heading, title, link };
+    }
+  }
+
+  return undefined;
+}
+
+function findFallbackTitle(card: Element, origin: string): Omit<TitleHeading, "heading"> | undefined {
+  const link = Array.from(card.querySelectorAll("a[href]"))
+    .map((anchor) => readProductLink(anchor, origin))
+    .find((candidate) => candidate !== undefined);
+  const title = card.querySelector("img.s-image")?.getAttribute("alt")?.replace(/\s+/g, " ").trim();
+  return link && title ? { title, link } : undefined;
+}
+
+function findBrand(card: Element, titleHeading?: Element): string | undefined {
+  const brandHeading = Array.from(card.querySelectorAll("h2")).find(
+    (heading) =>
+      heading !== titleHeading &&
+      !heading.closest("a") &&
+      (heading.classList.contains("a-size-mini") || heading.closest(".a-row.a-color-secondary") !== null)
+  );
+
+  return collapseText(brandHeading) ?? collapseText(card.querySelector(".a-row.a-size-base.a-color-secondary .a-size-base-plus"));
+}
+
+function findPriceText(card: Element): string | undefined {
+  const selectors = [".a-price:not(.a-text-price) .a-offscreen", ".a-price .a-offscreen"];
+  for (const selector of selectors) {
+    const text = Array.from(card.querySelectorAll(selector))
+      .map((element) => element.textContent?.trim())
+      .find(Boolean);
+    if (text) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
+function findImageUrl(card: Element): string | undefined {
+  const image =
+    card.querySelector<HTMLImageElement>(".s-product-image-container img.s-image") ??
+    card.querySelector<HTMLImageElement>("img.s-image");
+  return image?.src || undefined;
 }
 
 export function extractSearchCandidates(
@@ -109,36 +196,34 @@ export function extractSearchCandidates(
 
   const limit = request.limit ?? 8;
   const marketCurrency = MARKET_DEFAULT_CURRENCY[request.marketplace];
-  return organicResults.slice(0, limit).flatMap((result) => {
-    const title = result.querySelector("h2 span")?.textContent?.trim();
-    const href = result.querySelector<HTMLAnchorElement>("h2 a")?.getAttribute("href");
-
-    if (!title || !href) {
+  const candidates = organicResults.flatMap((result): SearchCandidate[] => {
+    const titleHeading = findTitleHeading(result, pageOrigin);
+    const titled = titleHeading ?? findFallbackTitle(result, pageOrigin);
+    if (!titled) {
       return [];
     }
 
-    const asin = result.getAttribute("data-asin") || undefined;
-    const brand =
-      result
-        .querySelector(".a-row.a-size-base.a-color-secondary .a-size-base-plus")
-        ?.textContent?.trim() || undefined;
+    const dataAsin = result.getAttribute("data-asin")?.trim();
+    const asin = dataAsin && ASIN_PATTERN.test(dataAsin) ? dataAsin.toUpperCase() : titled.link.asin;
 
-    const rawPrice = result.querySelector(".a-price .a-offscreen")?.textContent?.trim();
+    const rawPrice = findPriceText(result);
     const priceAmount = rawPrice ? parseLocalizedNumber(rawPrice) : undefined;
     const currency = rawPrice ? detectCurrency(rawPrice, marketCurrency) : undefined;
 
     return [
       {
         marketplace: request.marketplace,
-        asin: asin || undefined,
-        title,
-        brand,
+        asin,
+        title: titled.title,
+        brand: findBrand(result, titleHeading?.heading),
         price: priceAmount !== undefined && currency ? { amount: priceAmount, currency } : undefined,
-        url: absoluteUrl(href, pageOrigin),
-        imageUrl: result.querySelector<HTMLImageElement>("img.s-image")?.src
+        url: titled.link.url,
+        imageUrl: findImageUrl(result)
       }
     ];
   });
+
+  return candidates.slice(0, limit);
 }
 
 declare global {
