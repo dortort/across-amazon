@@ -49,8 +49,10 @@ function aliasMatches(normalizedText: string, alias: string): boolean {
   return normalizedText.includes(alias);
 }
 
+const PRODUCT_PATH_ASIN = /\/(?:dp|gp\/product|clp)\/([A-Z0-9]{10})/i;
+
 function extractAsin(documentRef: Document, href: string): string | undefined {
-  const asinFromUrl = href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1]?.toUpperCase();
+  const asinFromUrl = href.match(PRODUCT_PATH_ASIN)?.[1]?.toUpperCase();
   if (asinFromUrl) {
     return asinFromUrl;
   }
@@ -61,7 +63,7 @@ function extractAsin(documentRef: Document, href: string): string | undefined {
   }
 
   const canonicalHref = documentRef.querySelector<HTMLLinkElement>("link[rel='canonical']")?.href;
-  const asinFromCanonical = canonicalHref?.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1]?.toUpperCase();
+  const asinFromCanonical = canonicalHref?.match(PRODUCT_PATH_ASIN)?.[1]?.toUpperCase();
   return asinFromCanonical;
 }
 
@@ -116,18 +118,39 @@ function resolveDestinationCountryCode(documentRef: Document): string | undefine
   return undefined;
 }
 
+const BRAND_LABELS = new Set(["brand", "brand name", "marke", "marque", "marca", "marchio", "ブランド"]);
+
 function cleanBrand(rawBrand?: string): string | undefined {
   if (!rawBrand) {
     return undefined;
   }
 
   const cleaned = rawBrand
-    .replace(/^brand\s*[:：]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/^(?:brand|marke|marque|marca|marchio)\s*[:：]\s*/i, "")
     .replace(/^visit the\s+/i, "")
+    .replace(/^visita la tienda de\s+/i, "")
     .replace(/\s+store$/i, "")
     .trim();
 
-  return cleaned || undefined;
+  return cleaned && !BRAND_LABELS.has(cleaned.toLowerCase()) ? cleaned : undefined;
+}
+
+function readBrandRowValue(documentRef: Document): string | undefined {
+  const row = documentRef.querySelector("tr.po-brand");
+  if (!row) {
+    return undefined;
+  }
+
+  const cells = Array.from(row.querySelectorAll("td"));
+  const valueCell = row.querySelector("td.a-span9") ?? (cells.length > 1 ? cells[cells.length - 1] : undefined);
+  return valueCell?.textContent ?? undefined;
+}
+
+function extractBrand(documentRef: Document): string | undefined {
+  return [readBrandRowValue(documentRef), documentRef.querySelector("#bylineInfo")?.textContent ?? undefined]
+    .map(cleanBrand)
+    .find(Boolean);
 }
 
 function toHttpUrl(value: string | null | undefined, href: string): string | undefined {
@@ -183,15 +206,11 @@ export function extractSourceContext(documentRef: Document, href: string, hostna
     };
   }
 
-  const brandText =
-    documentRef.querySelector("#bylineInfo")?.textContent?.trim() ??
-    documentRef.querySelector("tr.po-brand td")?.textContent?.trim();
-
   const source: SourceContext = {
     marketplace,
     asin,
     title,
-    brand: cleanBrand(brandText),
+    brand: extractBrand(documentRef),
     variationTokens: extractVariationTokens(documentRef),
     destinationCountryCode: resolveDestinationCountryCode(documentRef) ?? marketplace,
     sourceUrl: href

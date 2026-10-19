@@ -596,3 +596,79 @@ describe("search result cards", () => {
     expect(candidate.price).toEqual({ amount: 335, currency: "CAD" });
   });
 });
+
+describe("source brand and ASIN", () => {
+  const SONY_TITLE = '<span id="productTitle">Sony WH-1000XM5 Premium Noise Cancelling Wireless Headphones, Black</span>';
+  const SONY_ASIN = '<input id="ASIN" value="B09XS7JWHH" />';
+
+  function sourceFrom(body: string, url = "https://www.amazon.com/dp/B09XS7JWHH", head = "") {
+    const dom = new JSDOM(`<!doctype html><html><head>${head}</head><body>${body}</body></html>`, { url });
+    return extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname).source;
+  }
+
+  function brandRow(label: string, value: string): string {
+    return `<table><tr class="a-spacing-small po-brand">
+      <td class="a-span3"><span class="a-size-base a-text-bold">${label}</span></td>
+      <td class="a-span9"><span class="a-size-base po-break-word">${value}</span></td>
+    </tr></table>`;
+  }
+
+  it.each(MARKETS)("reads the brand from the %s source page", (market) => {
+    const dom = loadFixture("source", market);
+    const extracted = extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname);
+
+    expect(extracted.source?.brand).toBe("Acme");
+  });
+
+  it.each(["Brand", "Brand Name", "Marca", "Marke", "Marque", "ブランド"])(
+    "reads the value cell, not the %s label cell, when the page has no byline",
+    (label) => {
+      expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}<div id="bylineInfo_feature_div"></div>${brandRow(label, "Sony")}`)?.brand).toBe(
+        "Sony"
+      );
+    }
+  );
+
+  it("reads the last cell of a brand row without layout classes", () => {
+    expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}<table><tr class="po-brand"><td>Brand</td><td> Sony </td></tr></table>`)?.brand).toBe(
+      "Sony"
+    );
+  });
+
+  it("leaves the brand unset when the brand row holds only its label", () => {
+    expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}<table><tr class="po-brand"><td>Brand</td></tr></table>`)?.brand).toBeUndefined();
+  });
+
+  it("prefers the brand row over a localized store byline", () => {
+    expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}<a id="bylineInfo">Besuche den Sony-Store</a>${brandRow("Marke", "Sony")}`)?.brand).toBe(
+      "Sony"
+    );
+  });
+
+  it.each([
+    ["Visit the Sony Store", "Sony"],
+    ["Visita la tienda de Sony", "Sony"],
+    ["Brand: Sony", "Sony"],
+    ["Marca: Sony", "Sony"]
+  ])("reads the byline %s when the page has no brand row", (byline, brand) => {
+    expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}<a id="bylineInfo">${byline}</a>`)?.brand).toBe(brand);
+  });
+
+  it("falls through an empty byline to the brand row", () => {
+    expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}<a id="bylineInfo">Brand: </a>${brandRow("Brand", "Sony")}`)?.brand).toBe("Sony");
+  });
+
+  it("reads the ASIN from a /clp/ canonical link when neither the URL nor the page carries it", () => {
+    const source = sourceFrom(
+      SONY_TITLE,
+      "https://www.amazon.com/Sony-WH-1000XM5-Canceling-Headphones-Hands-Free/s?node=12097479011",
+      '<link rel="canonical" href="https://www.amazon.com/clp/B09XS7JWHH" />'
+    );
+
+    expect(source?.asin).toBe("B09XS7JWHH");
+  });
+
+  it("reads the ASIN from a /clp/ page URL", () => {
+    expect(sourceFrom(SONY_TITLE, "https://www.amazon.com/clp/b09xs7jwhh")?.asin).toBe("B09XS7JWHH");
+  });
+});
