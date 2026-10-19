@@ -60,26 +60,59 @@ export function normalizeBrand(brand?: string): string {
   return normalizeText(brand).replace(/\s+/g, "");
 }
 
-export function extractVariationTokens(value: string): string[] {
-  const normalized = normalizeText(value);
-  const modelMatches = normalized.match(/[a-z]{1,4}\d{2,}[a-z0-9-]*/g) ?? [];
-  const packMatches = normalized.match(/\b\d+\s?(?:pack|count|ct|pcs|piece|pieces|pk)\b/g) ?? [];
-  const sizeMatches = normalized.match(/\b\d+(?:\.\d+)?\s?(?:oz|ml|l|kg|g|cm|mm|in)\b/g) ?? [];
+const MODEL_TOKEN = /\b(?=[a-z0-9-]*\d)(?=[a-z0-9-]*[a-z])[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
+const MIN_MODEL_TOKEN_LENGTH = 3;
+const MODEL_CONFLICT_CAP = 0.5;
+const BRAND_IN_TITLE_SCORE = 0.75;
+const COLOR_TOKENS = new Set(["black", "white", "blue", "red", "green", "silver", "gold", "pink"]);
 
-  const colorMatches = normalized
-    .split(" ")
-    .filter((token) => ["black", "white", "blue", "red", "green", "silver", "gold", "pink"].includes(token));
-
-  const tokenSet = new Set([...modelMatches, ...packMatches, ...sizeMatches, ...colorMatches]);
-  return [...tokenSet];
+function isModelPart(part: string): boolean {
+  return part.length >= MIN_MODEL_TOKEN_LENGTH && /\d/.test(part) && /[a-z]/.test(part);
 }
 
-function brandSimilarity(sourceBrand?: string, candidateBrand?: string): number {
+export function extractModelTokens(value: string): string[] {
+  const folded = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const tokens = new Set<string>();
+
+  for (const match of folded.match(MODEL_TOKEN) ?? []) {
+    const joined = match.replace(/-/g, "");
+    if (joined.length >= MIN_MODEL_TOKEN_LENGTH) {
+      tokens.add(joined);
+    }
+    for (const part of match.split("-")) {
+      if (isModelPart(part)) {
+        tokens.add(part);
+      }
+    }
+  }
+
+  return [...tokens];
+}
+
+export function extractAttributeTokens(value: string): string[] {
+  const normalized = normalizeText(value);
+  const packMatches = normalized.match(/\b\d+\s?(?:pack|count|ct|pcs|piece|pieces|pk)\b/g) ?? [];
+  const sizeMatches = normalized.match(/\b\d+(?:\.\d+)?\s?(?:oz|ml|l|kg|g|cm|mm|in)\b/g) ?? [];
+  const colorMatches = normalized.split(" ").filter((token) => COLOR_TOKENS.has(token));
+
+  return [...new Set([...packMatches, ...sizeMatches, ...colorMatches])];
+}
+
+export function extractVariationTokens(value: string): string[] {
+  return [...new Set([...extractModelTokens(value), ...extractAttributeTokens(value)])];
+}
+
+function brandSimilarity(sourceBrand: string | undefined, candidateBrand: string | undefined, candidateTitle: string): number {
   const source = normalizeBrand(sourceBrand);
   const candidate = normalizeBrand(candidateBrand);
 
-  if (!source || !candidate) {
+  if (!source) {
     return 0;
+  }
+
+  if (!candidate) {
+    const sourceWords = normalizeText(sourceBrand ?? "");
+    return ` ${normalizeText(candidateTitle)} `.includes(` ${sourceWords} `) ? BRAND_IN_TITLE_SCORE : 0;
   }
 
   if (source === candidate) {
@@ -93,6 +126,12 @@ function brandSimilarity(sourceBrand?: string, candidateBrand?: string): number 
   const sourceTokens = source.match(/[a-z0-9]+/g) ?? [];
   const candidateTokens = candidate.match(/[a-z0-9]+/g) ?? [];
   return jaccardSimilarity(sourceTokens, candidateTokens) * 0.7;
+}
+
+function hasModelConflict(sourceTitle: string, candidateTitle: string): boolean {
+  const sourceModels = extractModelTokens(sourceTitle);
+  const candidateModels = new Set(extractModelTokens(candidateTitle));
+  return sourceModels.length > 0 && candidateModels.size > 0 && !sourceModels.some((token) => candidateModels.has(token));
 }
 
 function variationSimilarity(sourceTokens: string[], candidateTokens: string[]): number {
@@ -136,19 +175,26 @@ export function sharesSourceAsin(
 export function computeMatchScore(source: SourceContext, candidate: SearchCandidate): MatchScore {
   const sourceTitleTokens = tokenizeTitle(source.title, source.marketplace);
   const candidateTitleTokens = tokenizeTitle(candidate.title, candidate.marketplace);
-  const sourceVariation = source.variationTokens;
-  const candidateVariation = extractVariationTokens(candidate.title);
+  const sourceAttributes = [
+    ...new Set([...source.variationTokens.flatMap(extractAttributeTokens), ...extractAttributeTokens(source.title)])
+  ];
+  const candidateAttributes = extractAttributeTokens(candidate.title);
 
   const titleScore = jaccardSimilarity(sourceTitleTokens, candidateTitleTokens);
-  const brandScore = brandSimilarity(source.brand, candidate.brand);
-  const variationScore = variationSimilarity(sourceVariation, candidateVariation);
+  const brandScore = brandSimilarity(source.brand, candidate.brand, candidate.title);
+  const variationScore = variationSimilarity(sourceAttributes, candidateAttributes);
 
   if (sharesSourceAsin(source, candidate)) {
     return { total: 1, titleScore, brandScore, variationScore, confidenceLabel: "HIGH" };
   }
 
-  const total =
-    Number((titleScore * TITLE_WEIGHT + brandScore * BRAND_WEIGHT + variationScore * VARIATION_WEIGHT).toFixed(4));
+  const brandWeight = normalizeBrand(source.brand) ? BRAND_WEIGHT : 0;
+  const variationWeight = sourceAttributes.length > 0 ? VARIATION_WEIGHT : 0;
+  const weighted =
+    (titleScore * TITLE_WEIGHT + brandScore * brandWeight + variationScore * variationWeight) /
+    (TITLE_WEIGHT + brandWeight + variationWeight);
+  const capped = hasModelConflict(source.title, candidate.title) ? Math.min(weighted, MODEL_CONFLICT_CAP) : weighted;
+  const total = Number(capped.toFixed(4));
 
   return {
     total,

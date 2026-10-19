@@ -86,7 +86,7 @@ const EXPECTED_BASELINE: ComparisonResult = {
 const EXPECTED_DE_RESULT: ComparisonResult = {
   marketplace: "DE",
   status: "OK",
-  confidence: 0.88,
+  confidence: 0.92,
   productUrl: "https://www.amazon.de/dp/B000000005",
   breakdown: {
     item: { amount: 37.2, currency: "EUR" },
@@ -94,7 +94,7 @@ const EXPECTED_DE_RESULT: ComparisonResult = {
     importFees: { amount: 3.2, currency: "EUR" },
     totalDisplayed: { amount: 37.2, currency: "EUR" }
   },
-  notes: ["Match confidence: MEDIUM"],
+  notes: ["Match confidence: HIGH"],
   normalizedTotal: { amount: 48.49, currency: "USD" }
 };
 
@@ -531,7 +531,7 @@ describe("background orchestrator", () => {
       expect(payload.results.find((result) => result.marketplace === "JP")).toEqual({
         marketplace: "JP",
         status: "DESTINATION_MISMATCH",
-        confidence: 0.86,
+        confidence: 0.9,
         productUrl: "https://www.amazon.co.jp/dp/B000000009",
         notes: ["Destination mismatch detected (JP)", "Destination on product page does not match source destination"]
       });
