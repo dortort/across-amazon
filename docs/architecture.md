@@ -39,13 +39,19 @@ sequenceDiagram
         SW->>FX: fetch daily rates if none are stored for today
         loop each target marketplace, in order
             SW-->>Popup: PROGRESS OPEN
-            SW->>Temp: open the search page in an inactive tab
-            SW-->>Popup: PROGRESS SEARCH
-            SW->>Temp: inject search-extractor, close the tab
-            SW-->>Popup: PROGRESS MATCH
-            SW->>Temp: open the best candidate in an inactive tab
-            SW-->>Popup: PROGRESS READ
+            SW->>Temp: open the product page for the source ASIN in an inactive tab
             SW->>Temp: inject product-extractor, close the tab
+            alt the page is the source product
+                SW-->>Popup: PROGRESS READ
+            else not found, another product or a failed load
+                SW->>Temp: open the search page in an inactive tab
+                SW-->>Popup: PROGRESS SEARCH
+                SW->>Temp: inject search-extractor, close the tab
+                SW-->>Popup: PROGRESS MATCH
+                SW->>Temp: open the best candidate in an inactive tab
+                SW-->>Popup: PROGRESS READ
+                SW->>Temp: inject product-extractor, close the tab
+            end
         end
         SW-->>Popup: PROGRESS completed = total
         SW->>Store: write the comparison
@@ -58,7 +64,7 @@ sequenceDiagram
 
 The popup asks `chrome.tabs.query` for the active tab. If the URL's host is not one of the ten marketplace domains, it shows "Open an Amazon product page" and sends nothing to the background.
 
-Otherwise it sends `LOAD_SOURCE` with the tab id. The background (`loadSource` in `orchestrator.ts`) injects `content/source-extractor.js` into the tab to read the **source context**: marketplace, ASIN, title, brand, variation tokens from the selected colour, size, style and pack options, the destination country from Amazon's "Deliver to" box, and the product image. It then injects `content/product-extractor.js` into the same tab to read the **baseline**: item price, shipping and import fees on the page you are on. `LOAD_SOURCE` returns the raw baseline without fetching exchange rates, so the idle view appears quickly. If the source context cannot be read, the response carries an `error` and the popup shows the not-on-Amazon notice. If only the price cannot be read, the popup shows the product without one.
+Otherwise it sends `LOAD_SOURCE` with the tab id. The background (`loadSource` in `orchestrator.ts`) injects `content/source-extractor.js` into the tab to read the **source context**: marketplace, ASIN, title, brand (from the brand row of the product overview, else the store byline), variation tokens from the selected colour, size, style and pack options, the destination country from Amazon's "Deliver to" box, and the product image. It then injects `content/product-extractor.js` into the same tab to read the **baseline**: item price, shipping and import fees on the page you are on. `LOAD_SOURCE` returns the raw baseline without fetching exchange rates, so the idle view appears quickly. If the source context cannot be read, the response carries an `error` and the popup shows the not-on-Amazon notice. If only the price cannot be read, the popup shows the product without one.
 
 ### 2. The user starts a run
 
@@ -68,16 +74,16 @@ The background (`runComparison`) then:
 
 1. **Registers a run token** for the tab. A token holds a `cancelled` flag and the ids of the temporary tabs the run opened. Starting a run for a tab cancels any previous token for that tab.
 2. **Extracts the source context** again on the active tab and **loads the settings** (`settings:v1`). The target marketplaces are the enabled ones minus the source marketplace.
-3. **Checks the cache.** The key (`cmp:<hash>`) is built from the ASIN, variation tokens, source marketplace, destination country and target marketplaces. A record younger than 30 minutes is returned as the result immediately, with no progress messages and no tabs.
+3. **Checks the cache.** The key (`cmp:<hash>`) is built from a cache version, the ASIN, variation tokens, source marketplace, destination country and target marketplaces. A record younger than 30 minutes is returned as the result immediately, with no progress messages and no tabs. The version changes when extraction or matching changes, so a result cached by an earlier build is never shown.
 4. **Extracts the baseline** on the active tab. Missing shipping or import fees on the page you are on count as zero.
 5. **Fetches the FX table** (`fx-service.ts`). The table is stored per UTC day as `fx:YYYY-MM-DD`. When today's table is missing, the worker fetches the ECB daily reference rates XML and falls back to the Frankfurter API (`api.frankfurter.dev/v1/latest`). Both rate hosts are host permissions: the ECB feed sends no CORS headers, and listing Frankfurter keeps the fallback independent of its CORS headers. If both fail the run ends with an error.
 6. **Checks each target marketplace in turn**, one at a time:
-   - **OPEN**: opens `https://<domain>/s?k=<title brand variant>` in an inactive tab and waits up to 15 seconds for it to finish loading.
-   - **SEARCH**: injects `content/search-extractor.js`, reads up to eight result cards, and closes the tab.
-   - **MATCH**: scores every candidate against the source (`shared/matching.ts`): title token similarity 45%, brand 25%, variation tokens 30%. The best candidate must score at least 0.78, otherwise the marketplace becomes `NO_CONFIDENT_MATCH`. The best candidate's product page is opened in another inactive tab.
-   - **READ**: injects `content/product-extractor.js` with the source destination country, reads the cost stack and closes the tab. The result is `DESTINATION_MISMATCH` when the page ships to a different country, `UNAVAILABLE` when the item price, shipping or import information is missing, and `OK` otherwise. Its confidence is 80% match score plus 20% parse confidence. An extractor that returns nothing, or any thrown error (timeout, closed tab, script failure), becomes `PARSE_FAILED` for that marketplace only.
+   - **OPEN**: opens `https://<domain>/dp/<source ASIN>` in an inactive tab, waits up to 15 seconds for it to finish loading, reads it with `content/product-extractor.js` and closes it. The page is the source product when its own ASIN field or canonical link names the source ASIN, it has a product title, and that title shares at least one word with the source title. The marketplace is then **matched by ASIN**: it skips to READ with a match score of 1 and the note "Matched by ASIN". A not-found page, a redirect to another ASIN, an unrelated title, a load timeout, a closed tab or a script failure falls back to a **search**: the worker opens `https://<domain>/s?k=<title brand variant>` in another inactive tab and waits for it the same way.
+   - **SEARCH** (search fallback only): injects `content/search-extractor.js`, reads up to eight organic result cards (ASIN, title, brand, price and product link, in both the current and the older card layout), and closes the tab. Sponsored cards and cards without a `/dp/` or `/gp/product/` link are skipped.
+   - **MATCH** (search fallback only): scores every candidate against the source (`shared/matching.ts`). A candidate with the source ASIN and at least one title word in common scores 1. Any other candidate is scored on title token similarity 45%, brand 25% and variation 30%. Variation compares pack, size and colour tokens from the source's selected options and both titles. Brand and variation only count when the source page has them, and the remaining weights are scaled up to 100%. A candidate without a brand gets 0.75 for brand when its title names the source brand. A candidate whose model numbers (such as `WH-1000XM5`) share none with the source title's is capped at 0.5. The best candidate must score at least 0.78, otherwise the marketplace becomes `NO_CONFIDENT_MATCH`. The best candidate's product page is opened in another inactive tab.
+   - **READ**: for a search match, injects `content/product-extractor.js` with the source destination country, reads the cost stack and closes the tab. A match by ASIN uses the page already read during OPEN. The result is `DESTINATION_MISMATCH` when the page ships to a different country, `UNAVAILABLE` when the item price, shipping or import information is missing (including a page that exists but shows no price for the destination, whose notes relay Amazon's availability message), and `OK` otherwise. Its confidence is 80% match score plus 20% parse confidence, so a fully read match by ASIN has confidence 1. Its notes start with "Matched by ASIN", or "Matched by search" and the confidence label, and its link is `https://<domain>/dp/<matched ASIN>`. An extractor that returns nothing, or any thrown error after the lookup (timeout, closed tab, script failure), becomes `PARSE_FAILED` for that marketplace only.
 
-   Entering each phase sends `RUN_COMPARISON_PROGRESS` with `completed`, `total`, `currentMarketplace`, `phase`, the **partial ranking** of the results so far, and the FX table. The popup uses these to draw the dial and the chips.
+   Entering each phase sends `RUN_COMPARISON_PROGRESS` with `completed`, `total`, `currentMarketplace`, `phase`, the **partial ranking** of the results so far, and the FX table. The popup uses these to draw the dial and the chips. A marketplace matched by ASIN reports OPEN then READ; a search fallback reports OPEN, SEARCH, MATCH and READ.
 7. **Normalizes** each `OK` result: the delivered total (item + shipping + import fees in the marketplace currency, or Amazon's displayed total when it is higher) is converted to the comparison currency. A result that cannot be totalled or converted becomes `UNAVAILABLE`.
 8. Sends a final progress message with `completed = total`, **writes the cache record**, and returns the payload: source, baseline, sorted results, `generatedAt`, FX table, `activeTabId` and `runId`.
 9. **Closes any temporary tabs** that are still open, whatever the outcome.
@@ -88,7 +94,7 @@ The popup ranks and labels results itself (`src/popup/view-model.ts`). It conver
 
 ### Cancellation
 
-**Stop checking** sends `CANCEL_COMPARISON {activeTabId}`. The background marks that tab's token as cancelled and closes its temporary tabs at once. The run notices at its next phase or when the current marketplace finishes, throws "Comparison cancelled by user", and finishes with an error payload that the popup ignores because it has already returned to idle. Each run has its own token, so a run started right after Stop cannot un-cancel the previous one.
+**Stop checking** sends `CANCEL_COMPARISON {activeTabId}`. The background marks that tab's token as cancelled and closes its temporary tabs at once, including the tab of an ASIN lookup in progress. The run notices at its next phase or when the current marketplace finishes, throws "Comparison cancelled by user", and finishes with an error payload that the popup ignores because it has already returned to idle. A lookup interrupted by Stop never falls back to a search. Each run has its own token, so a run started right after Stop cannot un-cancel the previous one.
 
 ### Message correlation
 
@@ -103,7 +109,7 @@ After a run finishes or is cancelled, further messages for it are ignored. Befor
 
 `chrome.scripting.executeScript({ files })` runs a file as a classic script in the page's isolated world, and that world persists between injections. The same tab is injected several times: the source and product extractors run on the active tab for `LOAD_SOURCE` and again for every `RUN_COMPARISON`. A bundled file with top-level `const` or `let` bindings throws `Identifier '…' has already been declared` on the second injection.
 
-The `isolateContentScripts` plugin in `vite.config.ts` wraps every chunk under `content/` in `(() => { … })();` at build time and shifts its source map by one line. It also fails the build if a content chunk imports or exports anything, because a classic script cannot. `tests/unit/build.test.ts` builds the extension and evaluates each extractor twice in the same JSDOM isolated world to prove it.
+The `isolateContentScripts` plugin in `vite.config.ts` wraps every chunk under `content/` in `(() => { … })();` at build time and shifts its source map by one line. It also fails the build if a content chunk imports or exports anything, because a classic script cannot. That is why each extractor keeps its own copy of small helpers such as price parsing, currency detection and the ASIN pattern. `tests/unit/build.test.ts` builds the extension and evaluates each extractor twice in the same JSDOM isolated world to prove it.
 
 The background and the extractors exchange data through window properties in the isolated world: the worker writes a request such as `__ACROSS_AMAZON_SEARCH_REQUEST__`, injects the extractor file, then reads and deletes the result property (for example `__ACROSS_AMAZON_SEARCH_CANDIDATES__`).
 
@@ -122,15 +128,15 @@ Everything lives in `chrome.storage.local`:
 | Path | Responsibility |
 | --- | --- |
 | `src/background/service-worker.ts` | Message router for `RUN_COMPARISON`, `LOAD_SOURCE` and `CANCEL_COMPARISON`; sends the result message. |
-| `src/background/orchestrator.ts` | Run tokens, temporary tabs, script injection, the OPEN/SEARCH/MATCH/READ loop, normalization, caching and progress. |
+| `src/background/orchestrator.ts` | Run tokens, temporary tabs, script injection, the ASIN lookup and the OPEN/SEARCH/MATCH/READ search fallback, normalization, caching and progress. |
 | `src/background/fx-service.ts` | Daily FX table: storage per UTC day, ECB XML first, Frankfurter as a fallback; exports both endpoint URLs. |
-| `src/content/source-extractor.ts` | Reads the source context from the active product page. |
-| `src/content/search-extractor.ts` | Reads search result cards (ASIN, title, brand, price, URL). |
-| `src/content/product-extractor.ts` | Reads item price, shipping, import fees, displayed total, destination and deliverability from a product page. |
+| `src/content/source-extractor.ts` | Reads the source context (ASIN, title, brand, variant, destination, image) from the active product page. |
+| `src/content/search-extractor.ts` | Reads organic search result cards in both card layouts (ASIN, title, brand, price, URL) and skips sponsored ones. |
+| `src/content/product-extractor.ts` | Reads the page ASIN and title, item price, shipping, import fees (including the AmazonGlobal details), displayed total, destination and deliverability from a product page. |
 | `src/shared/types.ts` | Shared data types (`SourceContext`, `ComparisonResult`, payloads, settings). |
 | `src/shared/messages.ts` | Message type constants, request shapes and type guards. |
-| `src/shared/markets.ts` | The ten marketplaces: domain, currency, locale, flag; search URLs. |
-| `src/shared/matching.ts` | Title, brand and variant scoring and the match threshold. |
+| `src/shared/markets.ts` | The ten marketplaces: domain, currency, locale, flag; search and product URLs. |
+| `src/shared/matching.ts` | ASIN identity, model-number checks, title, brand and variant scoring and the match threshold. |
 | `src/shared/money.ts` | Localized price parsing, delivered totals, currency conversion and formatting. |
 | `src/shared/comparison.ts` | Result ordering: comparable results by normalized total, then the rest. |
 | `src/shared/storage.ts` | Settings and comparison cache access. |
