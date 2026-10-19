@@ -6,12 +6,14 @@ import { extractSearchCandidates } from "../../src/content/search-extractor";
 import {
   computeMatchScore,
   extractAttributeTokens,
+  findSourceVariant,
   extractModelTokens,
   extractVariationTokens,
   normalizeText,
   pickBestCandidate,
   sharesSourceAsin,
-  tokenizeTitle
+  tokenizeTitle,
+  variantConflicts
 } from "../../src/shared/matching";
 import type { Marketplace, SearchCandidate, SourceContext } from "../../src/shared/types";
 
@@ -280,4 +282,44 @@ describe("matching the current amazon search results", () => {
       expect(pickBestCandidate(SONY_SOURCE, liveCandidates(market))).toBeUndefined();
     }
   );
+});
+
+describe("variant check", () => {
+  const BLACK_SONY: SourceContext = { ...SONY_SOURCE, variationTokens: ["black"] };
+  const UK_TWISTER = [
+    { asin: "B09Y2LL45F", label: "With Hard Case" },
+    { asin: "B0F38PL24W", label: "With Soft Case" },
+    { asin: "B09Y2LL45F", label: "Silver" },
+    { asin: "B09Y2MYL5C", label: "Black" },
+    { asin: "B0BXM22X99", label: "Midnight Blue" },
+    { asin: "B0DBLP647C", label: "Smoky Pink" }
+  ];
+
+  it.each([
+    [["With Hard Case", "Silver"], true],
+    [["Midnight Blue"], true],
+    [["Hard Case", "Black/White"], false],
+    [["Hard Case"], false],
+    [[], false]
+  ])("decides whether a page showing %j conflicts with a black source: %s", (selected, expected) => {
+    expect(variantConflicts(BLACK_SONY, selected)).toBe(expected);
+  });
+
+  it.each([
+    [["1 Pack"], true],
+    [["Blue", "2 Pack"], false],
+    [["Red", "2 Pack"], true],
+    [["8 oz"], true]
+  ])("compares each kind of attribute on its own, so %j against a 2 pack of 16 oz blue conflicts: %s", (selected, expected) => {
+    expect(variantConflicts({ ...ACME_SOURCE, variationTokens: ["2 pack", "16 oz", "blue"] }, selected)).toBe(expected);
+  });
+
+  it("finds the source colour among the variants a twister offers", () => {
+    expect(findSourceVariant(BLACK_SONY, UK_TWISTER)).toEqual({ asin: "B09Y2MYL5C", label: "Black" });
+  });
+
+  it("finds nothing when no variant carries the source colour", () => {
+    expect(findSourceVariant(BLACK_SONY, UK_TWISTER.filter((option) => option.label !== "Black"))).toBeUndefined();
+    expect(findSourceVariant({ ...BLACK_SONY, title: "Sony WH-1000XM5", variationTokens: [] }, UK_TWISTER)).toBeUndefined();
+  });
 });

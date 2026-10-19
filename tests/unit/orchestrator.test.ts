@@ -141,6 +141,7 @@ interface HarnessOptions {
   holdFx?: Promise<void>;
   sourceAsinOn?: Marketplace[];
   redirectAsinOn?: Marketplace[];
+  variantAsinsOn?: Partial<Record<Marketplace, string[]>>;
 }
 
 interface Harness {
@@ -249,6 +250,10 @@ function createHarness(options: HarnessOptions): Harness {
       return { group: "product", dom };
     }
     if (requestedAsin === EXPECTED_SOURCE.asin && options.sourceAsinOn?.includes(market)) {
+      setPageAsin(dom.window.document, requestedAsin);
+      return { group: "product", dom };
+    }
+    if (requestedAsin && options.variantAsinsOn?.[market]?.includes(requestedAsin)) {
       setPageAsin(dom.window.document, requestedAsin);
       return { group: "product", dom };
     }
@@ -510,6 +515,16 @@ function unversionedCacheKeyFor(targetMarkets: Marketplace[]): string {
     hash |= 0;
   }
   return `cmp:${Math.abs(hash)}`;
+}
+
+function addColourTwister(document: Document, selected: string, options: Array<[asin: string, label: string]>): void {
+  const swatches = options
+    .map(([asin, label]) => `<li data-asin="${asin}" class="inline-twister-swatch"><img alt="${label}" class="swatch-image"></li>`)
+    .join("");
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div id="inline-twister-row-color_name"><span id="inline-twister-expanded-dimension-text-color_name">${selected}</span><ul>${swatches}</ul></div>`
+  );
 }
 
 function removeElement(document: Document, selector: string): void {
@@ -938,6 +953,99 @@ describe("background orchestrator", () => {
       ]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(harness.tabListenerCount()).toBe(0);
+    });
+  });
+
+  describe("variant check", () => {
+    const BLUE_VARIANT_ASIN = "B0000000B5";
+    const RED_LISTING_URL = "https://www.amazon.de/dp/B000000005";
+
+    function colourPages(colourAt: (url: string) => string | undefined, options: Array<[string, string]>): Prepare {
+      return (group, market, document) => {
+        const colour = colourAt(document.URL);
+        if (group === "product" && market === "DE" && colour) {
+          addColourTwister(document, colour, options);
+        }
+      };
+    }
+
+    it("switches a search match shown in another colour to the source colour from its twister", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        variantAsinsOn: { DE: [BLUE_VARIANT_ASIN] },
+        prepare: colourPages((url) => (url === RED_LISTING_URL ? "Red" : "Blue"), [
+          ["B000000005", "Red"],
+          [BLUE_VARIANT_ASIN, "Blue"]
+        ])
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          ...EXPECTED_DE_RESULT,
+          productUrl: `https://www.amazon.de/dp/${BLUE_VARIANT_ASIN}`,
+          notes: ["Matched by search", "Match confidence: HIGH", "Switched to the Blue variant"]
+        }
+      ]);
+      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url).slice(-2)).toEqual([
+        RED_LISTING_URL,
+        `https://www.amazon.de/dp/${BLUE_VARIANT_ASIN}`
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reports no confident match when the listing's twister does not offer the source colour", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: colourPages(() => "Red", [
+          ["B000000005", "Red"],
+          ["B0000000S5", "Silver"]
+        ])
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "NO_CONFIDENT_MATCH",
+          confidence: 0,
+          notes: ["Matched by search", "Closest listing is another variant: Red"]
+        }
+      ]);
+      expect(marketEvents(harness, "DE").filter((event) => event.startsWith("open "))).toEqual([
+        "open missing/DE",
+        "open search/DE",
+        "open product/DE"
+      ]);
+    });
+
+    it("reports no confident match when the page for the source colour shows another colour too", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        variantAsinsOn: { DE: [BLUE_VARIANT_ASIN] },
+        prepare: colourPages(() => "Red", [
+          ["B000000005", "Red"],
+          [BLUE_VARIANT_ASIN, "Blue"]
+        ])
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toMatchObject([{ marketplace: "DE", status: "NO_CONFIDENT_MATCH" }]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("keeps a search match whose page shows the source colour among others", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: colourPages(() => "Blue/White", [["B000000005", "Blue/White"]])
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
     });
   });
 

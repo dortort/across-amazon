@@ -1,7 +1,7 @@
 import { buildProductUrl, buildSearchUrl } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
-import { computeMatchScore, pickBestCandidate, sharesSourceAsin } from "../shared/matching";
+import { computeMatchScore, findSourceVariant, pickBestCandidate, sharesSourceAsin, variantConflicts } from "../shared/matching";
 import { convertMoney, deliveredTotal, getDefaultCurrencyForMarketplace } from "../shared/money";
 import { sortComparisonResults } from "../shared/comparison";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
@@ -293,29 +293,78 @@ async function extractBaseline(activeTabId: number, source: SourceContext): Prom
   }
 }
 
+async function readProductPage(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  asin: string,
+  token: RunToken
+): Promise<ProductExtractionResult | undefined> {
+  const tabId = await openInactiveTab(buildProductUrl(targetMarket, asin), token);
+  try {
+    await waitForTabComplete(tabId);
+    return await extractProductData(tabId, {
+      marketplace: targetMarket,
+      sourceDestinationCountryCode: source.destinationCountryCode
+    });
+  } finally {
+    await closeTempTab(tabId, token);
+  }
+}
+
 async function lookUpSourceAsin(
   source: SourceContext,
   targetMarket: Marketplace,
   token: RunToken
 ): Promise<ProductExtractionResult | undefined> {
-  let tabId: number | undefined;
   try {
-    tabId = await openInactiveTab(buildProductUrl(targetMarket, source.asin), token);
-    await waitForTabComplete(tabId);
-    const productData = await extractProductData(tabId, {
-      marketplace: targetMarket,
-      sourceDestinationCountryCode: source.destinationCountryCode
-    });
+    const productData = await readProductPage(source, targetMarket, source.asin, token);
     const listing = { marketplace: targetMarket, asin: productData?.asin, title: productData?.title };
     return productData && sharesSourceAsin(source, listing) ? productData : undefined;
   } catch {
     assertNotCancelled(token);
     return undefined;
-  } finally {
-    if (tabId !== undefined) {
-      await closeTempTab(tabId, token);
-    }
   }
+}
+
+interface ResolvedVariant {
+  productData: ProductExtractionResult;
+  asin?: string;
+  notes: string[];
+}
+
+async function resolveSourceVariant(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  productData: ProductExtractionResult,
+  token: RunToken
+): Promise<ResolvedVariant | undefined> {
+  if (!variantConflicts(source, productData.selectedVariants)) {
+    return { productData, notes: [] };
+  }
+
+  const option = findSourceVariant(
+    source,
+    productData.variantOptions.filter((candidate) => candidate.asin !== productData.asin)
+  );
+  if (!option) {
+    return undefined;
+  }
+
+  const variantData = await readProductPage(source, targetMarket, option.asin, token);
+  if (!variantData || variantData.asin !== option.asin || variantConflicts(source, variantData.selectedVariants)) {
+    return undefined;
+  }
+
+  return { productData: variantData, asin: option.asin, notes: [`Switched to the ${option.label} variant`] };
+}
+
+function buildVariantMismatchResult(marketplace: Marketplace, selectedVariants: string[]): ComparisonResult {
+  return {
+    marketplace,
+    status: "NO_CONFIDENT_MATCH",
+    confidence: 0,
+    notes: ["Matched by search", `Closest listing is another variant: ${selectedVariants.join(", ")}`]
+  };
 }
 
 function buildProductResult(
@@ -409,12 +458,18 @@ async function compareMarket(
     return buildFailedResult(targetMarket, "No product extraction data returned");
   }
 
-  const productUrl = best.candidate.asin ? buildProductUrl(targetMarket, best.candidate.asin) : productData.canonicalUrl;
+  const variant = await resolveSourceVariant(source, targetMarket, productData, token);
+  if (!variant) {
+    return buildVariantMismatchResult(targetMarket, productData.selectedVariants);
+  }
+
+  const asin = variant.asin ?? best.candidate.asin;
+  const productUrl = asin ? buildProductUrl(targetMarket, asin) : variant.productData.canonicalUrl;
   return buildProductResult(
     targetMarket,
-    productData,
+    variant.productData,
     best.score,
-    ["Matched by search", `Match confidence: ${best.score.confidenceLabel}`],
+    ["Matched by search", `Match confidence: ${best.score.confidenceLabel}`, ...variant.notes],
     productUrl
   );
 }

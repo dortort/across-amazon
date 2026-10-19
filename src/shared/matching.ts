@@ -1,4 +1,4 @@
-import type { MatchScore, Marketplace, SearchCandidate, SourceContext } from "./types";
+import type { MatchScore, Marketplace, SearchCandidate, SourceContext, VariantOption } from "./types";
 
 const TITLE_WEIGHT = 0.45;
 const BRAND_WEIGHT = 0.25;
@@ -93,13 +93,52 @@ export function extractModelTokens(value: string): string[] {
   return [...tokens];
 }
 
+const PACK_PATTERN = String.raw`\d+\s?(?:pack|count|ct|pcs|piece|pieces|pk)`;
+const SIZE_PATTERN = String.raw`\d+(?:\.\d+)?\s?(?:oz|ml|l|kg|g|cm|mm|in)`;
+const PACK_TOKEN = new RegExp(`^${PACK_PATTERN}$`);
+const SIZE_TOKEN = new RegExp(`^${SIZE_PATTERN}$`);
+const ATTRIBUTE_KINDS = ["pack", "size", "colour"] as const;
+
 export function extractAttributeTokens(value: string): string[] {
   const normalized = normalizeText(value);
-  const packMatches = normalized.match(/\b\d+\s?(?:pack|count|ct|pcs|piece|pieces|pk)\b/g) ?? [];
-  const sizeMatches = normalized.match(/\b\d+(?:\.\d+)?\s?(?:oz|ml|l|kg|g|cm|mm|in)\b/g) ?? [];
+  const packMatches = normalized.match(new RegExp(String.raw`\b${PACK_PATTERN}\b`, "g")) ?? [];
+  const sizeMatches = normalized.match(new RegExp(String.raw`\b${SIZE_PATTERN}\b`, "g")) ?? [];
   const colorMatches = normalized.split(" ").filter((token) => COLOR_TOKENS.has(token));
 
   return [...new Set([...packMatches, ...sizeMatches, ...colorMatches])];
+}
+
+function attributeKind(token: string): (typeof ATTRIBUTE_KINDS)[number] {
+  if (PACK_TOKEN.test(token)) {
+    return "pack";
+  }
+  return SIZE_TOKEN.test(token) ? "size" : "colour";
+}
+
+function sourceAttributeTokens(source: SourceContext): string[] {
+  return [...new Set([...source.variationTokens.flatMap(extractAttributeTokens), ...extractAttributeTokens(source.title)])];
+}
+
+function attributesConflict(wanted: string[], offered: string[]): boolean {
+  return ATTRIBUTE_KINDS.some((kind) => {
+    const wantedOfKind = wanted.filter((token) => attributeKind(token) === kind);
+    const offeredOfKind = offered.filter((token) => attributeKind(token) === kind);
+    return (
+      wantedOfKind.length > 0 && offeredOfKind.length > 0 && !wantedOfKind.some((token) => offeredOfKind.includes(token))
+    );
+  });
+}
+
+export function variantConflicts(source: SourceContext, selectedVariants: string[]): boolean {
+  return attributesConflict(sourceAttributeTokens(source), selectedVariants.flatMap(extractAttributeTokens));
+}
+
+export function findSourceVariant(source: SourceContext, options: VariantOption[]): VariantOption | undefined {
+  const wanted = sourceAttributeTokens(source);
+  return options.find((option) => {
+    const offered = extractAttributeTokens(option.label);
+    return offered.some((token) => wanted.includes(token)) && !attributesConflict(wanted, offered);
+  });
 }
 
 export function extractVariationTokens(value: string): string[] {
@@ -206,9 +245,7 @@ export function sharesSourceAsin(
 export function computeMatchScore(source: SourceContext, candidate: SearchCandidate): MatchScore {
   const sourceTitleTokens = tokenizeTitle(source.title, source.marketplace);
   const candidateTitleTokens = tokenizeTitle(candidate.title, candidate.marketplace);
-  const sourceAttributes = [
-    ...new Set([...source.variationTokens.flatMap(extractAttributeTokens), ...extractAttributeTokens(source.title)])
-  ];
+  const sourceAttributes = sourceAttributeTokens(source);
   const candidateAttributes = extractAttributeTokens(candidate.title);
 
   const titleScore = jaccardSimilarity(sourceTitleTokens, candidateTitleTokens);
