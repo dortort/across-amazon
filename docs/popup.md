@@ -57,7 +57,7 @@ Each marketplace is first looked up by your product's ASIN, Amazon's own product
 
 The card at the top gives the answer:
 
-- **Cheapest delivered to United States** names the destination the prices were quoted for: the country in Amazon's "Deliver to" box on the page you are on, or the marketplace's own country when the page does not show one. A "Deliver to" country outside the ten marketplaces, such as Switzerland, is not recognised yet: the card then names the marketplace's country, while the prices are the ones Amazon showed for the address set on each marketplace.
+- **Cheapest delivered to United States** names the destination the prices were quoted for: the country in Amazon's "Deliver to" box on the page you are on, or the marketplace's own country when the page does not show one. A "Deliver to" country outside the ten marketplaces, such as Switzerland, is not recognised yet: the card then names the marketplace's country, while the prices are the ones Amazon showed for the address set on each marketplace. A marketplace whose page quotes delivery to a town and postcode, which is how Amazon shows an address in its own country (for example a default address in Canada on amazon.ca), is reported as "Does not ship here" instead of being compared.
 - **Save $50.94** is the difference between the cheapest delivered total ($349.05 from Germany) and the delivered total on the page you are on ($399.99).
 - **13% less** is that saving as a share of what you would pay here.
 - **Open on amazon.de** opens that product page in a new tab. You review it and buy there, on Amazon. The extension never adds to cart or checks out.
@@ -79,6 +79,8 @@ The cheapest row is highlighted. Click any row to open its [breakdown sheet](#4-
 ### What "Check match" means
 
 Every listing in the list passed the product-matching threshold. A listing found under your product's ASIN is the same product by Amazon's own identifier, so it counts as an exact match and never shows the pill. A listing found by searching is scored, not certain: its confidence combines how closely the listing's title, brand and variant match your product with how cleanly its product page could be read. When that confidence is below 90%, the row (and the verdict card, if it is the cheapest) shows a **Check match** pill. In the example Italy scored 76% because its listing title does not state the colour.
+
+Before a listing found by searching is ranked, its product page is checked for the variant it shows. When the page shows another colour, pack or size than yours, the extension switches to your variant through the page's own variant selector, or reports the marketplace as "No confident match" when the page does not offer it.
 
 Open the listing and confirm it is the same product, variant and condition before you buy. Listings that score below the matching threshold are never ranked. They appear under [issues](#5-issues) as "No confident match".
 
@@ -106,8 +108,8 @@ Marketplaces that could not be compared are folded under **N marketplaces could 
 
 | Status | What happened |
 | --- | --- |
-| No confident match | The marketplace does not list your product's ASIN and no search result scored above the matching threshold, so nothing is compared rather than risking the wrong product. |
-| Delivered total not quotable | Amazon did not show a complete delivered price (item, shipping and import fees) for your destination, for example because the item cannot be shipped to your address. |
+| No confident match | The marketplace does not list your product's ASIN and no search result scored above the matching threshold, or the closest listing is another variant that its page does not offer in yours, so nothing is compared rather than risking the wrong product. |
+| Delivered total not quotable | Amazon did not show the item price or the shipping for your destination, for example because the item cannot be shipped to your address. When Amazon gives a reason, the note repeats it, for example: Amazon says: “This item cannot be shipped to your selected delivery location.” |
 | Could not read the page | The product page could not be read, or the tab failed to load in time. |
 | Does not ship here | A match was found, but the seller does not ship to your destination. |
 
@@ -143,7 +145,7 @@ On any other site, or on an Amazon page that is not a product page (search resul
 
 ## What the numbers mean
 
-- **Delivered total** = item price + shipping to your destination + import fees deposit, as quoted on the Amazon product page, in that marketplace's currency. If Amazon displays a total that is higher than that sum, the displayed total is used.
+- **Delivered total** = item price + shipping to your destination + import fees deposit, as quoted on the Amazon product page, in the currency the page shows. If Amazon displays a total that is higher than that sum, the displayed total is used. Amazon quotes import fees for an address abroad only on some pages (amazon.com shows them in its AmazonGlobal details). When a page prices the item and the delivery but shows no import fees, the delivered total is the item price plus shipping, and any import charges collected on delivery are not included.
 - **Conversion**: totals are converted to your display currency with the European Central Bank daily reference rates (with [Frankfurter](https://frankfurter.dev/) as a fallback when the ECB feed is unavailable). Rates are fetched at most once a day, and the footer shows their date. Amazon charges you in the marketplace's own currency, so your card or bank's rate decides what you actually pay.
 - **Delta**: the converted delivered total minus the converted delivered total of the page you are on. The page you are on is always the reference.
 - **Saving percentage**: the saving divided by the delivered total on the page you are on.
