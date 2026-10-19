@@ -302,23 +302,31 @@ async function extractBaseline(activeTabId: number, source: SourceContext): Prom
   }
 }
 
-async function readProductPage(
-  source: SourceContext,
-  targetMarket: Marketplace,
-  asin: string,
-  token: RunToken
-): Promise<ProductExtractionResult | undefined> {
-  const tabId = await openInactiveTab(buildProductUrl(targetMarket, asin), token);
+async function readTempTab<T>(url: string, token: RunToken, read: (tabId: number) => Promise<T>): Promise<T> {
+  const tabId = await openInactiveTab(url, token);
   try {
     await waitForTabComplete(tabId);
-    return await extractProductData(tabId, {
+    return await read(tabId);
+  } finally {
+    await closeTempTab(tabId, token);
+  }
+}
+
+function readProductPage(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  url: string,
+  token: RunToken,
+  onLoaded?: () => void
+): Promise<ProductExtractionResult | undefined> {
+  return readTempTab(url, token, (tabId) => {
+    onLoaded?.();
+    return extractProductData(tabId, {
       marketplace: targetMarket,
       sourceDestinationCountryCode: source.destinationCountryCode,
       sourceDeliverTo: source.deliverTo
     });
-  } finally {
-    await closeTempTab(tabId, token);
-  }
+  });
 }
 
 type AsinLookup = { status: "MATCHED"; productData: ProductExtractionResult } | { status: "DEAD" | "MISSED" };
@@ -326,7 +334,7 @@ type AsinLookup = { status: "MATCHED"; productData: ProductExtractionResult } | 
 async function lookUpSourceAsin(source: SourceContext, targetMarket: Marketplace, token: RunToken): Promise<AsinLookup> {
   let productData: ProductExtractionResult | undefined;
   try {
-    productData = await readProductPage(source, targetMarket, source.asin, token);
+    productData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, source.asin), token);
   } catch {
     assertNotCancelled(token);
     return { status: "MISSED" };
@@ -363,7 +371,7 @@ async function resolveSourceVariant(
     return undefined;
   }
 
-  const variantData = await readProductPage(source, targetMarket, option.asin, token);
+  const variantData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, option.asin), token);
   if (!variantData || variantData.asin !== option.asin || variantConflicts(source, variantData.selectedVariants)) {
     return undefined;
   }
@@ -429,15 +437,13 @@ async function searchForMatch(
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<{ candidate: SearchCandidate; score: MatchScore } | undefined> {
   for (const query of queries) {
-    const searchTabId = await openInactiveTab(buildSearchUrl(targetMarket, query), token);
-    await waitForTabComplete(searchTabId);
-
-    enterPhase("SEARCH");
-    const candidates = await extractSearchCandidates(searchTabId, {
-      marketplace: targetMarket,
-      limit: 8
+    const candidates = await readTempTab(buildSearchUrl(targetMarket, query), token, (tabId) => {
+      enterPhase("SEARCH");
+      return extractSearchCandidates(tabId, {
+        marketplace: targetMarket,
+        limit: 8
+      });
     });
-    await closeTempTab(searchTabId, token);
 
     enterPhase("MATCH");
     const best = pickBestCandidate(
@@ -479,17 +485,7 @@ async function compareMarket(
     return buildNoMatchResult(targetMarket);
   }
 
-  const productTabId = await openInactiveTab(best.candidate.url, token);
-  await waitForTabComplete(productTabId);
-
-  enterPhase("READ");
-  const productData = await extractProductData(productTabId, {
-    marketplace: targetMarket,
-    sourceDestinationCountryCode: source.destinationCountryCode,
-    sourceDeliverTo: source.deliverTo
-  });
-  await closeTempTab(productTabId, token);
-
+  const productData = await readProductPage(source, targetMarket, best.candidate.url, token, () => enterPhase("READ"));
   if (!productData) {
     return buildFailedResult(targetMarket, "No product extraction data returned");
   }

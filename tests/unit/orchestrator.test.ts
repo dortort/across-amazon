@@ -1671,20 +1671,63 @@ describe("background orchestrator", () => {
       expect(progressPayloads(harness)).toEqual([]);
     });
 
-    it("records a market whose page cannot be scripted as PARSE_FAILED, keeps going and closes its tab", async () => {
-      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], failScriptOn: "search/DE" });
+    it.each([
+      ["search/DE", "content/search-extractor.js"],
+      ["product/DE", "content/product-extractor.js"]
+    ])(
+      "records a market whose %s page cannot be scripted as PARSE_FAILED and closes its tab before the next market starts",
+      async (label, script) => {
+        const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], failScriptOn: label });
 
-      const payload = await runViaWorker(harness);
+        const payload = await runViaWorker(harness);
 
-      expect(payload.error).toBeUndefined();
-      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
-        ["UK", "OK"],
-        ["DE", "PARSE_FAILED"]
-      ]);
-      expect(payload.results[1].notes).toEqual(["Frame with ID 0 was removed."]);
-      expect(harness.events[harness.events.length - 1]).toBe("close search/DE");
-      expect(harness.openTempTabs()).toEqual([]);
-    });
+        expect(payload.error).toBeUndefined();
+        expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+          ["UK", "OK"],
+          ["DE", "PARSE_FAILED"]
+        ]);
+        expect(payload.results[1].notes).toEqual(["Frame with ID 0 was removed."]);
+        expect(marketEvents(harness, "DE").slice(-2)).toEqual([`inject ${script} ${label}`, `close ${label}`]);
+        expect(harness.openTempTabs()).toEqual([]);
+      }
+    );
+
+    it.each(["search/DE", "product/DE"])(
+      "records a market whose %s page never finishes loading as PARSE_FAILED and closes its tab before the next market starts",
+      async (label) => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        try {
+          let stalledTabId: number | undefined;
+          const harness = await bootServiceWorker({
+            enabledMarketplaces: ["US", "DE", "UK"],
+            onTabCreated: (tab) => {
+              if (tab.label === label) {
+                stalledTabId = tab.id;
+                tab.status = "loading";
+              }
+            }
+          });
+
+          const run = runViaWorker(harness);
+          await vi.waitFor(() => expect(harness.events).toContain(`loading ${label}`));
+          expect(harness.events).not.toContain("progress OPEN UK");
+          await vi.advanceTimersByTimeAsync(15_000);
+          const payload = await run;
+
+          expect(payload.error).toBeUndefined();
+          expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+            ["UK", "OK"],
+            ["DE", "PARSE_FAILED"]
+          ]);
+          expect(payload.results[1].notes).toEqual([`Timed out waiting for tab ${stalledTabId} to complete`]);
+          expect(marketEvents(harness, "DE").slice(-2)).toEqual([`loading ${label}`, `close ${label}`]);
+          expect(harness.openTempTabs()).toEqual([]);
+          expect(harness.tabListenerCount()).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
   });
 
   describe("baseline", () => {
