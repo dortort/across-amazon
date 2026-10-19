@@ -43,10 +43,10 @@ The footer reads "ECB daily rates" until a check has loaded exchange rates. Afte
 
 <img src="screenshots/running.png" width="360" alt="Running popup with a progress dial at 4 of 9, Searching France, and chips for Canada, Mexico, United Kingdom, Germany and France">
 
-Each marketplace is searched and read in background tabs that open without taking focus and close as soon as they have been read. The popup shows:
+Each marketplace is first looked up by your product's ASIN, Amazon's own product identifier, and searched only when it does not list that ASIN. Its pages are read in background tabs that open without taking focus and close as soon as they have been read. The popup shows:
 
 - **The dial**: how many marketplaces are finished out of the total (4/9 here).
-- **The current step** for the marketplace in progress: *Opening tab*, *Searching*, *Matching product* or *Reading cost stack*, followed by its domain.
+- **The current step** for the marketplace in progress: *Opening tab*, *Searching*, *Matching product* or *Reading cost stack*, followed by its domain. A marketplace that lists your product's ASIN goes straight from *Opening tab* to *Reading cost stack*.
 - **A chip per finished marketplace**, in the order they were checked. A green chip shows the delivered total in your display currency. A chip with "—" means that marketplace could not be compared. The [issues list](#5-issues) explains why once the check is done. The blue chip with "…" is the marketplace being checked now.
 
 **Stop checking** cancels the run and closes any background tabs it opened. Closing the popup does not stop a check: it finishes in the background and its result is [cached](#what-the-numbers-mean). Reopen the popup on the same tab to follow its progress.
@@ -57,7 +57,7 @@ Each marketplace is searched and read in background tabs that open without takin
 
 The card at the top gives the answer:
 
-- **Cheapest delivered to United States** names the destination the prices were quoted for: the country in Amazon's "Deliver to" box on the page you are on, or the marketplace's own country when the page does not show one.
+- **Cheapest delivered to United States** names the destination the prices were quoted for: the country in Amazon's "Deliver to" box on the page you are on, or the marketplace's own country when the page does not show one. A "Deliver to" country outside the ten marketplaces, such as Switzerland, is not recognised yet: the card then names the marketplace's country, while the prices are the ones Amazon showed for the address set on each marketplace.
 - **Save $50.94** is the difference between the cheapest delivered total ($349.05 from Germany) and the delivered total on the page you are on ($399.99).
 - **13% less** is that saving as a share of what you would pay here.
 - **Open on amazon.de** opens that product page in a new tab. You review it and buy there, on Amazon. The extension never adds to cart or checks out.
@@ -78,7 +78,7 @@ The cheapest row is highlighted. Click any row to open its [breakdown sheet](#4-
 
 ### What "Check match" means
 
-Every listing in the list passed the product-matching threshold, but matches are scored, not certain. Each result carries a confidence that combines how closely the listing's title, brand and variant match your product with how cleanly its product page could be read. When that confidence is below 90%, the row (and the verdict card, if it is the cheapest) shows a **Check match** pill. In the example Italy scored 76% because its listing title does not state the colour.
+Every listing in the list passed the product-matching threshold. A listing found under your product's ASIN is the same product by Amazon's own identifier, so it counts as an exact match and never shows the pill. A listing found by searching is scored, not certain: its confidence combines how closely the listing's title, brand and variant match your product with how cleanly its product page could be read. When that confidence is below 90%, the row (and the verdict card, if it is the cheapest) shows a **Check match** pill. In the example Italy scored 76% because its listing title does not state the colour.
 
 Open the listing and confirm it is the same product, variant and condition before you buy. Listings that score below the matching threshold are never ranked. They appear under [issues](#5-issues) as "No confident match".
 
@@ -106,8 +106,8 @@ Marketplaces that could not be compared are folded under **N marketplaces could 
 
 | Status | What happened |
 | --- | --- |
-| No confident match | No search result scored above the matching threshold, so nothing is compared rather than risking the wrong product. |
-| Delivered total not quotable | Amazon did not show a complete delivered price (item, shipping and import fees) for your destination. |
+| No confident match | The marketplace does not list your product's ASIN and no search result scored above the matching threshold, so nothing is compared rather than risking the wrong product. |
+| Delivered total not quotable | Amazon did not show a complete delivered price (item, shipping and import fees) for your destination, for example because the item cannot be shipped to your address. |
 | Could not read the page | The product page could not be read, or the tab failed to load in time. |
 | Does not ship here | A match was found, but the seller does not ship to your destination. |
 
