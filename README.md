@@ -23,7 +23,7 @@ Across Amazon is a Chrome MV3 extension that compares delivered product cost acr
 - User-triggered comparison from the extension popup only
 - Top-10 marketplace support: US, CA, MX, UK, DE, FR, IT, ES, JP, AU
 - Finds the same product on each marketplace by its ASIN, falling back to a search
-- Conservative product matching with confidence filtering
+- Conservative product matching with confidence filtering, and a check that a listing found by search is your colour, pack and size
 - Sequential cross-market extraction via temporary inactive tabs
 - Daily FX normalization (ECB primary, Frankfurter fallback)
 - Local-only short-lived caching (30 minutes)
