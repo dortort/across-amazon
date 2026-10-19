@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { extractProductData } from "../../src/content/product-extractor";
@@ -317,5 +319,80 @@ describe("product extractor identity", () => {
     expect(result.title).toBeUndefined();
     expect(result.breakdown).toBeUndefined();
     expect(result.canonicalUrl).toBe("https://www.amazon.co.uk/dp/B09XS7JWHH");
+  });
+});
+
+function extractLive(file: string, marketplace: Marketplace): ProductExtractionResult {
+  const html = readFileSync(join(process.cwd(), "tests", "fixtures", "product-live", file), "utf8");
+  const probe = new JSDOM(html);
+  const url = probe.window.document.querySelector("meta[name='source-url']")?.getAttribute("content") ?? "";
+  const dom = new JSDOM(html, { url });
+  return extractProductData(dom.window.document, { marketplace, sourceDestinationCountryCode: marketplace }, dom.window.location.href);
+}
+
+describe("product extractor on pages for a delivery address in Switzerland", () => {
+  it("explains a page that cannot ship to the address instead of failing", () => {
+    const result = extractLive("US-cannot-ship-to-switzerland.html", "US");
+
+    expect(result.breakdown).toBeUndefined();
+    expect(result.isDeliverable).toBe(false);
+    expect(result.parseConfidence).toBe(0.1);
+    expect(result.notes).toEqual([
+      "Price not displayed for destination",
+      "Amazon says: This item cannot be shipped to your selected delivery location. Please choose a different delivery location.",
+      "Shipping not displayed for destination",
+      "Import fees not displayed for destination"
+    ]);
+  });
+
+  it("still reads the price of a product that ships there from amazon.com", () => {
+    const result = extractLive("US-ships-to-switzerland.html", "US");
+
+    expect(result.breakdown?.item).toEqual({ amount: 13.59, currency: "USD" });
+    expect(result.notes).not.toContain("Price not displayed for destination");
+  });
+
+  it("still reads the Swiss franc price and delivery of a product that ships there from amazon.de", () => {
+    const result = extractLive("DE-ships-to-switzerland.html", "DE");
+
+    expect(result.breakdown?.item).toEqual({ amount: 78.27, currency: "CHF" });
+    expect(result.breakdown?.shipping).toEqual({ amount: 41.36, currency: "CHF" });
+    expect(result.notes).toEqual(["Import fees not displayed for destination"]);
+  });
+});
+
+describe("product extractor pages without a price", () => {
+  function priceless(body: string): ProductExtractionResult {
+    const dom = new JSDOM(`<!doctype html><html><body><span id="productTitle">Sony WH-1000XM5</span>${body}</body></html>`, {
+      url: "https://www.amazon.de/dp/B09XS7JWHH"
+    });
+    return extractProductData(dom.window.document, { marketplace: "DE", sourceDestinationCountryCode: "DE" }, dom.window.location.href);
+  }
+
+  it("relays Amazon's availability message", () => {
+    const result = priceless(
+      '<div id="availability"><span class="a-size-medium a-color-price primary-availability-message"> Currently unavailable.\n We don\'t know when or if this item will be back in stock. </span></div>'
+    );
+
+    expect(result.notes.slice(0, 2)).toEqual([
+      "Price not displayed for destination",
+      "Amazon says: Currently unavailable. We don't know when or if this item will be back in stock."
+    ]);
+  });
+
+  it("reads the message itself, not the script Amazon keeps beside it", () => {
+    const result = priceless(
+      '<div id="availability"><script>P.when("A", "load").execute(function () {});</script><span class="primary-availability-message">No disponible por el momento.</span></div>'
+    );
+
+    expect(result.notes).toContain("Amazon says: No disponible por el momento.");
+  });
+
+  it("notes the missing price when the page gives no reason", () => {
+    expect(priceless("").notes).toEqual([
+      "Price not displayed for destination",
+      "Shipping not displayed for destination",
+      "Import fees not displayed for destination"
+    ]);
   });
 });

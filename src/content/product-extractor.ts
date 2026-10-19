@@ -182,6 +182,18 @@ function findPriceText(documentRef: Document): string | undefined {
   return undefined;
 }
 
+function readAvailabilityMessage(documentRef: Document): string | undefined {
+  const selectors = ["#availability .primary-availability-message", "#outOfStock .a-text-bold"];
+  for (const selector of selectors) {
+    const text = documentRef.querySelector(selector)?.textContent?.replace(/\s+/g, " ").trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
 const CHARGE_BLOCK_SELECTORS = [
   "#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE",
   "#deliveryBlockMessage",
@@ -283,6 +295,14 @@ export function extractProductData(
 
   const itemPriceText = findPriceText(documentRef);
   const itemPrice = itemPriceText ? parseMoney(itemPriceText, marketCurrency) : undefined;
+
+  if (!itemPrice) {
+    notes.push("Price not displayed for destination");
+    const availability = readAvailabilityMessage(documentRef);
+    if (availability) {
+      notes.push(`Amazon says: ${availability}`);
+    }
+  }
 
   const { amount: shippingAmount, isFree: shippingIsFree } = readCharge(
     documentRef,
