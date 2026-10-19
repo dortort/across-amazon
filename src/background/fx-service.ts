@@ -1,5 +1,8 @@
 import type { FxTable } from "../shared/types";
 
+export const ECB_DAILY_RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
+export const FRANKFURTER_LATEST_URL = "https://api.frankfurter.dev/v1/latest?base=EUR";
+
 function getUtcDayKey(date = new Date()): string {
   const year = date.getUTCFullYear();
   const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
@@ -34,7 +37,7 @@ function parseEcbRates(xml: string): FxTable | undefined {
 }
 
 async function fetchEcbDailyRates(): Promise<FxTable | undefined> {
-  const response = await fetch("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml", {
+  const response = await fetch(ECB_DAILY_RATES_URL, {
     method: "GET",
     cache: "no-store"
   });
@@ -48,7 +51,7 @@ async function fetchEcbDailyRates(): Promise<FxTable | undefined> {
 }
 
 async function fetchFrankfurterRates(): Promise<FxTable | undefined> {
-  const response = await fetch("https://api.frankfurter.app/latest?from=EUR", {
+  const response = await fetch(FRANKFURTER_LATEST_URL, {
     method: "GET",
     cache: "no-store"
   });

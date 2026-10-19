@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDailyFxTable } from "../../src/background/fx-service";
+import { ECB_DAILY_RATES_URL, FRANKFURTER_LATEST_URL, getDailyFxTable } from "../../src/background/fx-service";
 
 type StorageRecord = Record<string, unknown>;
 
@@ -54,7 +54,9 @@ describe("fx service", () => {
 
     expect(table.source).toBe("FRANKFURTER");
     expect(table.rates.USD).toBe(1.11);
+    expect(table.rates.EUR).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([ECB_DAILY_RATES_URL, FRANKFURTER_LATEST_URL]);
   });
 
   it("returns cached table for the current utc day", async () => {
