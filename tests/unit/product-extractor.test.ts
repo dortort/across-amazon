@@ -399,6 +399,38 @@ describe("product extractor delivery address", () => {
     expect(result.destinationMatched).toBe(true);
   });
 
+  function readDestination(market: Marketplace, host: string, blocks: string): ProductExtractionResult {
+    const dom = new JSDOM(
+      `<!doctype html><html><body><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">12,34 €</span></span></div>${blocks}</body></html>`,
+      { url: `https://${host}/dp/B09XS7JWHH` }
+    );
+    return extractProductData(dom.window.document, { marketplace: market, sourceDestinationCountryCode: "US" }, dom.window.location.href);
+  }
+
+  const DELIVER_TO_SWITZERLAND = '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>';
+
+  it.each([
+    ["ES", "www.amazon.es", "Entrega por 12,34 € el lunes, 9 de noviembre"],
+    ["MX", "www.amazon.com.mx", "Envío por $250.00 el martes, 28 de octubre"],
+    ["US", "www.amazon.com", "Get it as soon as Tuesday, Oct 28 if you order within 3 hrs"],
+    ["ES", "www.amazon.es", "Envío GRATIS de productos usados el lunes"]
+  ] as const)("does not read a country from the words of a %s delivery message on %s: %s", (market, host, message) => {
+    const result = readDestination(market, host, `${DELIVER_TO_SWITZERLAND}<div id="deliveryBlockMessage">${message}</div>`);
+
+    expect(result.destinationCountryCode).toBeUndefined();
+    expect(result.destinationMatched).toBe(true);
+  });
+
+  it("still reads a country a delivery message names in full", () => {
+    const result = readDestination(
+      "DE",
+      "www.amazon.de",
+      `${DELIVER_TO_SWITZERLAND}<div id="deliveryBlockMessage">Lieferung nach Deutschland am Dienstag</div>`
+    );
+
+    expect(result.destinationCountryCode).toBe("DE");
+  });
+
   it("leaves the live amazon.de page for an address in Switzerland unresolved", () => {
     const html = readFileSync(join(process.cwd(), "tests", "fixtures", "product-live", "DE-ships-to-switzerland.html"), "utf8");
     const dom = new JSDOM(html, { url: "https://www.amazon.de/dp/B09LCMVB3F" });

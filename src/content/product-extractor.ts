@@ -40,10 +40,13 @@ function normalize(value: string): string {
     .trim();
 }
 
+function isCountryCode(alias: string): boolean {
+  return /^[a-z]{2}$/.test(alias);
+}
+
 function aliasMatches(normalizedText: string, alias: string): boolean {
-  if (/^[a-z]{2}$/.test(alias)) {
-    const regex = new RegExp(`\\b${alias}\\b`, "i");
-    return regex.test(normalizedText);
+  if (/^[a-z ]+$/.test(alias)) {
+    return new RegExp(`(?:^|[^a-z])${alias}(?:[^a-z]|$)`).test(normalizedText);
   }
 
   return normalizedText.includes(alias);
@@ -153,15 +156,18 @@ function resolveDestinationCountryCode(
   marketplace: ProductExtractionRequest["marketplace"]
 ): string | undefined {
   const deliverToText = readTexts(documentRef, DELIVER_TO_SELECTORS);
-  const locationText = [deliverToText, readTexts(documentRef, DELIVERY_MESSAGE_SELECTORS)].filter(Boolean).join(" ");
+  const deliverTo = normalize(deliverToText);
+  const message = normalize(readTexts(documentRef, DELIVERY_MESSAGE_SELECTORS));
 
-  if (!locationText) {
+  if (!deliverTo && !message) {
     return undefined;
   }
 
-  const normalizedText = normalize(locationText);
   for (const country of COUNTRY_ALIASES) {
-    if (country.aliases.some((alias) => aliasMatches(normalizedText, alias))) {
+    const named = country.aliases.some(
+      (alias) => aliasMatches(deliverTo, alias) || (!isCountryCode(alias) && aliasMatches(message, alias))
+    );
+    if (named) {
       return country.code;
     }
   }
