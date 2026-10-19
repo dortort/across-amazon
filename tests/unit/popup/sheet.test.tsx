@@ -1,6 +1,16 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NBSP, baseline, productUrl, renderDone, resultPayload, rowElements, rowSummary, source } from "./harness";
+import {
+  NBSP,
+  baseline,
+  deWithoutImportFees,
+  productUrl,
+  renderDone,
+  resultPayload,
+  rowElements,
+  rowSummary,
+  source
+} from "./harness";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -122,6 +132,20 @@ describe("detail sheet", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(app.create).not.toHaveBeenCalled();
+  });
+
+  it("says the import fees were not shown for a marketplace whose page showed none", async () => {
+    const app = await renderDone(resultPayload({ results: [deWithoutImportFees] }));
+
+    await app.user.click(rowFor(app.container, "Germany"));
+
+    expect(sheetLines(screen.getByRole("dialog", { name: "🇩🇪 Germany" }))).toEqual([
+      ["dB-line", "Item price", `279,00${NBSP}€`],
+      ["dB-line", "Shipping to United States", `12,99${NBSP}€`],
+      ["dB-line", "Import fees deposit", "Not shown"],
+      ["dB-line total", "Delivered total", `291,99${NBSP}€`],
+      ["dB-line conv", "Roughly", "$315.35 at today’s rate"]
+    ]);
   });
 
   it("titles the page you are on with the product title alone when it has no variant", async () => {

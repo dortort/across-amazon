@@ -37,6 +37,7 @@ export {
   baseline,
   ca,
   de,
+  deWithoutImportFees,
   es,
   fr,
   fxTable,

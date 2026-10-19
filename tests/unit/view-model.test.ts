@@ -14,12 +14,16 @@ import {
   DISPLAY_CURRENCIES,
   checkLabel,
   computeVerdict,
+  costLine,
+  costSentence,
   currencyChoices,
   deliveredLocalTotal,
   displayTotal,
   estimatedSeconds,
   formatDelta,
   formatLocal,
+  importFeesShown,
+  importFeesValue,
   issueNote,
   issues,
   issuesLabel,
@@ -410,6 +414,46 @@ describe("needsMatchCheck", () => {
   it("never flags results that are not OK", () => {
     expect(needsMatchCheck(mx)).toBe(false);
     expect(needsMatchCheck(es)).toBe(false);
+  });
+});
+
+describe("import fees", () => {
+  const withoutImportFees: ComparisonResult = {
+    ...de,
+    breakdown: { item: { amount: 279.0, currency: "EUR" }, shipping: { amount: 12.99, currency: "EUR" } },
+    notes: ["Matched by ASIN", "Import fees not displayed for destination"]
+  };
+  const zeroDeposit: ComparisonResult = {
+    ...withoutImportFees,
+    breakdown: { item: money(279.0, "EUR"), shipping: money(12.99, "EUR"), importFees: money(0, "EUR") }
+  };
+  const euros = (value: Money): string => formatLocal(value, "DE");
+
+  it("tells a result whose page showed import fees, or a zero deposit, from one whose page showed none", () => {
+    expect(importFeesShown(de)).toBe(true);
+    expect(importFeesShown(zeroDeposit)).toBe(true);
+    expect(importFeesShown(withoutImportFees)).toBe(false);
+    expect(importFeesShown(mx)).toBe(true);
+  });
+
+  it("says which charges a total includes", () => {
+    expect(costSentence(de)).toBe("Item, shipping and import fees included.");
+    expect(costSentence(withoutImportFees)).toBe(
+      "Item and shipping included. Amazon showed no import fees, so duties may still be due on delivery."
+    );
+    expect(costLine({ result: de, total: money(349.05, "USD"), isSource: false, isBest: true })).toBe("incl. shipping & import");
+    expect(costLine({ result: withoutImportFees, total: money(315.35, "USD"), isSource: false, isBest: true })).toBe(
+      "incl. shipping, import fees not shown"
+    );
+  });
+
+  it("shows the import fees line as an amount, a dash for none due, or not shown", () => {
+    const row = (result: ComparisonResult, isSource = false) => ({ result, total: money(1, "USD"), isSource, isBest: false });
+
+    expect(importFeesValue(row(de), euros)).toBe(`31,20${NBSP}€`);
+    expect(importFeesValue(row(zeroDeposit), euros)).toBe("—");
+    expect(importFeesValue(row(withoutImportFees), euros)).toBe("Not shown");
+    expect(importFeesValue(row(withoutImportFees, true), euros)).toBe("—");
   });
 });
 

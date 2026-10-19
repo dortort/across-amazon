@@ -257,6 +257,28 @@ export function formatDelta(delta: Money | undefined, isSource: boolean, locale 
     : { text: `+${magnitude}`, cls: "up" };
 }
 
+export function importFeesShown(result: ComparisonResult): boolean {
+  return !result.breakdown || result.breakdown.importFees !== undefined;
+}
+
+export function costSentence(result: ComparisonResult): string {
+  return importFeesShown(result)
+    ? "Item, shipping and import fees included."
+    : "Item and shipping included. Amazon showed no import fees, so duties may still be due on delivery.";
+}
+
+export function costLine(row: RankedRow): string {
+  return row.isSource || importFeesShown(row.result) ? "incl. shipping & import" : "incl. shipping, import fees not shown";
+}
+
+export function importFeesValue(row: RankedRow, formatted: (value: Money) => string): string {
+  const importFees = row.result.breakdown?.importFees;
+  if (importFees?.amount) {
+    return formatted(importFees);
+  }
+  return row.isSource || importFeesShown(row.result) ? "—" : "Not shown";
+}
+
 export function statusText(status: ComparisonStatus): string {
   return STATUS_TEXT[status];
 }

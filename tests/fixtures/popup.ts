@@ -98,6 +98,12 @@ export const de = okResult("DE", [279.0, 12.99, 31.2], 0.91, [
   "Match confidence: HIGH",
   "Import fees deposit quoted on the product page. Delivery 6–10 days."
 ]);
+export const deWithoutImportFees: ComparisonResult = {
+  ...de,
+  breakdown: { item: money(279.0, "EUR"), shipping: money(12.99, "EUR") },
+  normalizedTotal: undefined,
+  notes: ["Matched by ASIN", "Import fees not displayed for destination"]
+};
 export const it_ = okResult("IT", [289.9, 14.5, 30.2], 0.76, [
   "Match confidence: MEDIUM",
   "Colour is not stated in the listing title — confirm it is the black variant before buying."

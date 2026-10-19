@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { MARKETPLACE_BY_CODE, marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
 import type { Marketplace } from "../../shared/types";
-import { deliveredLocalTotal, formatDelta, formatLocal, needsMatchCheck } from "../view-model";
+import { costLine, deliveredLocalTotal, formatDelta, formatLocal, needsMatchCheck } from "../view-model";
 import type { RankedRow } from "../view-model";
 
 interface RankedListProps {
@@ -34,7 +34,11 @@ function RowButton({ row, onSelect }: RowButtonProps): ReactElement {
           {marketLabel(marketplace)}
           {needsMatchCheck(row.result) ? <span className="dB-flag-pill">Check match</span> : null}
         </strong>
-        {local ? <span>{formatLocal(local, marketplace)} incl. shipping &amp; import</span> : null}
+        {local ? (
+          <span>
+            {formatLocal(local, marketplace)} {costLine(row)}
+          </span>
+        ) : null}
       </span>
       <span className="amt">
         <strong>{formatMoney(row.total)}</strong>

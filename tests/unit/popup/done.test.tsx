@@ -7,6 +7,7 @@ import {
   NBSP,
   baseline,
   de,
+  deWithoutImportFees,
   es,
   fr,
   fxTable,
@@ -90,6 +91,31 @@ describe("done view verdicts", () => {
     expect(card.querySelector(".eyebrow .dB-flag-pill")).toHaveTextContent("Check match");
     expect(lede).toBe(
       "Buy from Germany for $349.05 delivered. Item, shipping and import fees included. We could not read the price on this page to compare. Confirm it is the same product before you buy."
+    );
+  });
+
+  it("says a saving leaves import fees out when the best marketplace showed none", async () => {
+    const app = await renderDone(resultPayload({ results: [deWithoutImportFees, uk, jp] }));
+    const { headline, lede } = verdictCard(app.container);
+
+    expect(headline).toHaveTextContent("Save $84.64");
+    expect(lede).toBe(
+      "Buy from Germany for $315.35 delivered — 21% less than the $399.99 you would pay here. Item and shipping included. Amazon showed no import fees, so duties may still be due on delivery."
+    );
+    expect(rowSummary(rowElements(app.container)[0])).toMatchObject({
+      name: "Germany",
+      local: `291,99${NBSP}€ incl. shipping, import fees not shown`,
+      best: true
+    });
+  });
+
+  it("says the cheapest total leaves import fees out when that marketplace showed none", async () => {
+    const app = await renderDone(resultPayload({ baseline: undefined, results: [deWithoutImportFees, uk] }), {
+      loadSource: { source }
+    });
+
+    expect(verdictCard(app.container).lede).toBe(
+      "Buy from Germany for $315.35 delivered. Item and shipping included. Amazon showed no import fees, so duties may still be due on delivery. We could not read the price on this page to compare."
     );
   });
 

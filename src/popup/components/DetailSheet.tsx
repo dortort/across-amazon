@@ -3,7 +3,14 @@ import type { ReactElement } from "react";
 import { MARKETPLACE_BY_CODE, marketDisplayDomain, marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
 import type { ComparisonResult, Money, SourceContext } from "../../shared/types";
-import { deliveredLocalTotal, formatLocal, formatVariantTokens, needsMatchCheck, trustSentence } from "../view-model";
+import {
+  deliveredLocalTotal,
+  formatLocal,
+  formatVariantTokens,
+  importFeesValue,
+  needsMatchCheck,
+  trustSentence
+} from "../view-model";
 import type { RankedRow } from "../view-model";
 import { OpenButton } from "./OpenButton";
 
@@ -74,10 +81,7 @@ function SheetContent({ row, source, destination, onClose, onOpen }: SheetConten
           label={`Shipping to ${destination}`}
           value={breakdown?.shipping?.amount ? local(breakdown.shipping) : "Free"}
         />
-        <SheetLine
-          label="Import fees deposit"
-          value={breakdown?.importFees?.amount ? local(breakdown.importFees) : "—"}
-        />
+        <SheetLine label="Import fees deposit" value={importFeesValue(row, local)} />
         <SheetLine label="Delivered total" value={local(deliveredLocalTotal(result))} variant="total" />
         <SheetLine label="Roughly" value={`${formatMoney(row.total)} at today’s rate`} variant="conv" />
       </div>

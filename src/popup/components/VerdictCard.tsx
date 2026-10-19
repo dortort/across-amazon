@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from "react";
 import { marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
 import type { ComparisonResult } from "../../shared/types";
-import { needsMatchCheck, percentFormat } from "../view-model";
+import { costSentence, needsMatchCheck, percentFormat } from "../view-model";
 import type { Verdict } from "../view-model";
 import { OpenButton } from "./OpenButton";
 
@@ -61,7 +61,8 @@ export function VerdictCard({ verdict, error, destination, sourceDomain, onOpen 
           <p className="lede">
             Buy from <b>{marketLabel(verdict.best.marketplace)}</b> for <b>{formatMoney(verdict.bestTotal)}</b>{" "}
             delivered — {percentFormat(verdict.percent)}% less than the {formatMoney(verdict.baselineTotal)} you would
-            pay here. Item, shipping and import fees included.{matchSentence(verdict.best)}
+            pay here. {costSentence(verdict.best)}
+            {matchSentence(verdict.best)}
           </p>
           <OpenButton className="dB-vbtn" result={verdict.best} onOpen={onOpen} />
         </div>
@@ -76,7 +77,7 @@ export function VerdictCard({ verdict, error, destination, sourceDomain, onOpen 
           <p className="dB-save">{formatMoney(verdict.bestTotal)}</p>
           <p className="lede">
             Buy from <b>{marketLabel(verdict.best.marketplace)}</b> for <b>{formatMoney(verdict.bestTotal)}</b>{" "}
-            delivered. Item, shipping and import fees included. We could not read the price on this page to compare.
+            delivered. {costSentence(verdict.best)} We could not read the price on this page to compare.
             {matchSentence(verdict.best)}
           </p>
           <OpenButton className="dB-vbtn" result={verdict.best} onOpen={onOpen} />
