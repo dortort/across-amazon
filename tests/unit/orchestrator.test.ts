@@ -297,7 +297,7 @@ function createHarness(options: HarnessOptions): Harness {
     if (injection.files) {
       for (const file of injection.files) {
         events.push(`inject ${file} ${tab.label}`);
-        if (options.failScriptOn === tab.label) {
+        if (options.failScriptOn === tab.label || options.failScriptOn === tab.url) {
           throw new Error("Frame with ID 0 was removed.");
         }
         const script = CONTENT_SCRIPTS[file];
@@ -1346,6 +1346,94 @@ describe("background orchestrator", () => {
 
       expect(payload.results).toMatchObject([{ marketplace: "DE", status: "NO_CONFIDENT_MATCH" }]);
       expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    describe("when the page for the source colour cannot be read", () => {
+      const BLUE_VARIANT_URL = `https://www.amazon.de/dp/${BLUE_VARIANT_ASIN}`;
+      const switchingOptions: HarnessOptions = {
+        enabledMarketplaces: ["US", "DE"],
+        variantAsinsOn: { DE: [BLUE_VARIANT_ASIN] },
+        prepare: colourPages((url) => (url === RED_LISTING_URL ? "Red" : "Blue"), [
+          ["B000000005", "Red"],
+          [BLUE_VARIANT_ASIN, "Blue"]
+        ])
+      };
+
+      function keptRedListing(reason: string): ComparisonResult {
+        return {
+          ...EXPECTED_DE_RESULT,
+          notes: [
+            "Matched by search",
+            "Match confidence: HIGH",
+            `Could not read the Blue variant: ${reason}`,
+            "Quoted listing is another variant: Red"
+          ]
+        };
+      }
+
+      it("keeps the search match with a note when the page cannot be scripted", async () => {
+        const harness = await bootServiceWorker({ ...switchingOptions, failScriptOn: BLUE_VARIANT_URL });
+
+        const payload = await runViaWorker(harness);
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toEqual([keptRedListing("Frame with ID 0 was removed.")]);
+        expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url).slice(-2)).toEqual([
+          RED_LISTING_URL,
+          BLUE_VARIANT_URL
+        ]);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
+
+      it("keeps the search match with a note when the page never finishes loading", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        try {
+          let stalledTabId: number | undefined;
+          const harness = await bootServiceWorker({
+            ...switchingOptions,
+            onTabCreated: (tab) => {
+              if (tab.url === BLUE_VARIANT_URL) {
+                stalledTabId = tab.id;
+                tab.status = "loading";
+              }
+            }
+          });
+
+          const run = runViaWorker(harness);
+          await vi.waitFor(() => expect(harness.events).toContain("loading product/DE"));
+          await vi.advanceTimersByTimeAsync(15_000);
+          const payload = await run;
+
+          expect(payload.error).toBeUndefined();
+          expect(payload.results).toEqual([keptRedListing(`Timed out waiting for tab ${stalledTabId} to complete`)]);
+          expect(harness.openTempTabs()).toEqual([]);
+          expect(harness.tabListenerCount()).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("stops without keeping the search match when Stop arrives while the page loads", async () => {
+        const harness = await bootServiceWorker({
+          ...switchingOptions,
+          onTabCreated: (tab) => {
+            if (tab.url === BLUE_VARIANT_URL) {
+              tab.status = "loading";
+            }
+          }
+        });
+
+        const run = startRunViaWorker(harness, "run-1");
+        await vi.waitFor(() => expect(harness.events).toContain("loading product/DE"));
+        await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+        await run;
+
+        expect(resultPayloads(harness, "run-1")).toEqual([
+          expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
+        ]);
+        expect(harness.openTempTabs()).toEqual([]);
+        expect(harness.tabListenerCount()).toBe(0);
+      });
     });
 
     it("keeps a search match whose page shows the source colour among others", async () => {

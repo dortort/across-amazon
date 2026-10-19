@@ -371,7 +371,20 @@ async function resolveSourceVariant(
     return undefined;
   }
 
-  const variantData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, option.asin), token);
+  let variantData: ProductExtractionResult | undefined;
+  try {
+    variantData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, option.asin), token);
+  } catch (error) {
+    assertNotCancelled(token);
+    return {
+      productData,
+      notes: [
+        `Could not read the ${option.label} variant: ${errorMessage(error, "Unknown extraction error")}`,
+        `Quoted listing is another variant: ${productData.selectedVariants.join(", ")}`
+      ]
+    };
+  }
+
   if (!variantData || variantData.asin !== option.asin || variantConflicts(source, variantData.selectedVariants)) {
     return undefined;
   }
