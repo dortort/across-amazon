@@ -465,6 +465,22 @@ function cacheKeyFor(targetMarkets: Marketplace[]): string {
   });
 }
 
+function unversionedCacheKeyFor(targetMarkets: Marketplace[]): string {
+  const value = [
+    EXPECTED_SOURCE.asin,
+    [...EXPECTED_SOURCE.variationTokens].sort().join("|"),
+    "US",
+    "US",
+    [...targetMarkets].sort().join("|")
+  ].join("::");
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return `cmp:${Math.abs(hash)}`;
+}
+
 function removeElement(document: Document, selector: string): void {
   document.querySelector(selector)?.remove();
 }
@@ -687,6 +703,25 @@ describe("background orchestrator", () => {
         "content/source-extractor.js"
       ]);
       expect(progressPayloads(harness)).toHaveLength(progressBefore);
+    });
+
+    it("ignores a comparison cached under the unversioned key of earlier builds", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+      const staleKey = unversionedCacheKeyFor(["DE"]);
+      harness.storage[staleKey] = {
+        createdAt: new Date().toISOString(),
+        source: EXPECTED_SOURCE,
+        results: [
+          { marketplace: "DE", status: "NO_CONFIDENT_MATCH", confidence: 0, notes: ["No candidate passed conservative confidence threshold"] }
+        ]
+      };
+
+      const payload = await runViaWorker(harness);
+
+      expect(staleKey).not.toBe(cacheKeyFor(["DE"]));
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.tabsCreate).toHaveBeenCalled();
+      expect(harness.storage[cacheKeyFor(["DE"])]).toMatchObject({ results: [EXPECTED_DE_RESULT] });
     });
 
     it("tolerates cache records written before baseline and FX were stored", async () => {
