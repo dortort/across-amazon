@@ -377,6 +377,20 @@ describe("product extractor delivery address", () => {
     return extractProductData(dom.window.document, { marketplace: "CA", sourceDestinationCountryCode: "US" }, dom.window.location.href);
   }
 
+  function readDestination(market: Marketplace, host: string, blocks: string): ProductExtractionResult {
+    const dom = new JSDOM(
+      `<!doctype html><html><body><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">12,34 €</span></span></div>${blocks}</body></html>`,
+      { url: `https://${host}/dp/B09XS7JWHH` }
+    );
+    return extractProductData(dom.window.document, { marketplace: market, sourceDestinationCountryCode: "US" }, dom.window.location.href);
+  }
+
+  const DELIVER_TO_SWITZERLAND = '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>';
+
+  function deliverToBox(place: string): string {
+    return `<span id="glow-ingress-line1">Deliver to Francis</span><span id="glow-ingress-line2">${place}</span>`;
+  }
+
   it("reads an address given as a town and postcode as one in the marketplace's own country", () => {
     const result = deliveringTo(
       '<span id="glow-ingress-line1">Delivering to Balzac T4B 2T3</span><span id="glow-ingress-line2">Update location</span>' +
@@ -389,6 +403,31 @@ describe("product extractor delivery address", () => {
     expect(result.notes).toContain("Destination mismatch detected (CA)");
   });
 
+  it.each([
+    ["UK", "www.amazon.co.uk", "London SW1A 1AA"],
+    ["DE", "www.amazon.de", "Berlin 10115"],
+    ["US", "www.amazon.com", "New York 10001"],
+    ["AU", "www.amazon.com.au", "Sydney 2000"],
+    ["JP", "www.amazon.co.jp", "Tokyo 100-0001"]
+  ] as const)("reads a %s postcode on %s (%s) as an address at home", (market, host, place) => {
+    const result = readDestination(market, host, deliverToBox(place));
+
+    expect(result.destinationCountryCode).toBe(market);
+  });
+
+  it.each([
+    ["DE", "www.amazon.de", "Zurich 8001"],
+    ["US", "www.amazon.com", "Zurich 8001"],
+    ["UK", "www.amazon.co.uk", "Paris 75001"],
+    ["AU", "www.amazon.com.au", "Berlin 10115"],
+    ["JP", "www.amazon.co.jp", "Zurich 8001"]
+  ] as const)("leaves a postcode that is not in the %s format on %s unresolved: %s", (market, host, place) => {
+    const result = readDestination(market, host, deliverToBox(place));
+
+    expect(result.destinationCountryCode).toBeUndefined();
+    expect(result.destinationMatched).toBe(true);
+  });
+
   it("leaves a country it does not know unresolved, even beside a dated delivery message", () => {
     const result = deliveringTo(
       '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>' +
@@ -398,16 +437,6 @@ describe("product extractor delivery address", () => {
     expect(result.destinationCountryCode).toBeUndefined();
     expect(result.destinationMatched).toBe(true);
   });
-
-  function readDestination(market: Marketplace, host: string, blocks: string): ProductExtractionResult {
-    const dom = new JSDOM(
-      `<!doctype html><html><body><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">12,34 €</span></span></div>${blocks}</body></html>`,
-      { url: `https://${host}/dp/B09XS7JWHH` }
-    );
-    return extractProductData(dom.window.document, { marketplace: market, sourceDestinationCountryCode: "US" }, dom.window.location.href);
-  }
-
-  const DELIVER_TO_SWITZERLAND = '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>';
 
   it.each([
     ["ES", "www.amazon.es", "Entrega por 12,34 € el lunes, 9 de noviembre"],

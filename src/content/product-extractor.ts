@@ -144,6 +144,21 @@ function parseCurrencyMarkedMoney(text: string, marketCurrency: string): ParsedM
 const DELIVER_TO_SELECTORS = ["#glow-ingress-line2", "#glow-ingress-line1", "#contextualIngressPtLabel"];
 const DELIVERY_MESSAGE_SELECTORS = ["#delivery-block-message", "#deliveryBlockMessage"];
 
+const FIVE_DIGITS = /(?:^|\D)\d{5}(?:\D|$)/;
+
+const DOMESTIC_POSTCODE: Record<ProductExtractionRequest["marketplace"], RegExp> = {
+  US: /(?:^|\D)\d{5}(?:-\d{4})?(?:\D|$)/,
+  CA: /(?:^|[^a-z0-9])[a-z]\d[a-z] ?\d[a-z]\d(?:[^a-z0-9]|$)/,
+  MX: FIVE_DIGITS,
+  UK: /(?:^|[^a-z0-9])[a-z]{1,2}\d[a-z\d]? ?\d[a-z]{2}(?:[^a-z0-9]|$)/,
+  DE: FIVE_DIGITS,
+  FR: FIVE_DIGITS,
+  IT: FIVE_DIGITS,
+  ES: FIVE_DIGITS,
+  JP: /(?:^|\D)\d{3}-\d{4}(?:\D|$)/,
+  AU: /(?:^|\D)\d{4}(?:\D|$)/
+};
+
 function readTexts(documentRef: Document, selectors: string[]): string {
   return selectors
     .map((selector) => documentRef.querySelector(selector)?.textContent)
@@ -172,7 +187,7 @@ function resolveDestinationCountryCode(
     }
   }
 
-  return /\d/.test(deliverToText) ? marketplace : undefined;
+  return DOMESTIC_POSTCODE[marketplace].test(deliverTo) ? marketplace : undefined;
 }
 
 function findPriceText(documentRef: Document): string | undefined {
