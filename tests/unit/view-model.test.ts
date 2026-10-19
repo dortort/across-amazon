@@ -647,7 +647,7 @@ describe("statusText", () => {
 });
 
 describe("issueNote", () => {
-  it("uses the per-status sentence for the destination country, never the backend notes", () => {
+  it("uses the per-status sentence for the destination country, not the backend's own notes", () => {
     expect(issueNote(jp, "US")).toBe("Match found, but the seller does not ship to United States.");
     expect(issueNote(jp, "DE")).toBe("Match found, but the seller does not ship to Germany.");
     expect(issueNote(fr, "US")).toBe("Amazon did not show a delivered price for this destination.");
@@ -668,6 +668,25 @@ describe("issueNote", () => {
   it("gives the same sentence with or without notes", () => {
     expect(issueNote(failedResult("FR", "UNAVAILABLE", 0.9))).toBe(issueNote(fr));
     expect(issueNote(failedResult("ES", "PARSE_FAILED", 0.89, [" "]))).toBe(issueNote(es));
+  });
+
+  it("adds Amazon's own reason to a market it could not quote", () => {
+    const cannotShip = failedResult("DE", "UNAVAILABLE", 0.82, [
+      "Matched by ASIN",
+      "Price not displayed for destination",
+      "Amazon says: This item cannot be shipped to your selected delivery location.",
+      "Shipping not displayed for destination"
+    ]);
+
+    expect(issueNote(cannotShip, "US")).toBe(
+      "Amazon did not show a delivered price for this destination. Amazon says: “This item cannot be shipped to your selected delivery location.”"
+    );
+  });
+
+  it("keeps Amazon's reason out of the other statuses", () => {
+    const mismatch = failedResult("MX", "DESTINATION_MISMATCH", 0.82, ["Amazon says: Currently unavailable."]);
+
+    expect(issueNote(mismatch, "US")).toBe("Match found, but the seller does not ship to United States.");
   });
 
   it("uses a generic destination when the country is unknown", () => {

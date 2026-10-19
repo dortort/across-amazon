@@ -261,13 +261,23 @@ export function statusText(status: ComparisonStatus): string {
   return STATUS_TEXT[status];
 }
 
+const AMAZON_REASON_PREFIX = "Amazon says: ";
+
+function amazonReason(result: ComparisonResult): string | undefined {
+  const note = result.notes?.find((entry) => entry.startsWith(AMAZON_REASON_PREFIX));
+  return note?.slice(AMAZON_REASON_PREFIX.length).trim() || undefined;
+}
+
 export function issueNote(result: ComparisonResult, destinationCountryCode?: string): string {
   const destination = destinationCountryCode ? countryName(destinationCountryCode) : "your address";
   switch (result.status) {
     case "DESTINATION_MISMATCH":
       return `Match found, but the seller does not ship to ${destination}.`;
-    case "UNAVAILABLE":
-      return "Amazon did not show a delivered price for this destination.";
+    case "UNAVAILABLE": {
+      const reason = amazonReason(result);
+      const sentence = "Amazon did not show a delivered price for this destination.";
+      return reason ? `${sentence} Amazon says: “${reason}”` : sentence;
+    }
     case "PARSE_FAILED":
       return "The product page could not be read.";
     case "NO_CONFIDENT_MATCH":
