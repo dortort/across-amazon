@@ -6,7 +6,7 @@ import globals from "globals";
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**", ".claude/**", ".omc/**"]
+    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**", ".claude/**", ".omc/**", "docs-site/**"]
   },
   js.configs.recommended,
   {
