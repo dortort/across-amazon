@@ -1718,7 +1718,7 @@ describe("background orchestrator", () => {
       ]);
       expect(harness.fetch).toHaveBeenCalledWith(
         offersUrl("https://www.amazon.de", "B000000001"),
-        expect.objectContaining({ credentials: "include" })
+        expect.objectContaining({ credentials: "same-origin" })
       );
       expect(harness.events.filter((event) => event.startsWith("offers "))).toEqual(["offers www.amazon.de"]);
       expect(harness.openTempTabs()).toEqual([]);
@@ -1876,7 +1876,7 @@ describe("background orchestrator", () => {
       });
       expect(harness.fetch).toHaveBeenCalledWith(
         offersUrl("https://www.amazon.de", "B000000005"),
-        expect.objectContaining({ credentials: "include" })
+        expect.objectContaining({ credentials: "same-origin" })
       );
     });
   });
