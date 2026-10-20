@@ -43,7 +43,7 @@ The footer reads "ECB daily rates" until a check has loaded exchange rates. Afte
 
 <img src="screenshots/running.png" width="360" alt="Running popup with a progress dial at 4 of 9, Searching France, and chips for Canada, Mexico, United Kingdom, Germany and France">
 
-Each marketplace is first looked up by your product's ASIN, Amazon's own product identifier, and searched only when it does not list that ASIN. Its pages are read in background tabs that open without taking focus and close as soon as they have been read. The popup shows:
+Each marketplace is first looked up by your product's ASIN, Amazon's own product identifier, and searched only when it does not list that ASIN. Its pages are read in background tabs that open without taking focus and close as soon as they have been read. Before a marketplace's first page is read, its delivery location is [set to your destination](#your-destination-and-the-other-marketplaces). The popup shows:
 
 - **The dial**: how many marketplaces are finished out of the total (4/9 here).
 - **The current step** for the marketplace in progress: *Opening tab*, *Searching*, *Matching product* or *Reading cost stack*, followed by its domain. A marketplace that lists your product's ASIN goes straight from *Opening tab* to *Reading cost stack*.
@@ -57,7 +57,7 @@ Each marketplace is first looked up by your product's ASIN, Amazon's own product
 
 The card at the top gives the answer:
 
-- **Cheapest delivered to United States** names the destination the prices were quoted for: the country in Amazon's "Deliver to" box on the page you are on, or the marketplace's own country when the page does not show one. A "Deliver to" country outside the ten marketplaces, such as Switzerland, is not recognised yet: the card then names the marketplace's country, while the prices are the ones Amazon showed for the address set on each marketplace. A marketplace whose page quotes delivery to a town and a postcode in that marketplace's own format, which is how Amazon shows an address in its own country (for example a default address in Canada on amazon.ca, "Balzac T4B 2T3"), is reported as "Does not ship here" instead of being compared. A postcode that the page you are on also shows is your own address, so that marketplace is still compared.
+- **Cheapest delivered to United States** names the destination the prices were quoted for: the country of Amazon's "Deliver to" box on the page you are on, any country Amazon delivers to, Switzerland included. When the page shows a town and a postcode instead, the destination is that marketplace's own country. When the country cannot be read at all, the card says "your address". See [your destination and the other marketplaces](#your-destination-and-the-other-marketplaces) for how every other marketplace is made to quote that destination.
 - **Save $50.94** is the difference between the cheapest delivered total ($349.05 from Germany) and the delivered total on the page you are on ($399.99).
 - **13% less** is that saving as a share of what you would pay here.
 - **Item, shipping and import fees included.** says what the cheapest total covers. When that marketplace's page showed no import fees for your destination, the card reads "Item and shipping included. Amazon showed no import fees, so duties may still be due on delivery." instead: the saving then leaves out any duties collected on delivery, while the page you are on may include them.
@@ -99,7 +99,7 @@ Clicking a row slides up its breakdown, in the marketplace's own currency:
 | Delivered total | Item + shipping + import fees. |
 | Roughly | The delivered total converted to your display currency at the day's rate. |
 
-The note under the lines says how sure the match is, for example "We are 91% sure this is the same product — title, brand and variant all line up." A low-confidence match gets an amber note instead. **Open on amazon.de** opens the listing. The sheet for the page you are on shows the product and variant and a **Close** button. Press Escape or click outside the sheet to close it.
+The note under the lines says how sure the match is, for example "We are 91% sure this is the same product — title, brand and variant all line up." A low-confidence match gets an amber note instead. When the check switched that marketplace's delivery location to your destination, a line below it says so, for example "Delivery location set to Switzerland". **Open on amazon.de** opens the listing. The sheet for the page you are on shows the product and variant and a **Close** button. Press Escape or click outside the sheet to close it.
 
 ## 5. Issues
 
@@ -110,9 +110,9 @@ Marketplaces that could not be compared are folded under **N marketplaces could 
 | Status | What happened |
 | --- | --- |
 | No confident match | The marketplace does not list your product's ASIN and no search result scored above the matching threshold, or the closest listing is another variant that its page does not offer in yours, so nothing is compared rather than risking the wrong product. |
-| Delivered total not quotable | Amazon did not show the item price or the shipping for your destination, for example because the item cannot be shipped to your address. When Amazon gives a reason, the note repeats it, for example: Amazon says: “This item cannot be shipped to your selected delivery location.” |
+| Delivered total not quotable | Amazon did not show the item price or the shipping for your destination, for example because the item cannot be shipped there. The note names the destination ("Amazon did not show a delivered price to Switzerland."), and when Amazon gives a reason it repeats it, for example: Amazon says: “This item cannot be shipped to your selected delivery location.” |
 | Could not read the page | The product page could not be read, or the tab failed to load in time. |
-| Does not ship here | A match was found, but the seller does not ship to your destination. |
+| Could not set delivery location | The marketplace kept quoting delivery to another place because its delivery location could not be switched to your destination, for example because it does not offer that country. The note says which: "This store does not offer delivery to Switzerland." or "Could not set this store's delivery location to Switzerland, so its price is for another place." |
 
 **Check again** at the bottom starts a new check.
 
@@ -143,6 +143,16 @@ If the check itself fails (for example the exchange rates could not be loaded, o
 <img src="screenshots/not-on-amazon.png" width="360" alt="Popup asking to open an Amazon product page, with the check button disabled">
 
 On any other site, or on an Amazon page that is not a product page (search results, the cart), the popup asks you to open an Amazon product page and the button stays disabled.
+
+## Your destination and the other marketplaces
+
+A delivered price only compares with yours when every marketplace quotes the same destination. So before the check reads a marketplace, it makes that marketplace deliver to the country of the page you are on, and leaves it that way.
+
+- **How.** On the first page the check opens on a marketplace, it reads the country that marketplace delivers to from the fields Amazon renders on the page. When that is already your destination, nothing is sent. Otherwise the extension makes the same two requests Amazon's own "Deliver to" box makes, from that page: it reads the location form, then submits your country. The page is then opened again so the price it reads is quoted for your destination.
+- **What changes.** Each marketplace's delivery location becomes your country, the same as picking it in that marketplace's "Choose your location" box. The extension never restores the previous location, so your own tabs on that marketplace show the new one after their next reload. The marketplace you are on is never changed. Only a country is ever set, never a town, a postcode or an address, and your saved addresses, cart and checkout are not touched.
+- **Only once.** A marketplace is set at most once per check, and a marketplace that already delivers to your destination costs no request. After the first check, every later check finds them already set.
+- **When it cannot.** A marketplace whose location form does not offer your country (amazon.com.au offers few countries), or that cannot be set to an address in its own country without a postcode, or whose change Amazon refuses, keeps quoting its previous place. It is listed under [issues](#5-issues) as "Could not set delivery location" and is never ranked, because its price is for another place.
+- **Country, not address.** When the page you are on shows a town and a postcode (an address in that marketplace's own country), the other marketplaces are set to that country, so their quotes are for the country rather than your exact address.
 
 ## What the numbers mean
 

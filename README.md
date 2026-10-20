@@ -25,6 +25,7 @@ Across Amazon is a Chrome MV3 extension that compares delivered product cost acr
 - Finds the same product on each marketplace by its ASIN, falling back to a search by brand and model number, then by title
 - Conservative product matching with confidence filtering, and a check that a listing found by search is your colour, pack and size
 - Sequential cross-market extraction via temporary inactive tabs
+- Sets each marketplace's delivery location to your destination before reading its price, and leaves it set
 - Says when a delivered total leaves out import fees because the marketplace showed none for your destination
 - Daily FX normalization (ECB primary, Frankfurter fallback)
 - Local-only short-lived caching (30 minutes)
@@ -62,7 +63,7 @@ See [Testing](docs/testing.md) for first-time Playwright setup and how the basel
 ## Project structure
 
 - `src/background`: service worker, orchestration, FX service
-- `src/content`: source/search/product extractors
+- `src/content`: source/search/product extractors and the delivery location setter
 - `src/shared`: message/types, matching, money, storage
 - `src/popup`: extension popup UI (`view-model.ts` holds the pure ranking and copy logic, `components/` the views)
 - `src/options`: options/settings page
@@ -75,6 +76,7 @@ See [Testing](docs/testing.md) for first-time Playwright setup and how the basel
 
 - No checkout automation
 - No credential handling
+- No change to your addresses: a marketplace's delivery location is set to a country, never to an address
 - No scheduled crawling
 - No long-term price-history storage
 - Purchases always occur on official Amazon product pages
