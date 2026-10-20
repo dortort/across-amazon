@@ -38,9 +38,10 @@ sequenceDiagram
         SW->>Store: read today's FX table
         SW->>FX: fetch daily rates if none are stored for today
         loop each target marketplace, in order
+            Note over SW,Temp: until the marketplace has a location result other than NO_WIDGET, every tab opened on it runs the location-setter first
             SW-->>Popup: PROGRESS OPEN
             SW->>Temp: open the product page for the source ASIN in an inactive tab
-            SW->>Temp: inject location-setter, once per marketplace
+            SW->>Temp: inject location-setter
             opt the marketplace delivers elsewhere
                 Temp->>Temp: GET the location form, POST the address change
                 SW->>Temp: close the tab, reopen the same URL
@@ -50,6 +51,13 @@ sequenceDiagram
                 SW-->>Popup: PROGRESS READ
             else not found, another product, a dead listing or a failed load
                 SW->>Temp: open the search page in an inactive tab
+                opt the product page had no location widget
+                    SW->>Temp: inject location-setter
+                    opt the marketplace delivers elsewhere
+                        Temp->>Temp: GET the location form, POST the address change
+                        SW->>Temp: close the tab, reopen the same URL
+                    end
+                end
                 SW-->>Popup: PROGRESS SEARCH
                 SW->>Temp: inject search-extractor, close the tab
                 SW-->>Popup: PROGRESS MATCH
@@ -85,7 +93,7 @@ Clicking the button creates a **run id** (`crypto.randomUUID()`) and sends `RUN_
 
 The background (`runComparison`) then:
 
-1. **Registers a run token** for the tab. A token holds a `cancelled` flag and the ids of the temporary tabs the run opened. Starting a run for a tab cancels any previous token for that tab.
+1. **Registers a run token** for the tab. A token holds a `cancelled` flag, the ids of the temporary tabs the run opened and the delivery location result of each target marketplace. Starting a run for a tab cancels any previous token for that tab.
 2. **Extracts the source context** again on the active tab and **loads the settings** (`settings:v1`). The target marketplaces are the enabled ones minus the source marketplace.
 3. **Checks the cache.** The key (`cmp:<hash>`) is built from a cache version, the ASIN, variation tokens, source marketplace, destination country, the source page's "Deliver to" text and target marketplaces. The text keeps two addresses apart that resolve to the same country code, such as a town and postcode and the bare country. A record younger than 30 minutes is returned as the result immediately, with no progress messages and no tabs. The version changes when extraction or matching changes, so a result cached by an earlier build is never shown. It is 6 since target marketplaces are set to the source destination before they are read.
 4. **Extracts the baseline** on the active tab. Missing shipping or import fees on the page you are on count as zero.
