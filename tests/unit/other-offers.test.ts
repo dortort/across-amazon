@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { buildOtherOffersUrl, parseOtherOffers, quotableOffers } from "../../src/content/other-offers";
+import { buildOtherOffersUrl, parseOtherOffers, quotableOffers, unseenOffers } from "../../src/content/other-offers";
 import type { OtherOffer, OtherOffersPanel } from "../../src/content/other-offers";
 
 const OFFERS_FIXTURES = join(process.cwd(), "tests", "fixtures", "offers-live");
@@ -336,5 +336,24 @@ describe("quotableOffers", () => {
 
   it("lists nothing from an empty panel", () => {
     expect(quotableOffers([])).toEqual([]);
+  });
+});
+
+describe("unseenOffers", () => {
+  it("keeps the offers of a page whose seller, item or delivery differ from those already read", () => {
+    const read = [offer({ seller: "First" }), offer({ seller: "Second" })];
+    const fresh = [
+      offer({ seller: "Third" }),
+      offer({ seller: "First", item: { amount: 99, currency: "EUR" } }),
+      offer({ seller: "Second", shipping: { amount: 0, currency: "EUR" } })
+    ];
+
+    expect(unseenOffers(read, fresh)).toEqual(fresh);
+  });
+
+  it("drops the offers already read, whatever their place on the page", () => {
+    const read = [offer({ seller: "First" }), offer({ seller: "Second" })];
+
+    expect(unseenOffers(read, [offer({ index: 7, seller: "Second" }), offer({ index: 8, seller: "First" })])).toEqual([]);
   });
 });
