@@ -1680,6 +1680,8 @@ describe("background orchestrator", () => {
       dispatcher: "Amazon",
       fulfilledByAmazon: true,
       offerCount: 4,
+      readCount: 4,
+      readComplete: true,
       deliveringNewCount: 4,
       comparedCount: 4
     };
@@ -1747,6 +1749,8 @@ describe("background orchestrator", () => {
             dispatcher: "RamanDz",
             fulfilledByAmazon: false,
             offerCount: 2,
+            readCount: 2,
+            readComplete: true,
             deliveringNewCount: 2,
             comparedCount: 2
           },
@@ -1866,7 +1870,15 @@ describe("background orchestrator", () => {
           shipping: { amount: 55.26, currency: "EUR" },
           importFees: { amount: 0, currency: "EUR" }
         },
-        otherSeller: { seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4, deliveringNewCount: 4 },
+        otherSeller: {
+          seller: "Star Brick City",
+          dispatcher: "Amazon",
+          fulfilledByAmazon: true,
+          offerCount: 4,
+          readCount: 4,
+          readComplete: true,
+          deliveringNewCount: 4
+        },
         notes: ["Quoted another seller's offer", "Import fees not displayed for destination"]
       });
       expect(payload.baseline).not.toHaveProperty("otherOffers");

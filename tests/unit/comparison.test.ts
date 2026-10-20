@@ -62,6 +62,8 @@ describe("withCheapestOtherOffer", () => {
         dispatcher: first.dispatcher,
         fulfilledByAmazon: first.fulfilledByAmazon,
         offerCount: 5,
+        readCount: 5,
+        readComplete: true,
         deliveringNewCount: otherOffers.length
       },
       otherOffers,
@@ -84,6 +86,8 @@ describe("withCheapestOtherOffer", () => {
         dispatcher: "RamanDz",
         fulfilledByAmazon: false,
         offerCount: 5,
+        readCount: 5,
+        readComplete: true,
         deliveringNewCount: 2,
         comparedCount: 2
       },

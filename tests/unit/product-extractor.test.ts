@@ -1253,7 +1253,15 @@ describe("product extractor other sellers' offers", () => {
       availability: "available",
       parseConfidence: 0.8,
       breakdown: { item: { amount: 651.25, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
-      otherSeller: { seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4, deliveringNewCount: 4 },
+      otherSeller: {
+        seller: "Star Brick City",
+        dispatcher: "Amazon",
+        fulfilledByAmazon: true,
+        offerCount: 4,
+        readCount: 4,
+        readComplete: true,
+        deliveringNewCount: 4
+      },
       otherOffers: [
         {
           item: { amount: 651.25, currency: "EUR" },
@@ -1324,6 +1332,8 @@ describe("product extractor other sellers' offers", () => {
       dispatcher: "Amazon",
       fulfilledByAmazon: true,
       offerCount: 2,
+      readCount: 2,
+      readComplete: true,
       deliveringNewCount: 2
     });
     expect(result.otherOffers?.map(({ item, shipping, seller }) => ({ item, shipping, seller }))).toEqual([
@@ -1470,7 +1480,7 @@ describe("product extractor other sellers' offers", () => {
       expect(requestedPages(fetchRef)).toEqual([1, 2]);
       expect(result.otherOffers).toHaveLength(12);
       expect(result.otherOffers?.[10]).toMatchObject({ seller: "Seller 11", item: { amount: 640, currency: "EUR" } });
-      expect(result.otherSeller).toMatchObject({ seller: "Seller 1", offerCount: 12, deliveringNewCount: 12 });
+      expect(result.otherSeller).toMatchObject({ seller: "Seller 1", offerCount: 12, readCount: 12, readComplete: true, deliveringNewCount: 12 });
       expect(result.notes).toEqual([QUOTED_NOTE, NO_IMPORT_FEES_NOTE]);
     });
 
@@ -1482,7 +1492,7 @@ describe("product extractor other sellers' offers", () => {
 
       expect(requestedPages(fetchRef)).toEqual([1, 2]);
       expect(result.otherOffers).toHaveLength(10);
-      expect(result.otherSeller).toMatchObject({ offerCount: 12, deliveringNewCount: 10 });
+      expect(result.otherSeller).toMatchObject({ offerCount: 12, readCount: 10, readComplete: false, deliveringNewCount: 10 });
     });
 
     function pagesAnswering(pages: Record<number, { body: string; after: number }>) {
@@ -1521,7 +1531,7 @@ describe("product extractor other sellers' offers", () => {
       expect(settledEarly).toBe(false);
       expect(settledAt).toBe(15_000);
       expect(result.otherOffers).toHaveLength(10);
-      expect(result.otherSeller).toMatchObject({ seller: "Seller 1", offerCount: 12 });
+      expect(result.otherSeller).toMatchObject({ seller: "Seller 1", offerCount: 12, readCount: 10, readComplete: false });
       expect(result.notes).toEqual([QUOTED_NOTE, NO_IMPORT_FEES_NOTE]);
     });
 
