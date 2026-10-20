@@ -37,7 +37,7 @@ const CANCELLED_ERROR = "Comparison cancelled by user";
 const TAB_CLOSED_ERROR = "The tab was closed.";
 const LOCATION_FORM_PATH = "/portal-migration/hz/glow/get-rendered-address-selections";
 const ADDRESS_CHANGE_PATH = "/portal-migration/hz/glow/address-change";
-const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc";
+const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
 const PAGE_TOKEN = "TEST-PAGE-TOKEN";
 const POST_TOKEN = "TEST-POST-TOKEN";
 const NOT_ACCEPTED_NOTE = "Delivery location not set: Amazon did not accept the change";
@@ -694,7 +694,7 @@ function offerOnlyOtherSellers(document: Document): void {
 }
 
 function offersUrl(origin: string, asin: string): string {
-  return `${origin}${OFFERS_PATH}?asin=${asin}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp`;
+  return `${origin}${OFFERS_PATH}?asin=${asin}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp&pageno=1&filters=%257B%2522all%2522%253Atrue%252C%2522new%2522%253Atrue%257D`;
 }
 
 function marketEvents(harness: Harness, market: Marketplace): string[] {
