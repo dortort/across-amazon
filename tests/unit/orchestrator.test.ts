@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setDeliveryLocation } from "../../src/content/location-setter";
 import { extractProductData } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import { extractSourceContext } from "../../src/content/source-extractor";
-import { getMarketplaceByDomain } from "../../src/shared/markets";
+import { MARKETPLACE_CODES, countryName, getMarketplaceByDomain } from "../../src/shared/markets";
 import {
   CANCEL_COMPARISON,
   LOAD_SOURCE,
@@ -19,6 +20,7 @@ import type {
   ComparisonResult,
   FxTable,
   LoadSourcePayload,
+  LocationRequest,
   Marketplace,
   ProductExtractionRequest,
   RunComparisonProgressPayload,
@@ -32,6 +34,12 @@ const SOURCE_URL = "https://www.amazon.com/dp/B000000001";
 const FIXTURE_ROOT = join(process.cwd(), "tests", "fixtures");
 const POPUP_CLOSED_ERROR = "Could not establish connection. Receiving end does not exist.";
 const CANCELLED_ERROR = "Comparison cancelled by user";
+const TAB_CLOSED_ERROR = "The tab was closed.";
+const LOCATION_FORM_PATH = "/portal-migration/hz/glow/get-rendered-address-selections";
+const ADDRESS_CHANGE_PATH = "/portal-migration/hz/glow/address-change";
+const PAGE_TOKEN = "TEST-PAGE-TOKEN";
+const POST_TOKEN = "TEST-POST-TOKEN";
+const NOT_ACCEPTED_NOTE = "Delivery location not set: Amazon did not accept the change";
 
 const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
@@ -116,6 +124,8 @@ interface FakeTab {
   scope: WindowScope;
   status: "loading" | "complete";
   completeDuringStatusCheck?: boolean;
+  closed: Promise<never>;
+  close: () => void;
 }
 
 interface Injection {
@@ -144,6 +154,10 @@ interface HarnessOptions {
   sourceAsinOn?: Marketplace[];
   redirectAsinOn?: Marketplace[];
   variantAsinsOn?: Partial<Record<Marketplace, string[]>>;
+  locations?: Partial<Record<Marketplace, string>>;
+  rejectLocationOn?: Marketplace[];
+  notOfferedOn?: Marketplace[];
+  holdLocation?: Promise<void>;
 }
 
 interface Harness {
@@ -161,11 +175,54 @@ interface Harness {
   dispatch: (message: unknown) => Promise<unknown>;
 }
 
-function setDeliveryCountry(document: Document, country: string): void {
+function applyLocation(document: Document, countryCode: string): void {
   const line = document.querySelector("#glow-ingress-line2");
   if (line) {
-    line.textContent = `Deliver to ${country}`;
+    line.textContent = `Deliver to ${countryName(countryCode)}`;
   }
+  const modal = {
+    ajaxHeaders: { "anti-csrftoken-a2z": PAGE_TOKEN },
+    name: "glow-modal",
+    url: `${LOCATION_FORM_PATH}?deviceType=desktop&pageType=Detail&storeContext=industrial&actionSource=desktop-modal`
+  };
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<span id="nav-global-location-data-modal-action" data-action="a-modal" data-a-modal='${JSON.stringify(modal)}'></span>` +
+      `<input type="hidden" id="countryCode" value="${countryCode}">`
+  );
+}
+
+function removeLocationFields(document: Document): void {
+  for (const selector of ["#nav-global-location-data-modal-action", "#countryCode"]) {
+    document.querySelector(selector)?.remove();
+  }
+}
+
+function tabClosing(): { closed: Promise<never>; close: () => void } {
+  let close: () => void = () => undefined;
+  const closed = new Promise<never>((_resolve, reject) => {
+    close = () => reject(new Error(TAB_CLOSED_ERROR));
+  });
+  closed.catch(() => undefined);
+  return { closed, close };
+}
+
+function locationFormFile(market: Marketplace): string {
+  switch (market) {
+    case "US":
+      return "US-modal.html";
+    case "CA":
+    case "MX":
+      return "CA-modal.html";
+    case "JP":
+      return "JP-modal.html";
+    default:
+      return "DE-modal.html";
+  }
+}
+
+function readLocationFixture(file: string): string {
+  return readFileSync(join(FIXTURE_ROOT, "location", file), "utf8");
 }
 
 function setPageAsin(document: Document, asin: string): void {
@@ -179,11 +236,11 @@ function setPageAsin(document: Document, asin: string): void {
   }
 }
 
-function loadFixtureDom(group: FixtureGroup, market: Marketplace, url: string, prepare?: Prepare): JSDOM {
+function loadFixtureDom(group: FixtureGroup, market: Marketplace, url: string, location: string, prepare?: Prepare): JSDOM {
   const file = group === "missing" ? join("product", "not-found.html") : join(group, `${market}.html`);
   const html = readFileSync(join(FIXTURE_ROOT, file), "utf8");
   const dom = new JSDOM(html, { url });
-  setDeliveryCountry(dom.window.document, "United States");
+  applyLocation(dom.window.document, location);
   prepare?.(group, market, dom.window.document);
   return dom;
 }
@@ -206,6 +263,16 @@ const CONTENT_SCRIPTS: Record<string, (tab: FakeTab) => void> = {
       const { document, location } = tab.dom.window;
       tab.scope.__ACROSS_AMAZON_PRODUCT_RESULT__ = extractProductData(document, request, location.href);
     }
+  },
+  "content/location-setter.js": (tab) => {
+    const request = tab.scope.__ACROSS_AMAZON_LOCATION_REQUEST__ as LocationRequest | undefined;
+    if (request) {
+      delete tab.scope.__ACROSS_AMAZON_LOCATION_REQUEST__;
+      const { document, location } = tab.dom.window;
+      tab.scope.__ACROSS_AMAZON_LOCATION_RESULT__ = setDeliveryLocation(document, request, location.origin, (url, init) =>
+        fetch(url, init)
+      );
+    }
   }
 };
 
@@ -225,6 +292,11 @@ function createHarness(options: HarnessOptions): Harness {
   const removedListeners = new Set<TabRemovedListener>();
   let nextTabId = 100;
   let fxHold = options.holdFx;
+  const locations = new Map<Marketplace, string>(MARKETPLACE_CODES.map((market) => [market, options.locations?.[market] ?? "US"]));
+
+  function fixtureDom(group: FixtureGroup, market: Marketplace, url: string): JSDOM {
+    return loadFixtureDom(group, market, url, locations.get(market) ?? "US", options.prepare);
+  }
 
   function requireTab(tabId: number): FakeTab {
     const tab = tabs.get(tabId);
@@ -240,13 +312,13 @@ function createHarness(options: HarnessOptions): Harness {
     const dom =
       options.activeHtml !== undefined || !market
         ? new JSDOM(options.activeHtml ?? "<!doctype html><html><body></body></html>", { url })
-        : loadFixtureDom("source", market, url, options.prepare);
+        : fixtureDom("source", market, url);
     const label = market && options.activeHtml === undefined ? `source/${market}` : "active";
-    tabs.set(ACTIVE_TAB_ID, { id: ACTIVE_TAB_ID, url, label, dom, scope: {}, status: "complete" });
+    tabs.set(ACTIVE_TAB_ID, { id: ACTIVE_TAB_ID, url, label, dom, scope: {}, status: "complete", ...tabClosing() });
   }
 
   function loadProductPage(market: Marketplace, url: string, requestedAsin?: string): { group: FixtureGroup; dom: JSDOM } {
-    const dom = loadFixtureDom("product", market, url, options.prepare);
+    const dom = fixtureDom("product", market, url);
     const pageAsin = dom.window.document.querySelector<HTMLInputElement>("#ASIN")?.value;
     if (requestedAsin === pageAsin || options.redirectAsinOn?.includes(market)) {
       return { group: "product", dom };
@@ -259,7 +331,7 @@ function createHarness(options: HarnessOptions): Harness {
       setPageAsin(dom.window.document, requestedAsin);
       return { group: "product", dom };
     }
-    return { group: "missing", dom: loadFixtureDom("missing", market, url, options.prepare) };
+    return { group: "missing", dom: fixtureDom("missing", market, url) };
   }
 
   function openTempTab(url: string): FakeTab {
@@ -271,7 +343,7 @@ function createHarness(options: HarnessOptions): Harness {
     const requestedAsin = /\/dp\/([A-Z0-9]{10})/i.exec(parsed.pathname)?.[1]?.toUpperCase();
     const { group, dom } =
       parsed.pathname === "/s"
-        ? { group: "search" as const, dom: loadFixtureDom("search", market, url, options.prepare) }
+        ? { group: "search" as const, dom: fixtureDom("search", market, url) }
         : loadProductPage(market, url, requestedAsin);
     const tab: FakeTab = {
       id: nextTabId,
@@ -279,14 +351,15 @@ function createHarness(options: HarnessOptions): Harness {
       label: `${group}/${market}`,
       dom,
       scope: {},
-      status: "complete"
+      status: "complete",
+      ...tabClosing()
     };
     nextTabId += 1;
     tabs.set(tab.id, tab);
     return tab;
   }
 
-  function runInjection(injection: Injection): Array<{ frameId: number; documentId: string; result?: unknown }> {
+  async function runInjection(injection: Injection): Promise<Array<{ frameId: number; documentId: string; result?: unknown }>> {
     const tab = requireTab(injection.target.tabId);
     if (tab.url.startsWith("chrome://")) {
       throw new Error("Cannot access a chrome:// URL");
@@ -315,7 +388,8 @@ function createHarness(options: HarnessOptions): Harness {
         args: unknown[]
       ) => unknown;
       const result = isolatedWorld(tab.scope, structuredClone(injection.args ?? []));
-      return [{ ...frame, result: structuredClone(result) }];
+      const settled = result instanceof Promise ? await Promise.race([result, tab.closed]) : result;
+      return [{ ...frame, result: structuredClone(settled) }];
     }
 
     throw new Error("Either files or func must be specified");
@@ -339,6 +413,7 @@ function createHarness(options: HarnessOptions): Harness {
   const tabsRemove = vi.fn(async (tabId: number) => {
     const tab = requireTab(tabId);
     tabs.delete(tabId);
+    tab.close();
     events.push(`close ${tab.label}`);
     for (const listener of [...removedListeners]) {
       listener(tabId);
@@ -347,8 +422,40 @@ function createHarness(options: HarnessOptions): Harness {
 
   const executeScript = vi.fn(async (injection: Injection) => runInjection(injection));
 
-  const fetchMock = vi.fn(async (input: string) => {
-    const host = new URL(input).hostname;
+  async function answerAmazon(market: Marketplace, url: URL, init: RequestInit) {
+    const headers = (init.headers ?? {}) as Record<string, string>;
+    if (url.pathname === LOCATION_FORM_PATH) {
+      events.push(`location form ${url.hostname}`);
+      await options.holdLocation;
+      const form = options.notOfferedOn?.includes(market) ? "AU-modal.html" : locationFormFile(market);
+      const body = headers["anti-csrftoken-a2z"] === PAGE_TOKEN ? readLocationFixture(form) : readLocationFixture("degraded-modal.html");
+      return { ok: true, status: 200, text: async () => body };
+    }
+    if (url.pathname === ADDRESS_CHANGE_PATH && init.method === "POST") {
+      const countryCode = (JSON.parse(String(init.body)) as { countryCode: string }).countryCode;
+      events.push(`location change ${url.hostname} ${countryCode}`);
+      const accepted =
+        headers["anti-csrftoken-a2z"] === POST_TOKEN &&
+        headers["Content-Type"] === "application/json" &&
+        !options.rejectLocationOn?.includes(market);
+      if (!accepted) {
+        return { ok: true, status: 200, text: async () => "" };
+      }
+      locations.set(market, countryCode);
+      const success = JSON.parse(readLocationFixture("address-change-CH.json")) as { address: Record<string, unknown> };
+      const body = JSON.stringify({ ...success, address: { ...success.address, countryCode, district: countryCode } });
+      return { ok: true, status: 200, text: async () => body };
+    }
+    return { ok: false, status: 404, text: async () => "" };
+  }
+
+  const fetchMock = vi.fn(async (input: string, init: RequestInit = {}) => {
+    const url = new URL(input);
+    const market = getMarketplaceByDomain(url.hostname);
+    if (market) {
+      return answerAmazon(market, url, init);
+    }
+    const host = url.hostname;
     events.push(`fx ${host}`);
     const hold = fxHold;
     fxHold = undefined;
@@ -575,12 +682,11 @@ describe("background orchestrator", () => {
       enabledMarketplaces: ["US", "UK", "DE", "FR", "IT", "ES", "JP"],
       sourceAsinOn: ["UK", "JP"],
       redirectAsinOn: ["ES"],
+      locations: { JP: "JP" },
+      rejectLocationOn: ["JP"],
       prepare: (group, market, document) => {
         if (group === "search" && market === "FR") {
           removeElement(document, "[data-asin='B000000006']");
-        }
-        if (group === "product" && market === "JP") {
-          setDeliveryCountry(document, "Japan");
         }
       }
     };
@@ -638,6 +744,7 @@ describe("background orchestrator", () => {
         productUrl: "https://www.amazon.co.jp/dp/B000000001",
         notes: [
           "Matched by ASIN",
+          NOT_ACCEPTED_NOTE,
           "Destination mismatch detected (JP)",
           "Destination on product page does not match source destination"
         ]
@@ -770,6 +877,7 @@ describe("background orchestrator", () => {
         "progress OPEN DE",
         "open missing/DE",
         "ready missing/DE",
+        "inject content/location-setter.js missing/DE",
         "inject content/product-extractor.js missing/DE",
         "close missing/DE",
         "open search/DE",
@@ -812,6 +920,7 @@ describe("background orchestrator", () => {
         "progress OPEN DE",
         "open product/DE",
         "ready product/DE",
+        "inject content/location-setter.js product/DE",
         "inject content/product-extractor.js product/DE",
         "close product/DE",
         "progress READ DE",
@@ -1142,16 +1251,43 @@ describe("background orchestrator", () => {
   });
 
   describe("delivery address", () => {
-    it("reports a market whose page quotes delivery to an address in its own country as not shipping to the source's", async () => {
-      const harness = await bootServiceWorker({
-        enabledMarketplaces: ["US", "DE"],
-        prepare: (group, market, document) => {
-          const line = document.querySelector("#glow-ingress-line2");
-          if (group === "product" && market === "DE" && line) {
-            line.textContent = "Delivering to Berlin 10115";
-          }
-        }
-      });
+    const switzerlandSource: HarnessOptions = { enabledMarketplaces: ["US", "DE"], locations: { US: "CH", DE: "DE" } };
+    const SEARCH_URL =
+      "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20Model%20X100%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue";
+
+    it("sets a market that delivers to an address in its own country to the source's destination, then compares it", async () => {
+      const harness = await bootServiceWorker(switzerlandSource);
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.source?.destinationCountryCode).toBe("CH");
+      expect(payload.results).toEqual([
+        { ...EXPECTED_DE_RESULT, notes: ["Matched by search", "Match confidence: HIGH", "Delivery location set to Switzerland"] }
+      ]);
+      expect(marketEvents(harness, "DE").slice(0, 10)).toEqual([
+        "progress OPEN DE",
+        "open missing/DE",
+        "ready missing/DE",
+        "inject content/location-setter.js missing/DE",
+        "location form www.amazon.de",
+        "location change www.amazon.de CH",
+        "close missing/DE",
+        "open missing/DE",
+        "ready missing/DE",
+        "inject content/product-extractor.js missing/DE"
+      ]);
+      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+        "https://www.amazon.de/dp/B000000001",
+        "https://www.amazon.de/dp/B000000001",
+        SEARCH_URL,
+        "https://www.amazon.de/dp/B000000005"
+      ]);
+      expect(harness.events.filter((event) => event.startsWith("inject content/location-setter.js"))).toHaveLength(1);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reports a market whose location could not be set and whose page still quotes its own country", async () => {
+      const harness = await bootServiceWorker({ ...switzerlandSource, rejectLocationOn: ["DE"] });
 
       const payload = await runViaWorker(harness);
 
@@ -1164,11 +1300,19 @@ describe("background orchestrator", () => {
           notes: [
             "Matched by search",
             "Match confidence: HIGH",
+            NOT_ACCEPTED_NOTE,
             "Destination mismatch detected (DE)",
             "Destination on product page does not match source destination"
           ]
         }
       ]);
+      expect(harness.events).toContain("location change www.amazon.de CH");
+      expect(marketEvents(harness, "DE").filter((event) => event.startsWith("open "))).toEqual([
+        "open missing/DE",
+        "open search/DE",
+        "open product/DE"
+      ]);
+      expect(harness.events.filter((event) => event.startsWith("inject content/location-setter.js"))).toHaveLength(1);
     });
 
     it("compares a market whose page shows the same town and postcode as the source page", async () => {
@@ -1186,6 +1330,221 @@ describe("background orchestrator", () => {
 
       expect(payload.source?.deliverTo).toBe("Paris 75001");
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+    });
+  });
+
+  describe("delivery location", () => {
+    const SET_NOTE = "Delivery location set to Switzerland";
+
+    function locationEvents(harness: Harness): string[] {
+      return harness.events.filter((event) => event.startsWith("location ") || event.startsWith("inject content/location-setter.js"));
+    }
+
+    it("leaves a store that already delivers to the destination untouched", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"], locations: { US: "CH", UK: "CH", DE: "CH" } });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.source?.destinationCountryCode).toBe("CH");
+      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+        ["UK", "OK"],
+        ["DE", "OK"]
+      ]);
+      expect(payload.results.flatMap((result) => result.notes ?? []).filter((note) => note.startsWith("Delivery location"))).toEqual([]);
+      expect(harness.events.filter((event) => event.startsWith("location "))).toEqual([]);
+      expect(harness.events.filter((event) => event.startsWith("inject content/location-setter.js"))).toEqual([
+        "inject content/location-setter.js missing/UK",
+        "inject content/location-setter.js missing/DE"
+      ]);
+      expect(harness.fetch.mock.calls.map(([url]) => new URL(url as string).hostname)).toEqual(["www.ecb.europa.eu"]);
+    });
+
+    it("sets each store once per run, on the first of its tabs that has the location widget, and reopens that tab", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        prepare: (group, _market, document) => {
+          if (group === "missing") {
+            removeLocationFields(document);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        { ...EXPECTED_DE_RESULT, notes: ["Matched by search", "Match confidence: HIGH", SET_NOTE] }
+      ]);
+      expect(marketEvents(harness, "DE")).toEqual([
+        "progress OPEN DE",
+        "open missing/DE",
+        "ready missing/DE",
+        "inject content/location-setter.js missing/DE",
+        "inject content/product-extractor.js missing/DE",
+        "close missing/DE",
+        "open search/DE",
+        "ready search/DE",
+        "inject content/location-setter.js search/DE",
+        "location form www.amazon.de",
+        "location change www.amazon.de CH",
+        "close search/DE",
+        "open search/DE",
+        "ready search/DE",
+        "progress SEARCH DE",
+        "inject content/search-extractor.js search/DE",
+        "close search/DE",
+        "progress MATCH DE",
+        "open product/DE",
+        "ready product/DE",
+        "progress READ DE",
+        "inject content/product-extractor.js product/DE",
+        "close product/DE"
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("does not post a destination the store does not offer", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "AU"],
+        locations: { US: "CH", AU: "NZ" },
+        notOfferedOn: ["AU"]
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(locationEvents(harness)).toEqual(["inject content/location-setter.js missing/AU", "location form www.amazon.com.au"]);
+      expect(payload.results).toHaveLength(1);
+      expect(payload.results[0]).toMatchObject({ marketplace: "AU", status: "DESTINATION_MISMATCH" });
+      expect(payload.results[0].notes).toEqual(
+        expect.arrayContaining(["Delivery location not offered: CH", "Destination mismatch detected (NZ)"])
+      );
+    });
+
+    it("does not try to set a store to its own country", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], locations: { US: "DE", DE: "US" } });
+
+      const payload = await runViaWorker(harness);
+
+      expect(locationEvents(harness)).toEqual(["inject content/location-setter.js missing/DE"]);
+      expect(payload.results[0]).toMatchObject({ marketplace: "DE", status: "DESTINATION_MISMATCH" });
+      expect(payload.results[0].notes).toEqual([
+        "Matched by search",
+        "Match confidence: HIGH",
+        "Delivery location not set: a postcode is needed for an address in the store's own country",
+        "Destination mismatch detected (US)",
+        "Destination on product page does not match source destination"
+      ]);
+    });
+
+    it("treats a page whose destination cannot be read as unconfirmed after a failed change", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        rejectLocationOn: ["DE"],
+        prepare: (group, _market, document) => {
+          if (group === "product") {
+            removeElement(document, "#countryCode");
+            removeElement(document, "#glow-ingress-line2");
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results[0]).toMatchObject({ marketplace: "DE", status: "DESTINATION_MISMATCH" });
+      expect(payload.results[0].notes).toEqual([
+        "Matched by search",
+        "Match confidence: HIGH",
+        NOT_ACCEPTED_NOTE,
+        "Destination on product page does not match source destination"
+      ]);
+    });
+
+    it("stops when the run is cancelled during a location change", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        locations: { US: "CH" },
+        holdLocation: deferred().promise
+      });
+
+      const run = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("location form www.amazon.de"));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      await run;
+
+      expect(resultPayloads(harness, "run-1")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
+      ]);
+      expect(harness.events.slice(harness.events.indexOf("location form www.amazon.de"))).toEqual([
+        "location form www.amazon.de",
+        "close missing/DE"
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    it("times out a location change that never answers and reads the page as it is", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          locations: { US: "CH" },
+          holdLocation: deferred().promise
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("location form www.amazon.de"));
+        await vi.advanceTimersByTimeAsync(20_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toEqual([
+          {
+            marketplace: "DE",
+            status: "DESTINATION_MISMATCH",
+            confidence: 0.9,
+            productUrl: "https://www.amazon.de/dp/B000000005",
+            notes: [
+              "Matched by search",
+              "Match confidence: HIGH",
+              "Delivery location not set: timed out after 20 seconds",
+              "Destination mismatch detected (US)",
+              "Destination on product page does not match source destination"
+            ]
+          }
+        ]);
+        expect(locationEvents(harness)).toEqual(["inject content/location-setter.js missing/DE", "location form www.amazon.de"]);
+        expect(harness.openTempTabs()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never changes the source store", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"], locations: { US: "CH" } });
+
+      await runViaWorker(harness);
+
+      expect(harness.events.filter((event) => event.startsWith("location change "))).toEqual([
+        "location change www.amazon.co.uk CH",
+        "location change www.amazon.de CH"
+      ]);
+      expect(harness.events.filter((event) => event.includes("www.amazon.com ") || event.endsWith("www.amazon.com"))).toEqual([]);
+      expect(harness.events.filter((event) => event.includes("source/US"))).toEqual([
+        "inject content/source-extractor.js source/US",
+        "inject content/product-extractor.js source/US"
+      ]);
+    });
+
+    it("LOAD_SOURCE reads the source destination from the page fields without setting anything", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], locations: { US: "CH" } });
+
+      const response = await loadSourceViaWorker(harness);
+
+      expect(response.source).toEqual({ ...EXPECTED_SOURCE, destinationCountryCode: "CH", deliverTo: "Deliver to Switzerland" });
+      expect(response.baseline).toEqual(RAW_BASELINE);
+      expect(locationEvents(harness)).toEqual([]);
+      expect(harness.fetch).not.toHaveBeenCalled();
     });
   });
 
@@ -1490,7 +1849,8 @@ describe("background orchestrator", () => {
       ["the unversioned key of the first builds", undefined],
       ["the key of version 2, before variant checks and import-free quotes", 2],
       ["the key of version 3, before model-number matching and the delivery address", 3],
-      ["the key of version 4, before dead listings fell back to a search", 4]
+      ["the key of version 4, before dead listings fell back to a search", 4],
+      ["the key of version 5, before target stores were set to the destination", 5]
     ])("ignores a comparison cached under %s", async (_key, version) => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
       const staleKey = earlierCacheKeyFor(["DE"], version);

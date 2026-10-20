@@ -1,4 +1,4 @@
-import { buildProductUrl, buildSearchUrl } from "../shared/markets";
+import { buildProductUrl, buildSearchUrl, countryName } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
 import {
@@ -19,6 +19,8 @@ import type {
   ExtensionSettings,
   FxTable,
   LoadSourcePayload,
+  LocationRequest,
+  LocationResult,
   Marketplace,
   MatchScore,
   ProductExtractionRequest,
@@ -34,10 +36,14 @@ import { getDailyFxTable } from "./fx-service";
 
 const COMPARISON_TTL_MS = 30 * 60 * 1000;
 const CANCELLED_ERROR = "Comparison cancelled by user";
+const LOCATION_REQUEST_KEY = "__ACROSS_AMAZON_LOCATION_REQUEST__";
+const LOCATION_RESULT_KEY = "__ACROSS_AMAZON_LOCATION_RESULT__";
+const LOCATION_TIMEOUT_MS = 20_000;
 
 interface RunToken {
   cancelled: boolean;
   tempTabIds: Set<number>;
+  locations: Map<Marketplace, LocationResult>;
 }
 
 const RUN_TOKENS = new Map<number, RunToken>();
@@ -61,7 +67,8 @@ function startRun(activeTabId: number): RunToken {
 
   const token: RunToken = {
     cancelled: false,
-    tempTabIds: new Set()
+    tempTabIds: new Set(),
+    locations: new Map()
   };
   RUN_TOKENS.set(activeTabId, token);
   return token;
@@ -312,6 +319,69 @@ async function readTempTab<T>(url: string, token: RunToken, read: (tabId: number
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
+async function ensureDeliveryLocation(
+  tabId: number,
+  source: SourceContext,
+  targetMarket: Marketplace,
+  token: RunToken
+): Promise<LocationResult | undefined> {
+  const countryCode = source.destinationCountryCode;
+  if (!countryCode || token.locations.has(targetMarket)) {
+    return undefined;
+  }
+
+  await writeWindowValue<LocationRequest>(tabId, LOCATION_REQUEST_KEY, { marketplace: targetMarket, countryCode });
+  await runScriptFile(tabId, "content/location-setter.js");
+
+  let result: LocationResult;
+  try {
+    result = (await withTimeout(
+      readWindowValue<LocationResult>(tabId, LOCATION_RESULT_KEY),
+      LOCATION_TIMEOUT_MS,
+      "timed out after 20 seconds"
+    )) ?? { status: "FAILED", reason: "the location step returned nothing" };
+  } catch (error) {
+    assertNotCancelled(token);
+    result = { status: "FAILED", reason: errorMessage(error, "Unknown location error") };
+  }
+
+  assertNotCancelled(token);
+  if (result.status !== "NO_WIDGET") {
+    token.locations.set(targetMarket, result);
+  }
+  return result;
+}
+
+async function readTargetTab<T>(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  url: string,
+  token: RunToken,
+  read: (tabId: number) => Promise<T>
+): Promise<T> {
+  const first = await readTempTab(url, token, async (tabId) => {
+    const location = await ensureDeliveryLocation(tabId, source, targetMarket, token);
+    return location?.status === "SET" ? { reopen: true as const } : { reopen: false as const, value: await read(tabId) };
+  });
+  return first.reopen ? readTempTab(url, token, read) : first.value;
+}
+
 function readProductPage(
   source: SourceContext,
   targetMarket: Marketplace,
@@ -319,7 +389,7 @@ function readProductPage(
   token: RunToken,
   onLoaded?: () => void
 ): Promise<ProductExtractionResult | undefined> {
-  return readTempTab(url, token, (tabId) => {
+  return readTargetTab(source, targetMarket, url, token, (tabId) => {
     onLoaded?.();
     return extractProductData(tabId, {
       marketplace: targetMarket,
@@ -401,22 +471,38 @@ function buildVariantMismatchResult(marketplace: Marketplace, selectedVariants: 
   };
 }
 
+function locationNotes(location?: LocationResult): string[] {
+  switch (location?.status) {
+    case "SET":
+      return location.countryCode ? [`Delivery location set to ${countryName(location.countryCode)}`] : [];
+    case "NOT_OFFERED":
+      return [`Delivery location not offered: ${location.countryCode}`];
+    case "FAILED":
+      return [`Delivery location not set: ${location.reason}`];
+    default:
+      return [];
+  }
+}
+
 function buildProductResult(
   targetMarket: Marketplace,
   productData: ProductExtractionResult,
   match: MatchScore,
   matchNotes: string[],
-  productUrl: string
+  productUrl: string,
+  location?: LocationResult
 ): ComparisonResult {
   const baseConfidence = Number((match.total * 0.8 + productData.parseConfidence * 0.2).toFixed(4));
+  const notSet = location?.status === "FAILED" || location?.status === "NOT_OFFERED";
+  const notes = [...matchNotes, ...locationNotes(location)];
 
-  if (!productData.destinationMatched) {
+  if (!productData.destinationMatched || (notSet && productData.destinationCountryCode === undefined)) {
     return {
       marketplace: targetMarket,
       status: "DESTINATION_MISMATCH",
       confidence: baseConfidence,
       productUrl,
-      notes: [...matchNotes, ...productData.notes, "Destination on product page does not match source destination"]
+      notes: [...notes, ...productData.notes, "Destination on product page does not match source destination"]
     };
   }
 
@@ -427,7 +513,7 @@ function buildProductResult(
       confidence: baseConfidence,
       productUrl,
       breakdown: productData.breakdown,
-      notes: [...matchNotes, ...productData.notes]
+      notes: [...notes, ...productData.notes]
     };
   }
 
@@ -437,7 +523,7 @@ function buildProductResult(
     confidence: baseConfidence,
     productUrl,
     breakdown: productData.breakdown,
-    notes: [...matchNotes, ...productData.notes.filter((note) => note.toLowerCase().includes("shipping") === false)]
+    notes: [...notes, ...productData.notes.filter((note) => note.toLowerCase().includes("shipping") === false)]
   };
 }
 
@@ -450,7 +536,7 @@ async function searchForMatch(
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<{ candidate: SearchCandidate; score: MatchScore } | undefined> {
   for (const query of queries) {
-    const candidates = await readTempTab(buildSearchUrl(targetMarket, query), token, (tabId) => {
+    const candidates = await readTargetTab(source, targetMarket, buildSearchUrl(targetMarket, query), token, (tabId) => {
       enterPhase("SEARCH");
       return extractSearchCandidates(tabId, {
         marketplace: targetMarket,
@@ -489,7 +575,14 @@ async function compareMarket(
       title: lookup.productData.title ?? "",
       url: productUrl
     });
-    return buildProductResult(targetMarket, lookup.productData, match, ["Matched by ASIN"], productUrl);
+    return buildProductResult(
+      targetMarket,
+      lookup.productData,
+      match,
+      ["Matched by ASIN"],
+      productUrl,
+      token.locations.get(targetMarket)
+    );
   }
 
   const skippedAsins = lookup.status === "DEAD" ? [normalizeAsin(source.asin)] : [];
@@ -515,7 +608,8 @@ async function compareMarket(
     variant.productData,
     best.score,
     ["Matched by search", `Match confidence: ${best.score.confidenceLabel}`, ...variant.notes],
-    productUrl
+    productUrl,
+    token.locations.get(targetMarket)
   );
 }
 
