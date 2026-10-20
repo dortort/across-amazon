@@ -112,7 +112,7 @@ export const uk = okResult("UK", [259.0, 9.99, 24.6], 0.94, ["Import fees deposi
 export const ca = okResult("CA", [479.99, 12.99, 41.62], 0.97, ["Duties collected at checkout. Delivery 4–7 days."]);
 export const au = okResult("AU", [599.0, 19.95, 53.35], 0.9, ["GST included in the quoted import estimate."]);
 export const jp = failedResult("JP", "DESTINATION_MISMATCH", 0.93, [
-  "Match found, but the seller does not ship to the United States."
+  "Delivery location not set: Amazon did not accept the change"
 ]);
 export const fr = failedResult("FR", "UNAVAILABLE", 0.9, ["Out of stock — no delivery date offered."]);
 export const es = failedResult("ES", "PARSE_FAILED", 0.89, [

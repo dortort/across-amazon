@@ -48,7 +48,7 @@ const SOURCE_TRUST_SENTENCE = "This is the page you are on. Prices are what Amaz
 const STATUS_TEXT: Record<ComparisonStatus, string> = {
   OK: "Available",
   UNAVAILABLE: "Delivered total not quotable",
-  DESTINATION_MISMATCH: "Does not ship here",
+  DESTINATION_MISMATCH: "Could not set delivery location",
   PARSE_FAILED: "Could not read the page",
   NO_CONFIDENT_MATCH: "No confident match"
 };
@@ -284,6 +284,7 @@ export function statusText(status: ComparisonStatus): string {
 }
 
 const AMAZON_REASON_PREFIX = "Amazon says: ";
+const LOCATION_NOT_OFFERED_PREFIX = "Delivery location not offered";
 
 function amazonReason(result: ComparisonResult): string | undefined {
   const note = result.notes?.find((entry) => entry.startsWith(AMAZON_REASON_PREFIX));
@@ -294,10 +295,12 @@ export function issueNote(result: ComparisonResult, destinationCountryCode?: str
   const destination = destinationCountryCode ? countryName(destinationCountryCode) : "your address";
   switch (result.status) {
     case "DESTINATION_MISMATCH":
-      return `Match found, but the seller does not ship to ${destination}.`;
+      return result.notes?.some((note) => note.startsWith(LOCATION_NOT_OFFERED_PREFIX))
+        ? `This store does not offer delivery to ${destination}.`
+        : `Could not set this store's delivery location to ${destination}, so its price is for another place.`;
     case "UNAVAILABLE": {
       const reason = amazonReason(result);
-      const sentence = "Amazon did not show a delivered price for this destination.";
+      const sentence = `Amazon did not show a delivered price to ${destination}.`;
       return reason ? `${sentence} Amazon says: “${reason}”` : sentence;
     }
     case "PARSE_FAILED":

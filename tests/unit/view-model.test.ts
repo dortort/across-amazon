@@ -122,7 +122,7 @@ const it_ = okResult("IT", 289.9, 14.5, 30.2, 0.76, [
 const ca = okResult("CA", 479.99, 12.99, 41.62, 0.97, ["Duties collected at checkout. Delivery 4–7 days."]);
 const au = okResult("AU", 599.0, 19.95, 53.35, 0.88, ["GST included in the quoted import estimate."]);
 const jp = failedResult("JP", "DESTINATION_MISMATCH", 0.93, [
-  "Match found, but the seller does not ship to the United States."
+  "Delivery location not set: Amazon did not accept the change"
 ]);
 const fr = failedResult("FR", "UNAVAILABLE", 0.9, ["Out of stock — no delivery date offered."]);
 const es = failedResult("ES", "PARSE_FAILED", 0.89, [
@@ -682,7 +682,7 @@ describe("statusText", () => {
   it.each<[ComparisonStatus, string]>([
     ["OK", "Available"],
     ["UNAVAILABLE", "Delivered total not quotable"],
-    ["DESTINATION_MISMATCH", "Does not ship here"],
+    ["DESTINATION_MISMATCH", "Could not set delivery location"],
     ["PARSE_FAILED", "Could not read the page"],
     ["NO_CONFIDENT_MATCH", "No confident match"]
   ])("maps %s to %s", (status, text) => {
@@ -718,9 +718,10 @@ describe("marketplaceIso", () => {
 
 describe("issueNote", () => {
   it("uses the per-status sentence for the destination country, not the backend's own notes", () => {
-    expect(issueNote(jp, "US")).toBe("Match found, but the seller does not ship to United States.");
-    expect(issueNote(jp, "DE")).toBe("Match found, but the seller does not ship to Germany.");
-    expect(issueNote(fr, "US")).toBe("Amazon did not show a delivered price for this destination.");
+    expect(issueNote(jp, "US")).toBe("Could not set this store's delivery location to United States, so its price is for another place.");
+    expect(issueNote(jp, "CH")).toBe("Could not set this store's delivery location to Switzerland, so its price is for another place.");
+    expect(issueNote(fr, "US")).toBe("Amazon did not show a delivered price to United States.");
+    expect(issueNote(fr, "CH")).toBe("Amazon did not show a delivered price to Switzerland.");
     expect(issueNote(es, "US")).toBe("The product page could not be read.");
     expect(issueNote(mx, "US")).toBe("No listing scored above the confidence floor.");
   });
@@ -749,20 +750,33 @@ describe("issueNote", () => {
     ]);
 
     expect(issueNote(cannotShip, "US")).toBe(
-      "Amazon did not show a delivered price for this destination. Amazon says: “This item cannot be shipped to your selected delivery location.”"
+      "Amazon did not show a delivered price to United States. Amazon says: “This item cannot be shipped to your selected delivery location.”"
     );
   });
 
   it("keeps Amazon's reason out of the other statuses", () => {
     const mismatch = failedResult("MX", "DESTINATION_MISMATCH", 0.82, ["Amazon says: Currently unavailable."]);
 
-    expect(issueNote(mismatch, "US")).toBe("Match found, but the seller does not ship to United States.");
+    expect(issueNote(mismatch, "US")).toBe(
+      "Could not set this store's delivery location to United States, so its price is for another place."
+    );
+  });
+
+  it("says a store does not offer delivery to a destination its location form leaves out", () => {
+    const notOffered = failedResult("AU", "DESTINATION_MISMATCH", 0.9, [
+      "Matched by search",
+      "Delivery location not offered: CH",
+      "Destination mismatch detected (NZ)"
+    ]);
+
+    expect(issueNote(notOffered, "CH")).toBe("This store does not offer delivery to Switzerland.");
   });
 
   it("uses a generic destination when the country is unknown", () => {
     expect(issueNote(failedResult("JP", "DESTINATION_MISMATCH", 0.93))).toBe(
-      "Match found, but the seller does not ship to your address."
+      "Could not set this store's delivery location to your address, so its price is for another place."
     );
+    expect(issueNote(failedResult("FR", "UNAVAILABLE", 0.9))).toBe("Amazon did not show a delivered price to your address.");
   });
 
   it("returns an empty note for an OK result, notes or not", () => {

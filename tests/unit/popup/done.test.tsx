@@ -317,13 +317,13 @@ describe("issues accordion", () => {
       {
         flag: "🇫🇷",
         title: "France — Delivered total not quotable",
-        note: "Amazon did not show a delivered price for this destination."
+        note: "Amazon did not show a delivered price to United States."
       },
       { flag: "🇪🇸", title: "Spain — Could not read the page", note: "The product page could not be read." },
       {
         flag: "🇯🇵",
-        title: "Japan — Does not ship here",
-        note: "Match found, but the seller does not ship to United States."
+        title: "Japan — Could not set delivery location",
+        note: "Could not set this store's delivery location to United States, so its price is for another place."
       }
     ]);
 
@@ -343,12 +343,34 @@ describe("issues accordion", () => {
   });
 
   it("names the destination country from the source in the shipping note", async () => {
-    const app = await renderDone(resultPayload({ source: { ...source, destinationCountryCode: "DE" }, results: [de, jp] }));
+    const app = await renderDone(resultPayload({ source: { ...source, destinationCountryCode: "CH" }, results: [de, jp] }));
 
     await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
 
     expect(app.container.querySelector(".dB-issue p")?.textContent).toBe(
-      "Match found, but the seller does not ship to Germany."
+      "Could not set this store's delivery location to Switzerland, so its price is for another place."
+    );
+  });
+
+  it("says when a store does not offer delivery to the destination", async () => {
+    const au = { ...jp, marketplace: "AU" as const, notes: ["Delivery location not offered: CH"] };
+    const app = await renderDone(resultPayload({ source: { ...source, destinationCountryCode: "CH" }, results: [de, au] }));
+
+    await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
+
+    expect(app.container.querySelector(".dB-issue strong")?.textContent).toBe("Australia — Could not set delivery location");
+    expect(app.container.querySelector(".dB-issue p")?.textContent).toBe("This store does not offer delivery to Switzerland.");
+  });
+
+  it("names no country when the source destination is unknown", async () => {
+    const unknownDestination = { ...source };
+    delete unknownDestination.destinationCountryCode;
+    const app = await renderDone(resultPayload({ source: unknownDestination, results: [de, jp] }));
+
+    await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
+
+    expect(app.container.querySelector(".dB-issue p")?.textContent).toBe(
+      "Could not set this store's delivery location to your address, so its price is for another place."
     );
   });
 

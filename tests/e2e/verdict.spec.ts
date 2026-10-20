@@ -78,13 +78,13 @@ const ISSUES_IN_ORDER = {
     "Mexico — No confident match",
     "France — Delivered total not quotable",
     "Spain — Could not read the page",
-    "Japan — Does not ship here"
+    "Japan — Could not set delivery location"
   ],
   notes: [
     "No listing scored above the confidence floor.",
-    "Amazon did not show a delivered price for this destination.",
+    "Amazon did not show a delivered price to United States.",
     "The product page could not be read.",
-    "Match found, but the seller does not ship to United States."
+    "Could not set this store's delivery location to United States, so its price is for another place."
   ]
 };
 
