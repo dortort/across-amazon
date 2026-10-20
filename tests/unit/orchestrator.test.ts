@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setDeliveryLocation } from "../../src/content/location-setter";
-import { extractProductData } from "../../src/content/product-extractor";
+import { extractProductDataWithOffers } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import { extractSourceContext } from "../../src/content/source-extractor";
 import { MARKETPLACE_CODES, countryName, getMarketplaceByDomain } from "../../src/shared/markets";
@@ -37,6 +37,7 @@ const CANCELLED_ERROR = "Comparison cancelled by user";
 const TAB_CLOSED_ERROR = "The tab was closed.";
 const LOCATION_FORM_PATH = "/portal-migration/hz/glow/get-rendered-address-selections";
 const ADDRESS_CHANGE_PATH = "/portal-migration/hz/glow/address-change";
+const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc";
 const PAGE_TOKEN = "TEST-PAGE-TOKEN";
 const POST_TOKEN = "TEST-POST-TOKEN";
 const NOT_ACCEPTED_NOTE = "Delivery location not set: Amazon did not accept the change";
@@ -158,6 +159,8 @@ interface HarnessOptions {
   rejectLocationOn?: Marketplace[];
   notOfferedOn?: Marketplace[];
   holdLocation?: Promise<void>;
+  offersOn?: Partial<Record<Marketplace, string>>;
+  holdOffers?: Promise<void>;
 }
 
 interface Harness {
@@ -225,6 +228,10 @@ function readLocationFixture(file: string): string {
   return readFileSync(join(FIXTURE_ROOT, "location", file), "utf8");
 }
 
+function readOffersFixture(file: string): string {
+  return new JSDOM(readFileSync(join(FIXTURE_ROOT, "offers-live", file), "utf8")).window.document.body.innerHTML;
+}
+
 function setPageAsin(document: Document, asin: string): void {
   const input = document.querySelector<HTMLInputElement>("#ASIN");
   if (input) {
@@ -261,7 +268,9 @@ const CONTENT_SCRIPTS: Record<string, (tab: FakeTab) => void> = {
     const request = tab.scope.__ACROSS_AMAZON_PRODUCT_REQUEST__ as ProductExtractionRequest | undefined;
     if (request) {
       const { document, location } = tab.dom.window;
-      tab.scope.__ACROSS_AMAZON_PRODUCT_RESULT__ = extractProductData(document, request, location.href);
+      tab.scope.__ACROSS_AMAZON_PRODUCT_RESULT__ = extractProductDataWithOffers(document, request, location.href, (url, init) =>
+        fetch(url, init)
+      );
     }
   },
   "content/location-setter.js": (tab) => {
@@ -444,6 +453,12 @@ function createHarness(options: HarnessOptions): Harness {
       const success = JSON.parse(readLocationFixture("address-change-CH.json")) as { address: Record<string, unknown> };
       const body = JSON.stringify({ ...success, address: { ...success.address, countryCode, district: countryCode } });
       return { ok: true, status: 200, text: async () => body };
+    }
+    if (url.pathname === OFFERS_PATH) {
+      events.push(`offers ${url.hostname}`);
+      await options.holdOffers;
+      const file = options.offersOn?.[market];
+      return file ? { ok: true, status: 200, text: async () => readOffersFixture(file) } : { ok: false, status: 404, text: async () => "" };
     }
     return { ok: false, status: 404, text: async () => "" };
   }
@@ -661,6 +676,22 @@ function replaceOfferWithLiveBlocks(document: Document, file: string, blocks: st
     }
     document.body.insertAdjacentHTML("beforeend", section.innerHTML);
   }
+}
+
+function offerOnlyOtherSellers(document: Document): void {
+  for (const selector of OFFER_SELECTORS) {
+    removeElement(document, selector);
+  }
+  const asin = /\/dp\/([A-Z0-9]{10})/i.exec(document.URL)?.[1] ?? "";
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div id="olpLinkWidget_feature_div"><input type="hidden" id="all-offers-display-params" data-asin="${asin}" data-m="" data-qid="" data-smid="" data-sourcecustomerorglistid="" data-sourcecustomerorglistitemid="" data-sr=""></div>` +
+      '<span id="buybox-see-all-buying-choices"><span class="a-button-inner"><a class="a-button-text">See All Buying Options</a></span></span>'
+  );
+}
+
+function offersUrl(origin: string, asin: string): string {
+  return `${origin}${OFFERS_PATH}?asin=${asin}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp`;
 }
 
 function marketEvents(harness: Harness, market: Marketplace): string[] {
@@ -1639,6 +1670,180 @@ describe("background orchestrator", () => {
     });
   });
 
+  describe("other sellers' offers", () => {
+    const DE_SOURCE_ASIN_URL = "https://www.amazon.de/dp/B000000001";
+    const STAR_BRICK_CITY = {
+      seller: "Star Brick City",
+      dispatcher: "Amazon",
+      fulfilledByAmazon: true,
+      offerCount: 4
+    };
+
+    function onlyOtherSellersOn(market: Marketplace): Prepare {
+      return (group, pageMarket, document) => {
+        if (group === "product" && pageMarket === market) {
+          offerOnlyOtherSellers(document);
+        }
+      };
+    }
+
+    it("quotes the first new offer that delivers on a store whose page shows no price, with its seller", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        locations: { US: "CH", DE: "CH" },
+        offersOn: { DE: "DE-four-new-offers.html" },
+        prepare: onlyOtherSellersOn("DE")
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "OK",
+          confidence: 0.96,
+          productUrl: DE_SOURCE_ASIN_URL,
+          breakdown: { item: { amount: 651.25, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
+          otherSeller: STAR_BRICK_CITY,
+          notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"],
+          normalizedTotal: { amount: 763.03, currency: "USD" }
+        }
+      ]);
+      expect(harness.fetch).toHaveBeenCalledWith(
+        offersUrl("https://www.amazon.de", "B000000001"),
+        expect.objectContaining({ credentials: "include" })
+      );
+      expect(harness.events.filter((event) => event.startsWith("offers "))).toEqual(["offers www.amazon.de"]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reports a store whose other offers cannot ship there as unavailable, saying no other seller delivers", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "MX"],
+        sourceAsinOn: ["MX"],
+        offersOn: { MX: "MX-one-offer-not-shippable.html" },
+        prepare: onlyOtherSellersOn("MX")
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "MX",
+          status: "UNAVAILABLE",
+          confidence: 0.82,
+          productUrl: "https://www.amazon.com.mx/dp/B000000001",
+          notes: [
+            "Matched by ASIN",
+            "Price not displayed for destination",
+            "Shipping not displayed for destination",
+            "Import fees not displayed for destination",
+            "No other seller delivers to the destination"
+          ]
+        }
+      ]);
+      expect(harness.events).not.toContain("open search/MX");
+    });
+
+    it("reports a store as unavailable with the reason when its other offers cannot be read", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        prepare: onlyOtherSellersOn("DE")
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toMatchObject([
+        {
+          marketplace: "DE",
+          status: "UNAVAILABLE",
+          notes: [
+            "Matched by ASIN",
+            "Price not displayed for destination",
+            "Shipping not displayed for destination",
+            "Import fees not displayed for destination",
+            "Other offers could not be read: Amazon answered HTTP 404"
+          ]
+        }
+      ]);
+      expect(payload.results[0]).not.toHaveProperty("otherSeller");
+    });
+
+    it("times out a product read that never answers, as it does the location step, and closes the tab", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          holdOffers: deferred().promise,
+          prepare: onlyOtherSellersOn("DE")
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("offers www.amazon.de"));
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(harness.openTempTabs()).toEqual(["product/DE"]);
+        await vi.advanceTimersByTimeAsync(5_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toEqual([
+          {
+            marketplace: "DE",
+            status: "PARSE_FAILED",
+            confidence: 0,
+            notes: ["Timed out reading the product page after 25 seconds"]
+          }
+        ]);
+        expect(harness.openTempTabs()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reads the page you are on without its other offers when the popup opens, and quotes them for the run's baseline", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["DE", "US"],
+        activeUrl: "https://www.amazon.de/dp/B000000005",
+        offersOn: { DE: "DE-four-new-offers.html" },
+        prepare: (group, _market, document) => {
+          if (group === "source") {
+            offerOnlyOtherSellers(document);
+          }
+        }
+      });
+
+      const response = await loadSourceViaWorker(harness);
+
+      expect(response.source).toMatchObject({ marketplace: "DE", asin: "B000000005" });
+      expect(response.baseline).toBeUndefined();
+      expect(harness.fetch).not.toHaveBeenCalled();
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.baseline).toEqual({
+        marketplace: "DE",
+        status: "OK",
+        confidence: 1,
+        productUrl: "https://www.amazon.de/dp/B000000005",
+        breakdown: {
+          item: { amount: 651.25, currency: "EUR" },
+          shipping: { amount: 55.26, currency: "EUR" },
+          importFees: { amount: 0, currency: "EUR" }
+        },
+        otherSeller: STAR_BRICK_CITY,
+        notes: ["Quoted another seller's offer", "Import fees not displayed for destination"],
+        normalizedTotal: { amount: 706.51, currency: "EUR" }
+      });
+      expect(harness.fetch).toHaveBeenCalledWith(
+        offersUrl("https://www.amazon.de", "B000000005"),
+        expect.objectContaining({ credentials: "include" })
+      );
+    });
+  });
+
   describe("variant check", () => {
     const BLUE_VARIANT_ASIN = "B0000000B5";
     const RED_LISTING_URL = "https://www.amazon.de/dp/B000000005";
@@ -1849,7 +2054,8 @@ describe("background orchestrator", () => {
       ["the key of version 2, before variant checks and import-free quotes", 2],
       ["the key of version 3, before model-number matching and the delivery address", 3],
       ["the key of version 4, before dead listings fell back to a search", 4],
-      ["the key of version 5, before target stores were set to the destination", 5]
+      ["the key of version 5, before target stores were set to the destination", 5],
+      ["the key of version 6, before other sellers' offers were read", 6]
     ])("ignores a comparison cached under %s", async (_key, version) => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
       const staleKey = earlierCacheKeyFor(["DE"], version);

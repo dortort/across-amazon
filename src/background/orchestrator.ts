@@ -39,6 +39,9 @@ const CANCELLED_ERROR = "Comparison cancelled by user";
 const LOCATION_REQUEST_KEY = "__ACROSS_AMAZON_LOCATION_REQUEST__";
 const LOCATION_RESULT_KEY = "__ACROSS_AMAZON_LOCATION_RESULT__";
 const LOCATION_TIMEOUT_MS = 20_000;
+const PRODUCT_REQUEST_KEY = "__ACROSS_AMAZON_PRODUCT_REQUEST__";
+const PRODUCT_RESULT_KEY = "__ACROSS_AMAZON_PRODUCT_RESULT__";
+const PRODUCT_TIMEOUT_MS = 25_000;
 
 interface RunToken {
   cancelled: boolean;
@@ -206,9 +209,13 @@ async function extractSearchCandidates(tabId: number, request: SearchExtractionR
 }
 
 async function extractProductData(tabId: number, request: ProductExtractionRequest): Promise<ProductExtractionResult | undefined> {
-  await writeWindowValue(tabId, "__ACROSS_AMAZON_PRODUCT_REQUEST__", request);
+  await writeWindowValue(tabId, PRODUCT_REQUEST_KEY, request);
   await runScriptFile(tabId, "content/product-extractor.js");
-  return readWindowValue<ProductExtractionResult>(tabId, "__ACROSS_AMAZON_PRODUCT_RESULT__");
+  return withTimeout(
+    readWindowValue<ProductExtractionResult>(tabId, PRODUCT_RESULT_KEY),
+    PRODUCT_TIMEOUT_MS,
+    "Timed out reading the product page after 25 seconds"
+  );
 }
 
 function pushProgress(payload: RunComparisonProgressPayload): void {
@@ -277,12 +284,17 @@ function normalizeResult(result: ComparisonResult, currency: string, fxTable: Fx
   };
 }
 
-async function extractBaseline(activeTabId: number, source: SourceContext): Promise<ComparisonResult | undefined> {
+async function extractBaseline(
+  activeTabId: number,
+  source: SourceContext,
+  readOtherOffers: boolean
+): Promise<ComparisonResult | undefined> {
   try {
     const extraction = await extractProductData(activeTabId, {
       marketplace: source.marketplace,
       sourceDestinationCountryCode: source.destinationCountryCode,
-      sourceDeliverTo: source.deliverTo
+      sourceDeliverTo: source.deliverTo,
+      readOtherOffers
     });
 
     const breakdown = extraction?.breakdown;
@@ -302,6 +314,7 @@ async function extractBaseline(activeTabId: number, source: SourceContext): Prom
         importFees: breakdown.importFees ?? { amount: 0, currency },
         ...(breakdown.totalDisplayed ? { totalDisplayed: breakdown.totalDisplayed } : {})
       },
+      ...(extraction.otherSeller ? { otherSeller: extraction.otherSeller } : {}),
       notes: extraction.notes
     };
   } catch {
@@ -394,7 +407,8 @@ function readProductPage(
     return extractProductData(tabId, {
       marketplace: targetMarket,
       sourceDestinationCountryCode: source.destinationCountryCode,
-      sourceDeliverTo: source.deliverTo
+      sourceDeliverTo: source.deliverTo,
+      readOtherOffers: true
     });
   });
 }
@@ -523,6 +537,7 @@ function buildProductResult(
     confidence: baseConfidence,
     productUrl,
     breakdown: productData.breakdown,
+    ...(productData.otherSeller ? { otherSeller: productData.otherSeller } : {}),
     notes: [...notes, ...productData.notes.filter((note) => note.toLowerCase().includes("shipping") === false)]
   };
 }
@@ -623,7 +638,7 @@ export async function cancelComparison(activeTabId: number): Promise<void> {
 export async function loadSource(activeTabId: number): Promise<LoadSourcePayload> {
   try {
     const source = await extractSourceContext(activeTabId);
-    const baseline = await extractBaseline(activeTabId, source);
+    const baseline = await extractBaseline(activeTabId, source, false);
     return { source, baseline };
   } catch (error) {
     return { error: errorMessage(error, "Unable to read the active tab") };
@@ -666,7 +681,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       };
     }
 
-    baseline = await extractBaseline(activeTabId, source);
+    baseline = await extractBaseline(activeTabId, source, true);
     const table = await getDailyFxTable();
     fxTable = table;
 
