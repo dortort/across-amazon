@@ -220,6 +220,8 @@ describe("detail sheet", () => {
         dispatcher: "RamanDz",
         fulfilledByAmazon: false,
         offerCount: 2,
+        readCount: 2,
+        readComplete: true,
         deliveringNewCount: 2,
         comparedCount: 2
       }
@@ -241,7 +243,15 @@ describe("detail sheet", () => {
   it("says who sells the page you are on when its price came from another seller", async () => {
     const quotedBaseline = {
       ...baseline,
-      otherSeller: { seller: "Acme Outlet", dispatcher: "Acme Outlet", fulfilledByAmazon: false, offerCount: 1, deliveringNewCount: 1 }
+      otherSeller: {
+        seller: "Acme Outlet",
+        dispatcher: "Acme Outlet",
+        fulfilledByAmazon: false,
+        offerCount: 1,
+        readCount: 1,
+        readComplete: true,
+        deliveringNewCount: 1
+      }
     };
     const app = await renderDone(resultPayload({ baseline: quotedBaseline }));
 

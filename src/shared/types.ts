@@ -88,6 +88,8 @@ export interface OtherSeller {
   dispatcher?: string;
   fulfilledByAmazon: boolean;
   offerCount: number;
+  readCount: number;
+  readComplete: boolean;
   deliveringNewCount: number;
   comparedCount?: number;
 }

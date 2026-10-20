@@ -328,7 +328,7 @@ export function locationNote(result: ComparisonResult): string | undefined {
   return result.notes?.find((note) => note.startsWith(LOCATION_SET_PREFIX));
 }
 
-function offersSentence({ deliveringNewCount: listed, comparedCount: compared = 0 }: OtherSeller): string {
+function completeReadSentence(listed: number, compared: number): string {
   if (listed <= 1) {
     return "The only offer Amazon lists that delivers new.";
   }
@@ -338,6 +338,27 @@ function offersSentence({ deliveringNewCount: listed, comparedCount: compared = 
   return compared > 0
     ? `Cheapest of the ${compared} of the ${listed} offers Amazon lists that deliver new whose prices could be converted.`
     : `The first of the ${listed} offers Amazon lists that deliver new.`;
+}
+
+function partialReadSentence(listed: number, compared: number, scope: string): string {
+  if (listed <= 1) {
+    return `The only offer that delivers new ${scope}.`;
+  }
+  if (compared === listed) {
+    return `Cheapest of the ${listed} offers that deliver new ${scope}.`;
+  }
+  return compared > 0
+    ? `Cheapest of the ${compared} of the ${listed} offers that deliver new and whose prices could be converted, ${scope}.`
+    : `The first of the ${listed} offers that deliver new ${scope}.`;
+}
+
+function offersSentence(other: OtherSeller): string {
+  const { deliveringNewCount: listed, comparedCount: compared = 0, readCount, offerCount } = other;
+  if (other.readComplete) {
+    return completeReadSentence(listed, compared);
+  }
+  const total = offerCount > readCount ? ` of the ${offerCount} Amazon lists` : "";
+  return partialReadSentence(listed, compared, `among the first ${readCount} read${total}`);
 }
 
 export function otherSellerNote(result: ComparisonResult): string | undefined {

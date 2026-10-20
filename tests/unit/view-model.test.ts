@@ -877,7 +877,13 @@ describe("locationNote", () => {
 
 describe("otherSellerNote", () => {
   const quoted = (otherSeller: ComparisonResult["otherSeller"]): ComparisonResult => ({ ...de, otherSeller });
-  const counts = (listed: number, compared = listed) => ({ offerCount: listed, deliveringNewCount: listed, comparedCount: compared });
+  const counts = (listed: number, compared = listed) => ({
+    offerCount: listed,
+    readCount: listed,
+    readComplete: true,
+    deliveringNewCount: listed,
+    comparedCount: compared
+  });
 
   it("names the seller, Amazon as the dispatcher and how many offers that deliver new it was the cheapest of", () => {
     expect(otherSellerNote(quoted({ seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(4) }))).toBe(
@@ -912,8 +918,34 @@ describe("otherSellerNote", () => {
     expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(2, 0) }))).toBe(
       "Sold by BuyMyBricks, dispatched by Amazon. The first of the 2 offers Amazon lists that deliver new."
     );
-    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 }))).toBe(
+    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(2), comparedCount: undefined }))).toBe(
       "Sold by BuyMyBricks, dispatched by Amazon. The first of the 2 offers Amazon lists that deliver new."
+    );
+  });
+
+  it("says the offers were among the first ones read when paging stopped short of Amazon's total", () => {
+    const partial = { ...counts(10), offerCount: 12, readComplete: false };
+
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...partial }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. Cheapest of the 10 offers that deliver new among the first 10 read of the 12 Amazon lists."
+    );
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...partial, deliveringNewCount: 3, comparedCount: 2 }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. Cheapest of the 2 of the 3 offers that deliver new and whose prices could be converted, among the first 10 read of the 12 Amazon lists."
+    );
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...partial, deliveringNewCount: 1, comparedCount: 1 }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. The only offer that delivers new among the first 10 read of the 12 Amazon lists."
+    );
+  });
+
+  it("leaves Amazon's total out when the read stopped short of a total the panel did not give", () => {
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(10), readComplete: false }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. Cheapest of the 10 offers that deliver new among the first 10 read."
+    );
+  });
+
+  it("keeps the sentence about every offer Amazon lists when the read was complete", () => {
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(12) }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. Cheapest of the 12 offers Amazon lists that deliver new."
     );
   });
 

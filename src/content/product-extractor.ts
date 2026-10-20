@@ -671,7 +671,7 @@ function offerQuote({ item, shipping, seller, dispatcher, fulfilledByAmazon }: Q
   return { item, shipping, seller, dispatcher, fulfilledByAmazon };
 }
 
-function quoteOtherOffers(result: ProductExtractionResult, offers: QuotableOffer[], offerCount: number): ProductExtractionResult {
+function quoteOtherOffers(result: ProductExtractionResult, offers: QuotableOffer[], read: OffersRead): ProductExtractionResult {
   const [first] = offers;
   return {
     ...result,
@@ -685,7 +685,9 @@ function quoteOtherOffers(result: ProductExtractionResult, offers: QuotableOffer
       seller: first.seller,
       dispatcher: first.dispatcher,
       fulfilledByAmazon: first.fulfilledByAmazon,
-      offerCount,
+      offerCount: read.total,
+      readCount: read.offers.length,
+      readComplete: read.offers.length >= read.total,
       deliveringNewCount: offers.length
     },
     otherOffers: offers.map(offerQuote),
@@ -719,7 +721,7 @@ export async function extractProductDataWithOffers(
 
   const quotable = quotableOffers(read.offers);
   if (quotable.length > 0) {
-    return quoteOtherOffers(result, quotable, read.total);
+    return quoteOtherOffers(result, quotable, read);
   }
   return read.offers.length >= read.total
     ? withNote(result, NO_OTHER_SELLER)
