@@ -17,6 +17,7 @@ Across Amazon is a Chrome MV3 extension that compares delivered product cost acr
 - [Using the popup](docs/popup.md): every popup state, and what the delivered totals, deltas and "Check match" mean
 - [Architecture](docs/architecture.md): how a comparison runs end to end, message correlation, cancellation and the module map
 - [Testing](docs/testing.md): the test layers, visual baselines per platform, and regenerating the screenshots
+- [Privacy policy](docs/privacy-policy.md): what the extension reads, stores and sends, and to whom
 
 ## Capabilities
 
