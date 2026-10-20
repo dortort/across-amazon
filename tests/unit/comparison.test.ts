@@ -64,7 +64,8 @@ describe("withCheapestOtherOffer", () => {
         offerCount: 5,
         readCount: 5,
         readComplete: true,
-        deliveringNewCount: otherOffers.length
+        deliveringNewCount: otherOffers.length,
+        unreadableCount: 0
       },
       otherOffers,
       notes: ["Matched by ASIN", "Quoted another seller's offer"],
@@ -89,6 +90,7 @@ describe("withCheapestOtherOffer", () => {
         readCount: 5,
         readComplete: true,
         deliveringNewCount: 2,
+        unreadableCount: 0,
         comparedCount: 2
       },
       notes: ["Matched by ASIN", "Quoted another seller's offer"]

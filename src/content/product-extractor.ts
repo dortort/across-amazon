@@ -642,13 +642,17 @@ async function readOtherOffers(
   return { offers, total, complete: isReadComplete(offers, total, listEnded) };
 }
 
+function isUnreadableOffer(offer: OtherOffer): boolean {
+  return offer.isNew && (!offer.item || (!offer.shipping && !offer.undeliverable));
+}
+
 function unquotedNote(read: OffersRead): string {
   if (!read.complete) {
     return read.total === undefined
       ? `${OTHER_OFFERS_UNREAD}the panel gave no total`
       : `${OTHER_OFFERS_UNREAD}listed ${read.offers.length} of ${read.total} new offers`;
   }
-  const unreadable = read.offers.find((offer) => offer.isNew && (!offer.item || (!offer.shipping && !offer.undeliverable)));
+  const unreadable = read.offers.find(isUnreadableOffer);
   if (!unreadable) {
     return NO_OTHER_SELLER;
   }
@@ -698,7 +702,8 @@ function quoteOtherOffers(result: ProductExtractionResult, offers: QuotableOffer
       offerCount: read.total ?? read.offers.length,
       readCount: read.offers.length,
       readComplete: read.complete,
-      deliveringNewCount: offers.length
+      deliveringNewCount: offers.length,
+      unreadableCount: read.offers.filter(isUnreadableOffer).length
     },
     otherOffers: offers.map(offerQuote),
     notes: [OTHER_SELLER_QUOTED, IMPORT_FEES_NOT_DISPLAYED, ...result.notes.filter((note) => !isFeaturedOfferNote(note))]

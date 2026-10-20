@@ -59,7 +59,8 @@ const quotedBaseline = {
     offerCount: 1,
     readCount: 1,
     readComplete: true,
-    deliveringNewCount: 1
+    deliveringNewCount: 1,
+    unreadableCount: 0
   }
 };
 

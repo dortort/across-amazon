@@ -1260,7 +1260,8 @@ describe("product extractor other sellers' offers", () => {
         offerCount: 4,
         readCount: 4,
         readComplete: true,
-        deliveringNewCount: 4
+        deliveringNewCount: 4,
+        unreadableCount: 0
       },
       otherOffers: [
         {
@@ -1334,7 +1335,8 @@ describe("product extractor other sellers' offers", () => {
       offerCount: 2,
       readCount: 2,
       readComplete: true,
-      deliveringNewCount: 2
+      deliveringNewCount: 2,
+      unreadableCount: 0
     });
     expect(result.otherOffers?.map(({ item, shipping, seller }) => ({ item, shipping, seller }))).toEqual([
       { item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" }, seller: "BuyMyBricks" },
@@ -1601,6 +1603,28 @@ describe("product extractor other sellers' offers", () => {
 
       expect(result.notes.at(-1)).toBe("Other offers could not be read: a delivery price could not be read");
       expect(result.breakdown).toBeUndefined();
+    });
+
+    it("counts the new offers whose prices could not be read beside a quote", async () => {
+      const fetchRef = fetchPages({
+        1: pagedPanel(4, [
+          { seller: "Seller 1", item: "€701.00" },
+          { seller: "Seller 2", item: "€702.00" },
+          { seller: "Seller 3", item: "€703.00" },
+          { seller: "Seller 4", item: "€690.00", delivery: "Delivery Monday 4 November" }
+        ])
+      });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(result.otherSeller).toMatchObject({
+        offerCount: 4,
+        readCount: 4,
+        readComplete: true,
+        deliveringNewCount: 3,
+        unreadableCount: 1
+      });
+      expect(result.otherOffers?.map((offer) => offer.seller)).toEqual(["Seller 1", "Seller 2", "Seller 3"]);
     });
 
     it("does not claim no seller delivers when an offer's price could not be read", async () => {

@@ -91,6 +91,7 @@ export interface OtherSeller {
   readCount: number;
   readComplete: boolean;
   deliveringNewCount: number;
+  unreadableCount: number;
   comparedCount?: number;
 }
 

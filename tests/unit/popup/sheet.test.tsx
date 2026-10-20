@@ -223,6 +223,7 @@ describe("detail sheet", () => {
         readCount: 2,
         readComplete: true,
         deliveringNewCount: 2,
+        unreadableCount: 0,
         comparedCount: 2
       }
     };
@@ -250,7 +251,8 @@ describe("detail sheet", () => {
         offerCount: 1,
         readCount: 1,
         readComplete: true,
-        deliveringNewCount: 1
+        deliveringNewCount: 1,
+        unreadableCount: 0
       }
     };
     const app = await renderDone(resultPayload({ baseline: quotedBaseline }));

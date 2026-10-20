@@ -1683,6 +1683,7 @@ describe("background orchestrator", () => {
       readCount: 4,
       readComplete: true,
       deliveringNewCount: 4,
+      unreadableCount: 0,
       comparedCount: 4
     };
 
@@ -1752,6 +1753,7 @@ describe("background orchestrator", () => {
             readCount: 2,
             readComplete: true,
             deliveringNewCount: 2,
+            unreadableCount: 0,
             comparedCount: 2
           },
           notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"],
@@ -1873,7 +1875,8 @@ describe("background orchestrator", () => {
           offerCount: 4,
           readCount: 4,
           readComplete: true,
-          deliveringNewCount: 4
+          deliveringNewCount: 4,
+          unreadableCount: 0
         },
         notes: ["Quoted another seller's offer", "Import fees not displayed for destination"]
       });
