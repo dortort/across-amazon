@@ -899,6 +899,7 @@ describe("otherSellerNote", () => {
     readCount: listed,
     readComplete: true,
     deliveringNewCount: listed,
+    unreadableCount: 0,
     comparedCount: compared
   });
 
@@ -964,6 +965,32 @@ describe("otherSellerNote", () => {
     expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(12) }))).toBe(
       "Sold by Seller 1, dispatched by Amazon. Cheapest of the 12 offers Amazon lists that deliver new."
     );
+  });
+
+  it("scopes the claim to the offers whose prices could be read when some could not", () => {
+    const withUnreadable = (readable: number, compared: number, unreadable: number) => ({
+      ...counts(readable + unreadable, compared),
+      deliveringNewCount: readable,
+      unreadableCount: unreadable
+    });
+
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...withUnreadable(3, 3, 1) }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. Cheapest of the 3 offers whose prices could be read, of the 4 Amazon lists that deliver new."
+    );
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...withUnreadable(1, 1, 1) }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. The only offer whose prices could be read, of the 2 Amazon lists that deliver new."
+    );
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...withUnreadable(3, 2, 1) }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. Cheapest of the 2 offers whose prices could be read and converted, of the 4 Amazon lists that deliver new."
+    );
+    expect(otherSellerNote(quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...withUnreadable(3, 0, 1) }))).toBe(
+      "Sold by Seller 1, dispatched by Amazon. The first offer whose prices could be read, of the 4 Amazon lists that deliver new."
+    );
+    expect(
+      otherSellerNote(
+        quoted({ seller: "Seller 1", dispatcher: "Amazon", fulfilledByAmazon: true, ...withUnreadable(3, 3, 1), offerCount: 12, readComplete: false })
+      )
+    ).toBe("Sold by Seller 1, dispatched by Amazon. Cheapest of the 3 offers whose prices could be read, among the first 4 read of the 12 Amazon lists.");
   });
 
   it("says when the quoted offer is the only one that delivers new", () => {

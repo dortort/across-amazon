@@ -358,13 +358,25 @@ function partialReadSentence(listed: number, compared: number, scope: string): s
     : `The first of the ${listed} offers that deliver new ${scope}.`;
 }
 
-function offersSentence(other: OtherSeller): string {
-  const { deliveringNewCount: listed, comparedCount: compared = 0, readCount, offerCount } = other;
-  if (other.readComplete) {
-    return completeReadSentence(listed, compared);
+function unreadableSentence(readable: number, compared: number, scope: string): string {
+  const converted = compared > 0 && compared < readable ? " and converted" : "";
+  if (compared === 0) {
+    return `${readable <= 1 ? "The only" : "The first"} offer whose prices could be read, ${scope}.`;
   }
+  return compared === 1
+    ? `The only offer whose prices could be read${converted}, ${scope}.`
+    : `Cheapest of the ${compared} offers whose prices could be read${converted}, ${scope}.`;
+}
+
+function offersSentence(other: OtherSeller): string {
+  const { deliveringNewCount: listed, comparedCount: compared = 0, readCount, offerCount, unreadableCount } = other;
   const total = offerCount > readCount ? ` of the ${offerCount} Amazon lists` : "";
-  return partialReadSentence(listed, compared, `among the first ${readCount} read${total}`);
+  const partialScope = `among the first ${readCount} read${total}`;
+  if (unreadableCount > 0) {
+    const scope = other.readComplete ? `of the ${listed + unreadableCount} Amazon lists that deliver new` : partialScope;
+    return unreadableSentence(listed, compared, scope);
+  }
+  return other.readComplete ? completeReadSentence(listed, compared) : partialReadSentence(listed, compared, partialScope);
 }
 
 export function otherSellerNote(result: ComparisonResult): string | undefined {
