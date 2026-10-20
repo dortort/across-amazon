@@ -63,6 +63,10 @@ See [Testing](docs/testing.md) for first-time Playwright setup and how the basel
 3. Enable **Developer mode**
 4. Click **Load unpacked** and select `dist`
 
+## Package for the Chrome Web Store
+
+Run `pnpm package`. It runs the production build and zips the contents of `dist` (without source maps) into `release/across-amazon-<version>.zip`, ready to upload to the Chrome Web Store Developer Dashboard. It fails if the `manifest.json` and `package.json` versions differ.
+
 ## Project structure
 
 - `src/background`: service worker, orchestration, FX service
