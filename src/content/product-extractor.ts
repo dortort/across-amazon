@@ -581,15 +581,16 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<FetchedText>;
 
 const SEE_ALL_BUYING_OPTIONS = "#buybox-see-all-buying-choices";
 const OTHER_OFFERS_TIMEOUT_MS = 15_000;
+const OTHER_OFFERS_MIN_PAGE_MS = 3_000;
 const OTHER_OFFERS_MAX_PAGES = 3;
 const OTHER_OFFERS_HEADERS = { "X-Requested-With": "XMLHttpRequest", Accept: "text/html,*/*" };
 const OTHER_OFFERS_UNREAD = "Other offers could not be read: ";
 const NO_OTHER_SELLER = "No other seller delivers the item new to the destination";
 const OTHER_SELLER_QUOTED = "Quoted another seller's offer";
 
-async function fetchOtherOffers(documentRef: Document, url: string, fetchRef: FetchLike): Promise<Document> {
+async function fetchOtherOffers(documentRef: Document, url: string, fetchRef: FetchLike, timeoutMs: number): Promise<Document> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), OTHER_OFFERS_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchRef(url, { credentials: "same-origin", headers: OTHER_OFFERS_HEADERS, signal: controller.signal });
     if (!response.ok) {
@@ -616,19 +617,24 @@ async function readOtherOffers(
   marketCurrency: string,
   fetchRef: FetchLike
 ): Promise<OffersRead> {
-  const load = async (page: number): Promise<OtherOffersPanel | undefined> => {
+  const deadline = Date.now() + OTHER_OFFERS_TIMEOUT_MS;
+  const load = async (page: number, timeoutMs: number): Promise<OtherOffersPanel | undefined> => {
     const url = urlFor(page);
-    return url ? parseOtherOffers(await fetchOtherOffers(documentRef, url, fetchRef), marketCurrency) : undefined;
+    return url ? parseOtherOffers(await fetchOtherOffers(documentRef, url, fetchRef, timeoutMs), marketCurrency) : undefined;
   };
 
-  const first = await load(1);
+  const first = await load(1, OTHER_OFFERS_TIMEOUT_MS);
   if (!first) {
     throw new Error("Amazon's answer held no offer list");
   }
 
   let { offers, offerCount: total } = first;
   for (let page = 2; page <= OTHER_OFFERS_MAX_PAGES && offers.length < total; page += 1) {
-    const next = await load(page).catch(() => undefined);
+    const remaining = deadline - Date.now();
+    if (remaining < OTHER_OFFERS_MIN_PAGE_MS) {
+      break;
+    }
+    const next = await load(page, remaining).catch(() => undefined);
     const added = next ? unseenOffers(offers, next.offers) : [];
     if (!next || added.length === 0) {
       break;
