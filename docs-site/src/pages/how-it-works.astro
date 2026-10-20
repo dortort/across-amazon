@@ -203,8 +203,9 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
       <p>
         Your browser requests the Amazon pages with your own Amazon session, as if you had opened them yourself. The
         stores receive only what a comparison needs: your destination country in their location request, the product’s
-        ASIN in the addresses of the product pages and, with the page’s own parameters, in the request for other
-        sellers’ offers, and its title, brand, model number and selected variant as search terms. If you are signed in, Amazon can link these requests to your account. The exchange rate requests carry
+        ASIN in the addresses of the product pages and, with the page’s own parameters, a new-offers filter and a page
+        number, in the request for other sellers’ offers, and its title, brand, model number and selected variant as
+        search terms. If you are signed in, Amazon can link these requests to your account. The exchange rate requests carry
         no information about you or the product. Like any web request, they let those servers see your IP address.
       </p>
 
