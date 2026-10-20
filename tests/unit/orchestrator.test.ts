@@ -1723,7 +1723,7 @@ describe("background orchestrator", () => {
       expect(harness.openTempTabs()).toEqual([]);
     });
 
-    it("normalizes an offer with the item in pounds and the delivery in Swiss francs by converting each", async () => {
+    it("quotes the amazon.co.uk offer that is cheapest delivered in the comparison currency, not Amazon's first", async () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "UK"],
         sourceAsinOn: ["UK"],
@@ -1740,10 +1740,10 @@ describe("background orchestrator", () => {
           status: "OK",
           confidence: 0.96,
           productUrl: "https://www.amazon.co.uk/dp/B000000001",
-          breakdown: { item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" } },
-          otherSeller: { seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 },
+          breakdown: { item: { amount: 699, currency: "GBP" }, shipping: { amount: 40.86, currency: "CHF" } },
+          otherSeller: { seller: "RamanDz", dispatcher: "RamanDz", fulfilledByAmazon: false, offerCount: 2, deliveringNewCount: 2 },
           notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"],
-          normalizedTotal: { amount: 1018.98, currency: "USD" }
+          normalizedTotal: { amount: 933.01, currency: "USD" }
         }
       ]);
     });

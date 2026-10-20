@@ -1,4 +1,5 @@
-import type { ComparisonResult } from "./types";
+import { deliveredTotalIn } from "./money";
+import type { ComparisonResult, FxTable, Money, OfferQuote } from "./types";
 
 function statusRank(status: ComparisonResult["status"]): number {
   return status === "OK" ? 0 : 1;
@@ -25,4 +26,29 @@ export function findCheapestAvailable(results: ComparisonResult[]): ComparisonRe
   return sortComparisonResults(results).find(
     (result) => result.status === "OK" && typeof result.normalizedTotal?.amount === "number"
   );
+}
+
+function cheapestOffer(offers: OfferQuote[], currency: string, fxTable: FxTable): OfferQuote | undefined {
+  let cheapest: { offer: OfferQuote; total: Money } | undefined;
+  for (const offer of offers) {
+    const total = deliveredTotalIn({ item: offer.item, shipping: offer.shipping }, currency, fxTable);
+    if (total && (!cheapest || total.amount < cheapest.total.amount)) {
+      cheapest = { offer, total };
+    }
+  }
+  return cheapest?.offer ?? offers[0];
+}
+
+export function withCheapestOtherOffer(result: ComparisonResult, currency: string, fxTable: FxTable): ComparisonResult {
+  const { otherOffers, ...quote } = result;
+  const offer = otherOffers && cheapestOffer(otherOffers, currency, fxTable);
+  if (!offer || !quote.breakdown || !quote.otherSeller) {
+    return quote;
+  }
+
+  return {
+    ...quote,
+    breakdown: { ...quote.breakdown, item: offer.item, shipping: offer.shipping },
+    otherSeller: { ...quote.otherSeller, seller: offer.seller, dispatcher: offer.dispatcher, fulfilledByAmazon: offer.fulfilledByAmazon }
+  };
 }
