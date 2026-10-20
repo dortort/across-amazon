@@ -1,0 +1,13 @@
+---
+interface Props {
+  tone?: "note" | "caution";
+  title?: string;
+}
+
+const { tone = "note", title } = Astro.props;
+---
+
+<div class:list={["callout", { "callout-caution": tone === "caution" }]} role="note">
+  {title && <p class="callout-title">{title}</p>}
+  <slot />
+</div>
