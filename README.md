@@ -19,6 +19,7 @@ The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ
 - [Using the popup](docs/popup.md): every popup state, and what the delivered totals, deltas and "Check match" mean
 - [Architecture](docs/architecture.md): how a comparison runs end to end, message correlation, cancellation and the module map
 - [Testing](docs/testing.md): the test layers, visual baselines per platform, and regenerating the screenshots
+- [Chrome Web Store listing](docs/chrome-web-store.md): the store listing, privacy practices, reviewer test instructions and submission checklist
 - [Privacy policy](docs/privacy-policy.md): what the extension reads, stores and sends, and to whom
 
 ## Capabilities
