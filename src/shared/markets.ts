@@ -33,8 +33,8 @@ export const MARKETPLACE_BY_CODE: Record<Marketplace, MarketplaceConfig> = MARKE
 export const MARKETPLACE_CODES = MARKETPLACES.map((market) => market.code);
 
 export function getMarketplaceByDomain(hostname: string): Marketplace | undefined {
-  const normalizedHost = hostname.toLowerCase().replace(/^m\./, "www.");
-  return MARKETPLACES.find((market) => market.domain === normalizedHost)?.code;
+  const host = hostname.toLowerCase();
+  return MARKETPLACES.find((market) => market.domain === host)?.code;
 }
 
 export function buildSearchUrl(marketplace: Marketplace, query: string): string {
