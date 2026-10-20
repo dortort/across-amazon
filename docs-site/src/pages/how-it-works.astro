@@ -1,0 +1,354 @@
+---
+import Base from "../layouts/Base.astro";
+import PageIntro from "../components/PageIntro.astro";
+import Shot from "../components/Shot.astro";
+import Callout from "../components/Callout.astro";
+import TableScroll from "../components/TableScroll.astro";
+import Toc from "../components/Toc.astro";
+import { stores } from "../data/stores";
+import runningShot from "../assets/screenshots/running.png";
+
+const sections = {
+  steps: "What happens on each store",
+  permissions: "The two permissions it asks for",
+  hosts: "The sites it connects to",
+  storage: "What it stores, and for how long",
+  "delivery-location": "What it changes on other Amazon stores",
+  "remote-code": "No remote code",
+} as const;
+
+const tocItems = Object.entries(sections).map(([id, label]) => ({ href: `#${id}`, label }));
+
+const amazonHosts = stores.map((store) => `www.${store.domain}`);
+---
+
+<Base
+  title="How it works"
+  description="What Across Amazon does during a check, the permissions and sites it needs, what it stores and what it changes on other Amazon stores."
+>
+  <PageIntro
+    title="How it works"
+    lede="Across Amazon compares the delivered price of the product you are viewing with the same product on other Amazon stores. This page explains each step, what the extension needs and what it leaves behind."
+  />
+  <div class="container page-body">
+    <Toc items={tocItems} />
+
+    <article class="prose">
+      <p>
+        Opening the popup only reads the product page you are on. Nothing else happens until you press the check
+        button, which reads <span class="nowrap">“Check 9 other Amazons”</span> with the default settings. The
+        extension then looks for the same product on each other store, in background tabs that never take focus. A
+        check takes about 3 seconds per store. It reads what each store charges to deliver the product to you and
+        ranks the stores by that delivered total, converted to one currency at the European Central Bank’s daily rate.
+      </p>
+
+      <h2 id="steps">{sections.steps}</h2>
+      <p>The stores are checked one at a time. For each store, the extension does this:</p>
+      <ol>
+        <li>
+          <strong>Looks up your product by its ASIN.</strong> It opens the store’s page for your product’s ASIN,
+          Amazon’s own product identifier, in a background tab. If that page shows your product and it can be bought,
+          that is an exact match. When the store does not list the ASIN, or its listing is unavailable, it searches.
+        </li>
+        <li>
+          <strong>Sets the delivery location, if needed.</strong> On the first page it opens on the store, it reads
+          which country the store delivers to. If the store delivers elsewhere, it sets the store’s delivery location to
+          your destination country and opens the page again, so the price it reads is quoted for your destination. The
+          store is left that way afterwards: see <a href="#delivery-location">what it changes on other Amazon stores</a>.
+        </li>
+        <li>
+          <strong>Searches, if the store does not list the ASIN or its listing is unavailable.</strong> It searches the
+          store, first for the brand and model number when the title has one, then for the title, brand and selected
+          variant. Each result is scored on how closely its title, brand and variant match your product. The best
+          result must pass the matching threshold. Its page is then checked for your colour, pack and size. When it
+          shows another variant, the extension opens the variant the page offers with your attributes and reads that
+          page instead; when the page does not offer it, the store is reported as{" "}
+          <span class="nowrap">“No confident match”</span>. A store where no result passes the threshold is reported
+          the same way.
+        </li>
+        <li>
+          <strong>Reads the prices.</strong> It reads the item price, the shipping and any import fees the page quotes
+          for your destination. Their sum is the delivered total, in the currency the page shows. When a store shows
+          no import fees for your destination, the total is item plus shipping and
+          the popup <a href="/faq/#import-fees">says so</a>, because duties may still be due on delivery. If Amazon
+          shows a higher total than the sum, that total is used.
+        </li>
+        <li>
+          <strong>Closes the tab.</strong> Each tab closes as soon as it has been read, and the next store starts.
+        </li>
+      </ol>
+      <p>
+        While the check runs, the popup shows the results so far. The dial counts the stores finished out of the
+        total. A line names the step for the store in
+        progress: <em>Opening tab</em>, <em>Searching</em>, <em>Matching product</em> or <em>Reading cost stack</em>.
+        Each finished store gets a chip with its delivered total in your display currency, or a dash when it could not
+        be compared.
+      </p>
+      <Shot
+        src={runningShot}
+        alt="Running popup with a progress dial at 4 of 9, Searching France, and chips for Canada, Mexico, United Kingdom, Germany and France"
+        width={360}
+      >
+        <strong>A check in progress.</strong> Four of nine stores are done and France is being searched. Prices are
+        illustrative.
+      </Shot>
+      <p>
+        <span class="nowrap">“Stop checking”</span> cancels the run and closes any background tabs it opened. Closing
+        the popup does not stop a check: it finishes in the background and its result is stored. Reopen the popup on
+        the same tab to follow its progress.
+      </p>
+      <p>
+        When the last store is done, the popup ranks every store that quoted a delivered total, cheapest first,
+        including the page you are on. The card at the top names the cheapest. Stores that could not be compared are
+        listed under “N marketplaces could not be compared”, each with the reason. Press{" "}
+        <span class="nowrap">“Check again”</span> within 30 minutes and the same result comes back at once from
+        storage, with no tabs opened.
+      </p>
+      <p>
+        The pages it opens are ordinary visits: they appear in Chrome’s history and, if you are signed in to Amazon,
+        may appear in your Amazon browsing and search history. They may also influence Amazon’s recommendations.
+      </p>
+
+      <h2 id="permissions">{sections.permissions}</h2>
+      <p>Apart from the sites in the <a href="#hosts">next section</a>, the extension asks Chrome for two permissions.</p>
+      <TableScroll label="Permissions">
+        <table class="table-stack">
+          <thead>
+            <tr>
+              <th scope="col">Permission</th>
+              <th scope="col">Why it is needed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><code>scripting</code></th>
+              <td>
+                The extension declares no content scripts, so none of its code runs on a page by itself. When you open
+                the popup on one of the ten stores, and when you start a check, it injects its own packaged scripts
+                into the Amazon tab you are on and into the background tabs it opens on the other stores. The scripts
+                read the product, its price, shipping and import fees and the delivery destination, and set a store’s
+                delivery country when needed. On a store page that is not a product page, the extension finds no
+                product and keeps nothing.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><code>storage</code></th>
+              <td>
+                Keeps your settings (which stores to check and the display currency), the result of a finished check so
+                that checking again within 30 minutes returns it at once, and the day’s exchange rates so they are
+                normally downloaded once per UTC day. All of it stays in your browser.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </TableScroll>
+
+      <h2 id="hosts">{sections.hosts}</h2>
+      <p>
+        The extension’s manifest lists twelve hosts. Its own requests go to them and to Amazon’s image servers, for the
+        product picture shown in the popup. The pages it opens in background tabs load whatever Amazon’s own pages
+        load, such as Amazon’s image and script servers. Nothing goes to a server of the developer: the extension has
+        none.
+      </p>
+      <TableScroll label="Hosts in the extension’s manifest">
+        <table class="table-stack">
+          <thead>
+            <tr>
+              <th scope="col">Host</th>
+              <th scope="col">Why it connects</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">
+                The ten Amazon stores
+                <ul class="host-list" role="list">
+                  {
+                    amazonHosts.map((host) => (
+                      <li>
+                        <code>{host}</code>
+                      </li>
+                    ))
+                  }
+                </ul>
+              </th>
+              <td>
+                The extension runs its scripts in the Amazon tab you are on and in the background tabs, which open
+                product and search pages on the other stores. The popup uses this access to see that the tab you are on
+                is an Amazon store, without the broader <code>tabs</code> permission. To set a store’s delivery
+                country, the location script runs inside that store’s own page and sends the store’s own{" "}
+                <span class="nowrap">“Choose your location”</span> requests to the same store.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><code>www.ecb.europa.eu</code></th>
+              <td>
+                The extension downloads the European Central Bank’s daily euro reference rates, which convert each
+                store’s delivered total into one currency. This normally happens once per UTC day. Only a successful
+                download is kept, so after a failure it is tried again on the next check.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><code>api.frankfurter.dev</code></th>
+              <td>
+                A fallback for the same daily rates, used only when the European Central Bank’s feed cannot be loaded.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </TableScroll>
+      <p>
+        Your browser requests the Amazon pages with your own Amazon session, as if you had opened them yourself. The
+        stores receive only what a comparison needs: your destination country in their location request, the product’s
+        ASIN in the addresses of the product pages, and its title, brand, model number and selected variant as search
+        terms. If you are signed in, Amazon can link these requests to your account. The exchange rate requests carry
+        no information about you or the product. Like any web request, they let those servers see your IP address.
+      </p>
+
+      <h2 id="storage">{sections.storage}</h2>
+      <p>
+        Everything is kept in the extension’s local storage in your browser: your settings (which stores to check and
+        the display currency), the result of each finished check and each day’s exchange rates.
+      </p>
+      <TableScroll label="Stored data">
+        <table class="table-stack">
+          <thead>
+            <tr>
+              <th scope="col">What</th>
+              <th scope="col">How long</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Your settings</th>
+              <td>Until you change them or remove the extension.</td>
+            </tr>
+            <tr>
+              <th scope="row">Check results</th>
+              <td>
+                A finished check is reused for 30 minutes. An older result is deleted only when exactly the same check
+                runs again; otherwise it stays until you remove the extension or clear its storage.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Exchange rates</th>
+              <td>
+                Each day’s rates are reused for that UTC day. They stay until you remove the extension or clear its
+                storage.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </TableScroll>
+      <p>
+        A stored result holds the product details read from the page you are on, each store’s prices and the exchange
+        rates used. Some of those details can be personal: the <span class="nowrap">“Deliver to”</span> text, which
+        for a signed-in user can hold a first name, a town and a postcode; the page address, which can carry your
+        Amazon search terms; and your destination country.
+      </p>
+      <p>
+        Nothing the extension stores is sent to the developer or to anyone else.
+        To delete it, see <a href="/faq/#delete-data">how to delete your data</a>.
+      </p>
+
+      <h2 id="delivery-location">{sections["delivery-location"]}</h2>
+      <Callout tone="caution" title="Other stores’ delivery location may change">
+        <p>
+          Before it reads a store, the extension may set that store’s delivery location to the country in the{" "}
+          <span class="nowrap">“Deliver to”</span> box of the page you started from, and leaves it that way.
+        </p>
+      </Callout>
+      <p>
+        A delivered price only compares with yours when every store quotes the same destination, so a store that
+        delivers elsewhere is set to your destination country before it is read. When that country is known, a note in
+        the popup says so before you start.
+      </p>
+      <ul>
+        <li>
+          <strong>How.</strong> On the first page it opens on a store, the extension reads which country the store
+          delivers to. If that is already your destination country, nothing is sent. Otherwise it makes the same two
+          requests the store’s own <span class="nowrap">“Choose your location”</span> box makes, from that page and in
+          your own browser session: it loads the location form, taking only its security token and list of countries,
+          then submits your country. Each store is set at most once per check.
+        </li>
+        <li>
+          <strong>Only a country.</strong> It never sets a name, town, postcode or address. Your saved addresses, cart
+          and orders are not touched, and nothing is ever bought.
+        </li>
+        <li>
+          <strong>Left that way.</strong> The extension never restores the previous location. Your own tabs on that
+          store show the new one after their next reload, and later checks find the store already set.
+        </li>
+        <li>
+          <strong>Not the store you started from.</strong> Its delivery location is never changed.
+        </li>
+        <li>
+          <strong>Country, not address.</strong> When the page you are on shows a town and a postcode, an address in
+          that store’s own country, the other stores are set to that country. Their quotes are then for the country,
+          not your exact address.
+        </li>
+      </ul>
+      <p>
+        For example, start from a product on amazon.com with <span class="nowrap">“Deliver to Switzerland”</span>.
+        The check sets amazon.de, amazon.fr and the other stores to Switzerland, except any store that{" "}
+        <a href="#when-a-store-cannot-be-set">cannot be set</a>. A ranked store’s breakdown sheet says “Delivery
+        location set to Switzerland” when the check changed it. Afterwards amazon.de shows Switzerland in its{" "}
+        <span class="nowrap">“Deliver to”</span> box until you change it.
+      </p>
+
+      <h3 id="changing-it-back">Changing it back</h3>
+      <p>
+        To change a store back, pick another location in its <span class="nowrap">“Deliver to”</span> box, at any
+        time. Removing the extension does not change a store’s delivery location back.
+      </p>
+
+      <h3 id="when-a-store-cannot-be-set">When a store cannot be set to your country</h3>
+      <p>A store keeps quoting its previous place when:</p>
+      <ul>
+        <li>its location form does not offer your country (amazon.com.au offers few countries),</li>
+        <li>your destination is the store’s own country, which Amazon sets only by postcode, or</li>
+        <li>Amazon refuses the change.</li>
+      </ul>
+      <p>
+        Its price is then for another place, so it is never ranked. It is listed under “N marketplaces could not be
+        compared” as “Could not set delivery location”, with a note such as “This store does not offer delivery to
+        Switzerland.”
+      </p>
+
+      <h2 id="remote-code">{sections["remote-code"]}</h2>
+      <p>
+        The extension runs no remote code. Every script it runs is bundled in its package. It injects only its own
+        packaged files and functions into Amazon pages, and it never fetches code to run.
+      </p>
+
+      <p class="closing">
+        For everything the extension reads, keeps and sends, see the <a href="/privacy/">privacy policy</a>. For short
+        answers to common questions, see the <a href="/faq/">FAQ</a>.
+      </p>
+    </article>
+  </div>
+</Base>
+
+<style>
+  article :global(.shot) {
+    margin-inline: auto;
+  }
+
+  .host-list {
+    margin-top: 6px;
+    padding: 0;
+    list-style: none;
+    font-weight: 400;
+  }
+
+  .host-list li + li {
+    margin-top: 2px;
+  }
+
+  .closing {
+    margin-top: 2.5em;
+    padding-top: 1.25em;
+    border-top: 1px solid var(--color-hairline);
+    color: var(--color-muted);
+  }
+</style>
