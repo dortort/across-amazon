@@ -168,5 +168,7 @@ export function deliveredTotalIn(breakdown: PriceBreakdown | undefined, currency
   if (!converted.every((part): part is Money => part !== undefined)) {
     return undefined;
   }
-  return { amount: roundCents(converted.reduce((total, part) => total + part.amount, 0)), currency };
+  const sum = roundCents(converted.reduce((total, part) => total + part.amount, 0));
+  const displayed = breakdown.totalDisplayed && convertMoney(breakdown.totalDisplayed, currency, fxTable);
+  return displayed && roundCents(displayed.amount) >= sum ? { amount: roundCents(displayed.amount), currency } : { amount: sum, currency };
 }

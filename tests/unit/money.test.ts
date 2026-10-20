@@ -120,8 +120,27 @@ describe("deliveredTotalIn", () => {
     expect(deliveredTotalIn({ ...charges, totalDisplayed: eur(46) }, "USD", fxTable)).toEqual({ amount: 49.68, currency: "USD" });
   });
 
-  it("ignores a displayed total when the charges are in different currencies", () => {
+  it("keeps a displayed total that covers the converted charges when they are in different currencies", () => {
     expect(deliveredTotalIn({ ...poundsAndFrancs, totalDisplayed: { amount: 900, currency: "GBP" } }, "GBP", fxTable)).toEqual({
+      amount: 900,
+      currency: "GBP"
+    });
+    expect(deliveredTotalIn({ ...poundsAndFrancs, totalDisplayed: { amount: 900, currency: "GBP" } }, "USD", fxTable)).toEqual({
+      amount: 1140.85,
+      currency: "USD"
+    });
+    expect(deliveredTotalIn({ ...poundsAndFrancs, totalDisplayed: { amount: 1100, currency: "USD" } }, "GBP", fxTable)).toEqual({
+      amount: 867.78,
+      currency: "GBP"
+    });
+  });
+
+  it("keeps the converted charges when the displayed total is below them or cannot be converted", () => {
+    expect(deliveredTotalIn({ ...poundsAndFrancs, totalDisplayed: { amount: 700, currency: "GBP" } }, "GBP", fxTable)).toEqual({
+      amount: 803.86,
+      currency: "GBP"
+    });
+    expect(deliveredTotalIn({ ...poundsAndFrancs, totalDisplayed: { amount: 9000, currency: "SEK" } }, "GBP", fxTable)).toEqual({
       amount: 803.86,
       currency: "GBP"
     });
