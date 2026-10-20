@@ -1,4 +1,6 @@
 import type { ListingAvailability, ProductExtractionRequest, ProductExtractionResult, VariantOption } from "../shared/types";
+import { buildOtherOffersUrl, parseOtherOffers, pickOtherOffer } from "./other-offers";
+import type { QuotableOffer } from "./other-offers";
 import {
   collapseText,
   hasFreeMarker,
@@ -471,6 +473,16 @@ function readVariantOptions(documentRef: Document): VariantOption[] {
   });
 }
 
+const PRICE_NOT_DISPLAYED = "Price not displayed for destination";
+const SHIPPING_NOT_DISPLAYED = "Shipping not displayed for destination";
+const IMPORT_FEES_NOT_DISPLAYED = "Import fees not displayed for destination";
+const AMAZON_SAYS = "Amazon says: ";
+
+function parseConfidenceOf(priced: boolean, hasShippingInfo: boolean, hasImportInfo: boolean, destinationMatched: boolean): number {
+  const confidence = (priced ? 0.5 : 0) + (hasShippingInfo ? 0.2 : 0) + (hasImportInfo ? 0.2 : 0) + (destinationMatched ? 0.1 : 0);
+  return Number(confidence.toFixed(2));
+}
+
 export function extractProductData(
   documentRef: Document,
   request: ProductExtractionRequest,
@@ -482,10 +494,10 @@ export function extractProductData(
   const itemPrice = findItemPrice(documentRef, marketCurrency);
 
   if (!itemPrice) {
-    notes.push("Price not displayed for destination");
+    notes.push(PRICE_NOT_DISPLAYED);
     const availability = readAvailabilityMessage(documentRef);
     if (availability) {
-      notes.push(`Amazon says: ${availability}`);
+      notes.push(`${AMAZON_SAYS}${availability}`);
     }
   }
 
@@ -501,11 +513,11 @@ export function extractProductData(
   const hasImportInfo = Boolean(importAmount || importIsFree);
 
   if (!hasShippingInfo) {
-    notes.push("Shipping not displayed for destination");
+    notes.push(SHIPPING_NOT_DISPLAYED);
   }
 
   if (!hasImportInfo) {
-    notes.push("Import fees not displayed for destination");
+    notes.push(IMPORT_FEES_NOT_DISPLAYED);
   }
 
   const currency = itemPrice?.currency ?? shippingAmount?.currency ?? importAmount?.currency ?? marketCurrency;
@@ -527,12 +539,6 @@ export function extractProductData(
 
   const totalDisplayed = totalDisplayedText ? parseMoney(totalDisplayedText, marketCurrency) : globalCharges.total;
 
-  const parseConfidence =
-    (itemPrice ? 0.5 : 0) +
-    (hasShippingInfo ? 0.2 : 0) +
-    (hasImportInfo ? 0.2 : 0) +
-    (destinationMatched ? 0.1 : 0);
-
   return {
     marketplace: request.marketplace,
     asin: readDocumentAsin(documentRef, canonicalHref),
@@ -546,7 +552,7 @@ export function extractProductData(
     hasImportInfo,
     isDeliverable: Boolean(itemPrice) && destinationMatched,
     availability: readAvailability(documentRef, Boolean(itemPrice)),
-    parseConfidence: Number(parseConfidence.toFixed(2)),
+    parseConfidence: parseConfidenceOf(Boolean(itemPrice), hasShippingInfo, hasImportInfo, destinationMatched),
     breakdown: itemPrice
       ? {
           item: itemPrice,
@@ -559,16 +565,119 @@ export function extractProductData(
   };
 }
 
+interface FetchedText {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+}
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<FetchedText>;
+
+const SEE_ALL_BUYING_OPTIONS = "#buybox-see-all-buying-choices";
+const OTHER_OFFERS_TIMEOUT_MS = 15_000;
+const OTHER_OFFERS_HEADERS = { "X-Requested-With": "XMLHttpRequest", Accept: "text/html,*/*" };
+const OTHER_OFFERS_UNREAD = "Other offers could not be read: ";
+const NO_OTHER_SELLER = "No other seller delivers to the destination";
+const OTHER_SELLER_QUOTED = "Quoted another seller's offer";
+
+async function fetchOtherOffers(documentRef: Document, url: string, fetchRef: FetchLike): Promise<Document> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OTHER_OFFERS_TIMEOUT_MS);
+  try {
+    const response = await fetchRef(url, { credentials: "include", headers: OTHER_OFFERS_HEADERS, signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Amazon answered HTTP ${response.status}`);
+    }
+    const panel = documentRef.implementation.createHTMLDocument("");
+    panel.body.innerHTML = await response.text();
+    return panel;
+  } catch (error) {
+    throw controller.signal.aborted ? new Error(`timed out after ${OTHER_OFFERS_TIMEOUT_MS / 1000} seconds`) : error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function withNote(result: ProductExtractionResult, note: string): ProductExtractionResult {
+  return { ...result, notes: [...result.notes, note] };
+}
+
+function isFeaturedOfferNote(note: string): boolean {
+  return [PRICE_NOT_DISPLAYED, SHIPPING_NOT_DISPLAYED, IMPORT_FEES_NOT_DISPLAYED].includes(note) || note.startsWith(AMAZON_SAYS);
+}
+
+function asksForOtherOffers(
+  documentRef: Document,
+  request: ProductExtractionRequest,
+  result: ProductExtractionResult
+): boolean {
+  return (
+    request.readOtherOffers === true &&
+    !result.breakdown &&
+    result.destinationMatched &&
+    result.availability !== "unavailable" &&
+    documentRef.querySelector(SEE_ALL_BUYING_OPTIONS) !== null
+  );
+}
+
+function quoteOtherOffer(result: ProductExtractionResult, offer: QuotableOffer, offerCount: number): ProductExtractionResult {
+  return {
+    ...result,
+    hasShippingInfo: true,
+    hasImportInfo: false,
+    isDeliverable: result.destinationMatched,
+    availability: "available",
+    parseConfidence: parseConfidenceOf(true, true, false, result.destinationMatched),
+    breakdown: { item: offer.item, shipping: offer.shipping },
+    otherSeller: { seller: offer.seller, dispatcher: offer.dispatcher, fulfilledByAmazon: offer.fulfilledByAmazon, offerCount },
+    notes: [OTHER_SELLER_QUOTED, IMPORT_FEES_NOT_DISPLAYED, ...result.notes.filter((note) => !isFeaturedOfferNote(note))]
+  };
+}
+
+export async function extractProductDataWithOffers(
+  documentRef: Document,
+  request: ProductExtractionRequest,
+  pageUrl: string,
+  fetchRef: FetchLike
+): Promise<ProductExtractionResult> {
+  const result = extractProductData(documentRef, request, pageUrl);
+  if (!asksForOtherOffers(documentRef, request, result)) {
+    return result;
+  }
+
+  const url = buildOtherOffersUrl(documentRef, new URL(pageUrl).origin, result.asin);
+  if (!url) {
+    return withNote(result, `${OTHER_OFFERS_UNREAD}the page names no ASIN`);
+  }
+
+  let panel: Document;
+  try {
+    panel = await fetchOtherOffers(documentRef, url, fetchRef);
+  } catch (error) {
+    return withNote(result, `${OTHER_OFFERS_UNREAD}${error instanceof Error ? error.message : "Unknown request error"}`);
+  }
+
+  const offers = parseOtherOffers(panel, MARKET_DEFAULT_CURRENCY[request.marketplace]);
+  if (!offers) {
+    return withNote(result, `${OTHER_OFFERS_UNREAD}Amazon's answer held no offer list`);
+  }
+
+  const offer = pickOtherOffer(offers.offers);
+  return offer ? quoteOtherOffer(result, offer, offers.offerCount) : withNote(result, NO_OTHER_SELLER);
+}
+
 declare global {
   interface Window {
     __ACROSS_AMAZON_PRODUCT_REQUEST__?: ProductExtractionRequest;
-    __ACROSS_AMAZON_PRODUCT_RESULT__?: ProductExtractionResult;
+    __ACROSS_AMAZON_PRODUCT_RESULT__?: Promise<ProductExtractionResult>;
   }
 }
 
 if (typeof window !== "undefined" && typeof document !== "undefined") {
   const request = window.__ACROSS_AMAZON_PRODUCT_REQUEST__;
   if (request) {
-    window.__ACROSS_AMAZON_PRODUCT_RESULT__ = extractProductData(document, request, location.href);
+    window.__ACROSS_AMAZON_PRODUCT_RESULT__ = extractProductDataWithOffers(document, request, location.href, (url, init) =>
+      fetch(url, init)
+    );
   }
 }

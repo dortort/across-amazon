@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
-import { describe, expect, it } from "vitest";
-import { extractProductData } from "../../src/content/product-extractor";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { extractProductData, extractProductDataWithOffers } from "../../src/content/product-extractor";
 import { deliveredTotal } from "../../src/shared/money";
 import type { ListingAvailability, Marketplace, Money, PriceBreakdown, ProductExtractionResult } from "../../src/shared/types";
 import { destinationFields } from "./destination-fields";
@@ -1168,5 +1168,223 @@ describe("product extractor AmazonGlobal details", () => {
 
     expect(result.breakdown?.shipping).toEqual({ amount: 6, currency: "USD" });
     expect(result.breakdown?.totalDisplayed).toBeUndefined();
+  });
+});
+
+describe("product extractor other sellers' offers", () => {
+  const LEGO_ASIN = "B0CGVJVQV8";
+  const OFFERS_FIXTURES = join(process.cwd(), "tests", "fixtures", "offers-live");
+  const QUOTED_NOTE = "Quoted another seller's offer";
+  const NO_IMPORT_FEES_NOTE = "Import fees not displayed for destination";
+  const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc";
+  const PANEL_QUERY = `?asin=${LEGO_ASIN}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp`;
+  const BUYING_OPTIONS =
+    '<span id="buybox-see-all-buying-choices"><span class="a-button-inner"><a class="a-button-text">See All Buying Options</a></span></span>';
+
+  interface Answer {
+    ok?: boolean;
+    status?: number;
+    body: string;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function panelBody(file: string): string {
+    return new JSDOM(readFileSync(join(OFFERS_FIXTURES, file), "utf8")).window.document.body.innerHTML;
+  }
+
+  function fetchAnswering(answer: Answer) {
+    return vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: answer.ok ?? true,
+      status: answer.status ?? 200,
+      text: async () => answer.body
+    }));
+  }
+
+  function fetchFailing(error: Error) {
+    return vi.fn(async (_url: string, _init?: RequestInit): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> => {
+      throw error;
+    });
+  }
+
+  function legoPage(market: Marketplace, blocks: string = BUYING_OPTIONS): JSDOM {
+    const host = HOST_BY_MARKET[market];
+    if (!host) {
+      throw new Error(`No test host for ${market}`);
+    }
+    return new JSDOM(
+      `<!doctype html><html><body>
+        <input type="hidden" id="ASIN" name="ASIN" value="${LEGO_ASIN}">
+        <input type="hidden" id="countryCode" value="CH">
+        <span id="productTitle"> LEGO Harry Potter Gringotts Wizarding Bank Collectors' Edition </span>
+        <div id="olpLinkWidget_feature_div"><input type="hidden" id="all-offers-display-params" data-asin="${LEGO_ASIN}" data-m="" data-qid="" data-smid="" data-sourcecustomerorglistid="" data-sourcecustomerorglistitemid="" data-sr=""></div>
+        ${blocks}
+      </body></html>`,
+      { url: `https://${host}/dp/${LEGO_ASIN}` }
+    );
+  }
+
+  function read(page: JSDOM, market: Marketplace, fetchRef: Parameters<typeof extractProductDataWithOffers>[3]) {
+    return extractProductDataWithOffers(
+      page.window.document,
+      { marketplace: market, sourceDestinationCountryCode: "CH", readOtherOffers: true },
+      page.window.location.href,
+      fetchRef
+    );
+  }
+
+  function readPageAlone(page: JSDOM, market: Marketplace): ProductExtractionResult {
+    return extractProductData(page.window.document, { marketplace: market, sourceDestinationCountryCode: "CH" }, page.window.location.href);
+  }
+
+  it("quotes the first new offer that delivers when the page shows no price", async () => {
+    const page = legoPage("DE");
+    const fetchRef = fetchAnswering({ body: panelBody("DE-four-new-offers.html") });
+
+    const result = await read(page, "DE", fetchRef);
+
+    expect(result).toEqual({
+      ...readPageAlone(page, "DE"),
+      hasShippingInfo: true,
+      hasImportInfo: false,
+      isDeliverable: true,
+      availability: "available",
+      parseConfidence: 0.8,
+      breakdown: { item: { amount: 651.25, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
+      otherSeller: { seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4 },
+      notes: [QUOTED_NOTE, NO_IMPORT_FEES_NOTE]
+    });
+    expect(result).toMatchObject({ asin: LEGO_ASIN, destinationCountryCode: "CH", destinationMatched: true });
+    expect(deliveredTotal(result.breakdown)).toEqual({ amount: 706.51, currency: "EUR" });
+  });
+
+  it("asks the page's own origin for the panel, with the store's cookies", async () => {
+    const fetchRef = fetchAnswering({ body: panelBody("DE-four-new-offers.html") });
+
+    await read(legoPage("DE"), "DE", fetchRef);
+
+    expect(fetchRef).toHaveBeenCalledTimes(1);
+    expect(fetchRef).toHaveBeenCalledWith(
+      `https://www.amazon.de${OFFERS_PATH}${PANEL_QUERY}`,
+      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("drops Amazon's notice about the featured offer once another seller delivers", async () => {
+    const page = legoPage(
+      "UK",
+      `${BUYING_OPTIONS}<div id="availability"><span class="primary-availability-message">This item cannot be dispatched to your selected delivery location. Please choose a different delivery location.</span></div>`
+    );
+
+    const result = await read(page, "UK", fetchAnswering({ body: panelBody("UK-item-in-pounds-delivery-in-francs.html") }));
+
+    expect(readPageAlone(page, "UK").availability).toBe("undeliverable");
+    expect(result.availability).toBe("available");
+    expect(result.notes).toEqual([QUOTED_NOTE, NO_IMPORT_FEES_NOTE]);
+  });
+
+  it("quotes an item in pounds with its delivery in Swiss francs as Amazon shows them", async () => {
+    const result = await read(legoPage("UK"), "UK", fetchAnswering({ body: panelBody("UK-item-in-pounds-delivery-in-francs.html") }));
+
+    expect(result.breakdown).toEqual({ item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" } });
+    expect(result.otherSeller).toEqual({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2 });
+    expect(deliveredTotal(result.breakdown)).toBeUndefined();
+  });
+
+  it("quotes nothing and says so when no other seller can ship there", async () => {
+    const page = legoPage("MX");
+
+    const result = await read(page, "MX", fetchAnswering({ body: panelBody("MX-one-offer-not-shippable.html") }));
+
+    expect(result).toEqual({ ...readPageAlone(page, "MX"), notes: [...readPageAlone(page, "MX").notes, "No other seller delivers to the destination"] });
+    expect(result.breakdown).toBeUndefined();
+    expect(result.otherSeller).toBeUndefined();
+  });
+
+  it.each([
+    ["shows a price", `${BUYING_OPTIONS}<div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">€699,99</span></span></div>`],
+    ["has no See All Buying Options button", '<div id="availability"><span class="primary-availability-message">This item cannot be shipped to your selected delivery location.</span></div>'],
+    ["is currently unavailable", `${BUYING_OPTIONS}<div id="availability"><span class="primary-availability-message">Currently unavailable.</span></div>`],
+    [
+      "delivers to another country than the source",
+      `${BUYING_OPTIONS}<script type="a-state" data-a-state='{"key":"vas-base-vm"}'>{"countryCode":"DE"}</script>`
+    ]
+  ])("reads only the page when it %s", async (_case, blocks) => {
+    const page = legoPage("DE", blocks);
+    const fetchRef = fetchAnswering({ body: panelBody("DE-four-new-offers.html") });
+
+    const result = await read(page, "DE", fetchRef);
+
+    expect(fetchRef).not.toHaveBeenCalled();
+    expect(result).toEqual(readPageAlone(page, "DE"));
+  });
+
+  it("reads only the page when the request does not ask for other offers", async () => {
+    const page = legoPage("DE");
+    const fetchRef = fetchAnswering({ body: panelBody("DE-four-new-offers.html") });
+
+    const result = await extractProductDataWithOffers(
+      page.window.document,
+      { marketplace: "DE", sourceDestinationCountryCode: "CH" },
+      page.window.location.href,
+      fetchRef
+    );
+
+    expect(fetchRef).not.toHaveBeenCalled();
+    expect(result).toEqual(readPageAlone(page, "DE"));
+  });
+
+  it("keeps the page's own reading with a note when the page names no ASIN to ask about", async () => {
+    const page = legoPage("DE");
+    page.window.document.querySelector("#ASIN")?.remove();
+    page.window.document.querySelector("#all-offers-display-params")?.removeAttribute("data-asin");
+    const fetchRef = fetchAnswering({ body: panelBody("DE-four-new-offers.html") });
+
+    const result = await read(page, "DE", fetchRef);
+
+    expect(fetchRef).not.toHaveBeenCalled();
+    expect(result.notes.at(-1)).toBe("Other offers could not be read: the page names no ASIN");
+    expect(result.breakdown).toBeUndefined();
+  });
+
+  it.each([
+    ["Amazon answers with an error status", fetchAnswering({ ok: false, status: 503, body: "" }), "Amazon answered HTTP 503"],
+    ["the request fails", fetchFailing(new TypeError("Failed to fetch")), "Failed to fetch"],
+    [
+      "Amazon answers with another page",
+      fetchAnswering({ body: "<form name='signIn'><input id='ap_email'></form>" }),
+      "Amazon's answer held no offer list"
+    ]
+  ])("keeps the page's own reading with a note when %s", async (_case, fetchRef, reason) => {
+    const page = legoPage("DE");
+
+    const result = await read(page, "DE", fetchRef);
+
+    expect(result).toEqual({ ...readPageAlone(page, "DE"), notes: [...readPageAlone(page, "DE").notes, `Other offers could not be read: ${reason}`] });
+  });
+
+  it("gives up on a panel that has not answered after 15 seconds", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const fetchRef = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<{ ok: boolean; status: number; text: () => Promise<string> }>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+        })
+    );
+    let settled = false;
+
+    const pending = read(legoPage("DE"), "DE", fetchRef).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await pending;
+
+    expect(fetchRef.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    expect(result.breakdown).toBeUndefined();
+    expect(result.notes.at(-1)).toBe("Other offers could not be read: timed out after 15 seconds");
   });
 });

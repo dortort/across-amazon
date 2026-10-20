@@ -73,6 +73,13 @@ export interface VariantOption {
 
 export type ListingAvailability = "available" | "unavailable" | "undeliverable" | "unknown";
 
+export interface OtherSeller {
+  seller?: string;
+  dispatcher?: string;
+  fulfilledByAmazon: boolean;
+  offerCount: number;
+}
+
 export interface ProductExtractionResult {
   marketplace: Marketplace;
   asin?: string;
@@ -88,6 +95,7 @@ export interface ProductExtractionResult {
   availability: ListingAvailability;
   parseConfidence: number;
   breakdown?: PriceBreakdown;
+  otherSeller?: OtherSeller;
   notes: string[];
 }
 
@@ -105,6 +113,7 @@ export interface ProductExtractionRequest {
   marketplace: Marketplace;
   sourceDestinationCountryCode?: string;
   sourceDeliverTo?: string;
+  readOtherOffers?: boolean;
 }
 
 export interface LocationRequest {
