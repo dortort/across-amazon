@@ -30,6 +30,7 @@ The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ
 - Conservative product matching with confidence filtering, and a check that a listing found by search is your colour, pack and size
 - Sequential cross-market extraction via temporary inactive tabs
 - Sets each marketplace's delivery location to your destination before reading its price, and leaves it set
+- Quotes another seller's offer from "See All Buying Options" when a marketplace's page shows no price for your destination
 - Says when a delivered total leaves out import fees because the marketplace showed none for your destination
 - Daily FX normalization (ECB primary, Frankfurter fallback)
 - Local-only short-lived caching (30 minutes)
