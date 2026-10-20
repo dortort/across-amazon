@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { buildOtherOffersUrl, parseOtherOffers, pickOtherOffer } from "../../src/content/other-offers";
+import { buildOtherOffersUrl, parseOtherOffers, quotableOffers } from "../../src/content/other-offers";
 import type { OtherOffer, OtherOffersPanel } from "../../src/content/other-offers";
 
 const OFFERS_FIXTURES = join(process.cwd(), "tests", "fixtures", "offers-live");
@@ -190,7 +190,7 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
         }
       ]
     });
-    expect(pickOtherOffer(panel.offers)).toBeUndefined();
+    expect(quotableOffers(panel.offers)).toEqual([]);
   });
 
   it("reads free delivery from the message text and from the price attribute as zero in the item currency", () => {
@@ -269,17 +269,18 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
   });
 });
 
-describe("pickOtherOffer", () => {
-  it("quotes the first offer of the amazon.de panel, as Amazon sorts it", () => {
-    expect(pickOtherOffer(parsePanel(DE_PANEL, "EUR").offers)).toMatchObject({
-      index: 0,
-      item: { amount: 651.25, currency: "EUR" },
-      shipping: { amount: 55.26, currency: "EUR" }
-    });
+describe("quotableOffers", () => {
+  it("lists every new offer of the amazon.de panel with both prices, in Amazon's order", () => {
+    expect(quotableOffers(parsePanel(DE_PANEL, "EUR").offers).map(({ index, item, shipping }) => ({ index, item, shipping }))).toEqual([
+      { index: 0, item: { amount: 651.25, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
+      { index: 1, item: { amount: 714.28, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
+      { index: 2, item: { amount: 720.48, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
+      { index: 3, item: { amount: 973.41, currency: "EUR" }, shipping: { amount: 19, currency: "EUR" } }
+    ]);
   });
 
-  it("does not re-sort the offers, even when a later one is cheaper delivered", () => {
-    expect(pickOtherOffer(parsePanel(UK_PANEL, "GBP").offers)).toMatchObject({ index: 0, seller: "BuyMyBricks" });
+  it("keeps both amazon.co.uk offers in Amazon's order, leaving the choice between pounds and francs to the caller", () => {
+    expect(quotableOffers(parsePanel(UK_PANEL, "GBP").offers).map(({ seller }) => seller)).toEqual(["BuyMyBricks", "RamanDz"]);
   });
 
   it("skips used offers and offers without an item price or a delivery price", () => {
@@ -291,10 +292,10 @@ describe("pickOtherOffer", () => {
       usable
     ];
 
-    expect(pickOtherOffer(offers)).toBe(usable);
+    expect(quotableOffers(offers)).toEqual([usable]);
   });
 
-  it("quotes nothing from an empty panel", () => {
-    expect(pickOtherOffer([])).toBeUndefined();
+  it("lists nothing from an empty panel", () => {
+    expect(quotableOffers([])).toEqual([]);
   });
 });

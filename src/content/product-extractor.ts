@@ -1,5 +1,11 @@
-import type { ListingAvailability, ProductExtractionRequest, ProductExtractionResult, VariantOption } from "../shared/types";
-import { buildOtherOffersUrl, parseOtherOffers, pickOtherOffer } from "./other-offers";
+import type {
+  ListingAvailability,
+  OfferQuote,
+  ProductExtractionRequest,
+  ProductExtractionResult,
+  VariantOption
+} from "../shared/types";
+import { buildOtherOffersUrl, parseOtherOffers, quotableOffers } from "./other-offers";
 import type { QuotableOffer } from "./other-offers";
 import {
   collapseText,
@@ -620,7 +626,12 @@ function asksForOtherOffers(
   );
 }
 
-function quoteOtherOffer(result: ProductExtractionResult, offer: QuotableOffer, offerCount: number): ProductExtractionResult {
+function offerQuote({ item, shipping, seller, dispatcher, fulfilledByAmazon }: QuotableOffer): OfferQuote {
+  return { item, shipping, seller, dispatcher, fulfilledByAmazon };
+}
+
+function quoteOtherOffers(result: ProductExtractionResult, offers: QuotableOffer[], offerCount: number): ProductExtractionResult {
+  const [first] = offers;
   return {
     ...result,
     hasShippingInfo: true,
@@ -628,8 +639,15 @@ function quoteOtherOffer(result: ProductExtractionResult, offer: QuotableOffer, 
     isDeliverable: result.destinationMatched,
     availability: "available",
     parseConfidence: parseConfidenceOf(true, true, false, result.destinationMatched),
-    breakdown: { item: offer.item, shipping: offer.shipping },
-    otherSeller: { seller: offer.seller, dispatcher: offer.dispatcher, fulfilledByAmazon: offer.fulfilledByAmazon, offerCount },
+    breakdown: { item: first.item, shipping: first.shipping },
+    otherSeller: {
+      seller: first.seller,
+      dispatcher: first.dispatcher,
+      fulfilledByAmazon: first.fulfilledByAmazon,
+      offerCount,
+      deliveringNewCount: offers.length
+    },
+    otherOffers: offers.map(offerQuote),
     notes: [OTHER_SELLER_QUOTED, IMPORT_FEES_NOT_DISPLAYED, ...result.notes.filter((note) => !isFeaturedOfferNote(note))]
   };
 }
@@ -662,8 +680,8 @@ export async function extractProductDataWithOffers(
     return withNote(result, `${OTHER_OFFERS_UNREAD}Amazon's answer held no offer list`);
   }
 
-  const offer = pickOtherOffer(offers.offers);
-  return offer ? quoteOtherOffer(result, offer, offers.offerCount) : withNote(result, NO_OTHER_SELLER);
+  const quotable = quotableOffers(offers.offers);
+  return quotable.length > 0 ? quoteOtherOffers(result, quotable, offers.offerCount) : withNote(result, NO_OTHER_SELLER);
 }
 
 declare global {
