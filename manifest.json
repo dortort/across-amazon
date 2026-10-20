@@ -12,7 +12,7 @@
     "service_worker": "background/service-worker.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "permissions": ["scripting", "storage"],
   "host_permissions": [
     "https://www.amazon.com/*",
     "https://www.amazon.ca/*",

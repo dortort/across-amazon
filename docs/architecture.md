@@ -7,7 +7,7 @@ Across Amazon is a Manifest V3 extension with four parts:
 - **Content scripts** (`src/content`): three small extractors and the delivery location setter, injected on demand into Amazon pages with `chrome.scripting.executeScript`. None is declared in the manifest, so nothing runs on a page until a comparison asks for it.
 - **Options page** (`options.html`, `src/options`): the full settings form.
 
-The manifest asks for `activeTab`, `scripting`, `storage` and `tabs`, plus host permissions for the ten Amazon domains and the two exchange rate hosts, `www.ecb.europa.eu` and `api.frankfurter.dev`. Setting a store's delivery location needs no other permission: the setter's requests go from the store's own page to its own origin.
+The manifest asks for `scripting` and `storage`, plus host permissions for the ten Amazon domains and the two exchange rate hosts, `www.ecb.europa.eu` and `api.frankfurter.dev`. Without `tabs`, Chrome gives the popup the active tab's URL only on those Amazon hosts, so any other tab reads as not on Amazon. Setting a store's delivery location needs no other permission: the setter's requests go from the store's own page to its own origin.
 
 ## How a comparison runs
 
