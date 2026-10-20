@@ -71,7 +71,10 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
           for your destination. Their sum is the delivered total, in the currency the page shows. When a store shows
           no import fees for your destination, the total is item plus shipping and
           the popup <a href="/faq/#import-fees">says so</a>, because duties may still be due on delivery. If Amazon
-          shows a higher total than the sum, that total is used.
+          shows a higher total than the sum, that total is used. When the page shows no price for your destination but
+          offers <span class="nowrap">“See All Buying Options”</span>, it loads that list of other sellers’ offers, as
+          the button would, and quotes the cheapest new offer with both an item and a delivery price, converted at the
+          day’s rate. The result names the seller and the dispatcher and shows no import fees.
         </li>
         <li>
           <strong>Closes the tab.</strong> Each tab closes as soon as it has been read, and the next store starts.
@@ -174,7 +177,9 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
               </th>
               <td>
                 The extension runs its scripts in the Amazon tab you are on and in the background tabs, which open
-                product and search pages on the other stores. The popup uses this access to see that the tab you are on
+                product and search pages on the other stores. On a product page that shows no price for your destination, the
+                product script also requests that store’s own list of other sellers’ offers, with your session, as the
+                page’s <span class="nowrap">“See All Buying Options”</span> button would. The popup uses this access to see that the tab you are on
                 is an Amazon store, without the broader <code>tabs</code> permission. To set a store’s delivery
                 country, the location script runs inside that store’s own page and sends the store’s own{" "}
                 <span class="nowrap">“Choose your location”</span> requests to the same store. During a check, on a
@@ -245,8 +250,8 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
         </table>
       </TableScroll>
       <p>
-        A stored result holds the product details read from the page you are on, each store’s prices and the exchange
-        rates used. Some of those details can be personal: the <span class="nowrap">“Deliver to”</span> text, which
+        A stored result holds the product details read from the page you are on, each store’s prices (with the seller’s
+        and dispatcher’s names when another seller’s offer was quoted) and the exchange rates used. Some of those details can be personal: the <span class="nowrap">“Deliver to”</span> text, which
         for a signed-in user can hold a first name, a town and a postcode; the page address, which can carry your
         Amazon search terms; and your destination country.
       </p>

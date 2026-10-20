@@ -10,6 +10,7 @@ const questions = {
   "import-fees": "Why does it say import fees are not shown, and do I still pay duties?",
   "check-match": "What does “Check match” mean?",
   "stores-that-dont-ship": "Why can’t some stores be compared?",
+  "other-sellers": "Why does a store’s result name another seller?",
   "exchange-rates": "Where do the exchange rates come from?",
   "delete-data": "How do I delete my data?",
   "delivery-location": "Why does another Amazon store’s “Deliver to” box now show my country?",
@@ -126,7 +127,9 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
               <td>
                 Amazon did not show the item price or the shipping for your destination, for example because the item
                 cannot be shipped there. The note names the destination, for example: “Amazon did not show a delivered
-                price to Switzerland.” When Amazon gives a reason, the note repeats it.
+                price to Switzerland.” When Amazon gives a reason, the note repeats it. When the page offered{" "}
+                <span class="nowrap">“See All Buying Options”</span>, the extension read that list first, so this status
+                means no seller there delivers the item new to your destination either, and the note says so.
               </td>
             </tr>
             <tr>
@@ -146,10 +149,25 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
         </table>
       </TableScroll>
       <p>
-        You will see two of these most often. “Delivered total not quotable” usually means the store does not ship this
-        item to your delivery country. “Could not set delivery location” means the store would not switch to, or does
+        You will see two of these most often. “Delivered total not quotable” usually means neither the store nor any
+        seller it lists under <span class="nowrap">“See All Buying Options”</span> delivers this item new to your
+        country. “Could not set delivery location” means the store would not switch to, or does
         not offer, your delivery country. For example, amazon.com.au offers few countries. A store with that status is
         never ranked, because its price is for another place.
+      </p>
+
+      <h2 id="other-sellers">{questions["other-sellers"]}</h2>
+      <p>
+        A store’s own listing can show no price for your destination while other sellers on the same page deliver
+        there. Amazon then shows <span class="nowrap">“See All Buying Options”</span> instead of a price. The extension
+        reads that list, as pressing the button would, and quotes the cheapest new offer that shows both an item price
+        and a delivery price, converted at the day’s <a href="#exchange-rates">exchange rate</a>. The row’s breakdown
+        says who sells and dispatches the offer and how many offers on the list deliver new.
+      </p>
+      <p>
+        Such a quote shows no import fees: the list prices the item and the delivery only, so duties may still be due
+        on delivery. The offer is Amazon’s listing, not the extension’s. Open it
+        with <span class="nowrap">“Open on …”</span> and check the seller before you buy.
       </p>
 
       <h2 id="exchange-rates">{questions["exchange-rates"]}</h2>
@@ -203,8 +221,9 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
         “Deliver to” box. <a href="/how-it-works/#delivery-location">How it works</a> explains the change in full.
       </p>
       <p>
-        A store whose box shows your country may still not ship your item there. The check then lists it as “Delivered
-        total not quotable”. A store that does not offer your country, or whose change Amazon refuses, keeps quoting its
+        A store whose box shows your country may still not ship your item there. The check then reads the store’s{" "}
+        <span class="nowrap">“See All Buying Options”</span> list and, when no seller there delivers it new either, lists
+        it as <span class="nowrap">“Delivered total not quotable”</span>. A store that does not offer your country, or whose change Amazon refuses, keeps quoting its
         previous place and is listed as “Could not set delivery location”. Both appear with
         the <a href="#stores-that-dont-ship">stores that could not be compared</a>.
       </p>
