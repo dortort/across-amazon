@@ -1,9 +1,12 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ComparisonResult } from "../../../src/shared/types";
 import {
   NBSP,
   baseline,
   deWithoutImportFees,
+  fxTable,
+  money,
   productUrl,
   renderDone,
   resultPayload,
@@ -11,6 +14,18 @@ import {
   rowSummary,
   source
 } from "./harness";
+
+const ukFromAnotherSeller: ComparisonResult = {
+  marketplace: "UK",
+  status: "OK",
+  confidence: 0.96,
+  productUrl: productUrl("UK"),
+  breakdown: { item: money(574.97, "GBP"), shipping: money(252.53, "CHF") },
+  normalizedTotal: money(1018.98, "USD"),
+  notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"]
+};
+const fxTableWithFrancs = { ...fxTable, rates: { ...fxTable.rates, CHF: 0.94 } };
+const switzerland = { ...source, destinationCountryCode: "CH" };
 
 afterEach(() => {
   vi.useRealTimers();
@@ -165,6 +180,35 @@ describe("detail sheet", () => {
     await app.user.click(rowFor(app.container, "Germany"));
 
     expect(screen.getByRole("dialog", { name: "🇩🇪 Germany" }).querySelector(".dB-location")).toBeNull();
+  });
+
+  it("totals an offer priced in pounds with delivery in Swiss francs in pounds at today's rate", async () => {
+    const app = await renderDone(
+      resultPayload({ source: switzerland, results: [ukFromAnotherSeller], fxTable: fxTableWithFrancs })
+    );
+
+    expect(rowSummary(rowFor(app.container, "United Kingdom")).local).toBe("£803.86 incl. shipping, import fees not shown");
+    await app.user.click(rowFor(app.container, "United Kingdom"));
+
+    expect(sheetLines(screen.getByRole("dialog", { name: "🇬🇧 United Kingdom" }))).toEqual([
+      ["dB-line", "Item price", "£574.97"],
+      ["dB-line", "Shipping to Switzerland", `CHF${NBSP}252.53`],
+      ["dB-line", "Import fees deposit", "Not shown"],
+      ["dB-line total", "Delivered total", "£803.86"],
+      ["dB-line conv", "Roughly", "$1,018.98 at today’s rate"]
+    ]);
+  });
+
+  it("shows no total in the store's currency for an offer priced in two currencies when there is no FX table", async () => {
+    const app = await renderDone(resultPayload({ source: switzerland, results: [ukFromAnotherSeller], fxTable: undefined }));
+
+    expect(rowSummary(rowFor(app.container, "United Kingdom")).local).toBeUndefined();
+    await app.user.click(rowFor(app.container, "United Kingdom"));
+
+    expect(sheetLines(screen.getByRole("dialog", { name: "🇬🇧 United Kingdom" })).slice(3)).toEqual([
+      ["dB-line total", "Delivered total", "—"],
+      ["dB-line conv", "Roughly", "$1,018.98 at today’s rate"]
+    ]);
   });
 
   it("titles the page you are on with the product title alone when it has no variant", async () => {

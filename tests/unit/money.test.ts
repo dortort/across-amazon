@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { convertMoney, deliveredTotal, parseLocalizedNumber, parseMoney, sumMoney } from "../../src/shared/money";
-import type { Money, PriceBreakdown } from "../../src/shared/types";
+import { convertMoney, deliveredTotal, deliveredTotalIn, parseLocalizedNumber, parseMoney, sumMoney } from "../../src/shared/money";
+import type { FxTable, Money, PriceBreakdown } from "../../src/shared/types";
 
 describe("money utilities", () => {
   it("parses localized number formats", () => {
@@ -102,5 +102,37 @@ describe("deliveredTotal", () => {
     expect(deliveredTotal({ item: yen(4200), shipping: yen(500), importFees: yen(300), totalDisplayed: yen(4200) })).toEqual(
       yen(5000)
     );
+  });
+});
+
+describe("deliveredTotalIn", () => {
+  const fxTable: FxTable = { base: "EUR", date: "2026-10-16", rates: { EUR: 1, USD: 1.08, GBP: 0.852, CHF: 0.94 }, source: "ECB" };
+  const poundsAndFrancs: PriceBreakdown = { item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" } };
+
+  it("converts each charge into the target currency and sums them when the charges are in different currencies", () => {
+    expect(deliveredTotalIn(poundsAndFrancs, "GBP", fxTable)).toEqual({ amount: 803.86, currency: "GBP" });
+    expect(deliveredTotalIn(poundsAndFrancs, "CHF", fxTable)).toEqual({ amount: 886.89, currency: "CHF" });
+    expect(deliveredTotalIn(poundsAndFrancs, "USD", fxTable)).toEqual({ amount: 1018.98, currency: "USD" });
+  });
+
+  it("converts the delivered total of charges in one currency as a whole, displayed total included", () => {
+    expect(deliveredTotalIn(charges, "EUR", fxTable)).toEqual(eur(44.9));
+    expect(deliveredTotalIn({ ...charges, totalDisplayed: eur(46) }, "USD", fxTable)).toEqual({ amount: 49.68, currency: "USD" });
+  });
+
+  it("ignores a displayed total when the charges are in different currencies", () => {
+    expect(deliveredTotalIn({ ...poundsAndFrancs, totalDisplayed: { amount: 900, currency: "GBP" } }, "GBP", fxTable)).toEqual({
+      amount: 803.86,
+      currency: "GBP"
+    });
+  });
+
+  it("returns undefined when a charge or the target has no conversion path", () => {
+    expect(deliveredTotalIn({ ...poundsAndFrancs, shipping: { amount: 10, currency: "SEK" } }, "GBP", fxTable)).toBeUndefined();
+    expect(deliveredTotalIn(charges, "SEK", fxTable)).toBeUndefined();
+  });
+
+  it("returns undefined without a breakdown", () => {
+    expect(deliveredTotalIn(undefined, "USD", fxTable)).toBeUndefined();
   });
 });

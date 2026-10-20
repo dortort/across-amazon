@@ -452,6 +452,7 @@ export function App(): ReactElement {
           rows={rows}
           issues={issueResults}
           currency={currency}
+          fxTable={fxTable}
           destination={destination}
           destinationCountryCode={source?.destinationCountryCode}
           sourceDomain={sourceMarket ? marketDisplayDomain(sourceMarket) : "this page"}
@@ -467,6 +468,7 @@ export function App(): ReactElement {
       <DetailSheet
         row={sheetRow}
         source={source}
+        fxTable={fxTable}
         destination={destination}
         onClose={closeSheet}
         onOpen={open}

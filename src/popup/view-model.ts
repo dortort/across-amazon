@@ -1,5 +1,5 @@
 import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName } from "../shared/markets";
-import { convertMoney, deliveredTotal, formatMoney } from "../shared/money";
+import { deliveredTotal, deliveredTotalIn, formatMoney } from "../shared/money";
 import type {
   ComparisonPhase,
   ComparisonResult,
@@ -113,20 +113,19 @@ export function currencyChoices(source?: SourceContext, storedCurrency?: string)
   return [...new Set<string>([...leading, ...DISPLAY_CURRENCIES, ...stored])];
 }
 
-export function deliveredLocalTotal(result: ComparisonResult): Money | undefined {
-  return deliveredTotal(result.breakdown);
+export function deliveredLocalTotal(result: ComparisonResult, fxTable?: FxTable): Money | undefined {
+  const { breakdown } = result;
+  return deliveredTotal(breakdown) ?? (breakdown && fxTable ? deliveredTotalIn(breakdown, breakdown.item.currency, fxTable) : undefined);
 }
 
 export function displayTotal(result: ComparisonResult, currency: string, fxTable?: FxTable): Money | undefined {
-  const local = deliveredLocalTotal(result);
+  const local = deliveredTotal(result.breakdown);
   if (local && local.currency === currency) {
     return roundMoney(local);
   }
-  if (local && fxTable) {
-    const converted = convertMoney(local, currency, fxTable);
-    if (converted) {
-      return roundMoney(converted);
-    }
+  const converted = fxTable ? deliveredTotalIn(result.breakdown, currency, fxTable) : undefined;
+  if (converted) {
+    return roundMoney(converted);
   }
   if (result.normalizedTotal && result.normalizedTotal.currency === currency) {
     return roundMoney(result.normalizedTotal);

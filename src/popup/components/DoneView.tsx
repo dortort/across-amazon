@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import type { ComparisonResult, Marketplace } from "../../shared/types";
+import type { ComparisonResult, FxTable, Marketplace } from "../../shared/types";
 import type { RankedRow, Verdict } from "../view-model";
 import { IssuesAccordion } from "./IssuesAccordion";
 import { RankedList } from "./RankedList";
@@ -11,6 +11,7 @@ interface DoneViewProps {
   rows: RankedRow[];
   issues: ComparisonResult[];
   currency: string;
+  fxTable?: FxTable;
   destination: string;
   destinationCountryCode?: string;
   sourceDomain: string;
@@ -27,6 +28,7 @@ export function DoneView({
   rows,
   issues,
   currency,
+  fxTable,
   destination,
   destinationCountryCode,
   sourceDomain,
@@ -45,7 +47,7 @@ export function DoneView({
         sourceDomain={sourceDomain}
         onOpen={onOpen}
       />
-      {rows.length > 0 ? <RankedList rows={rows} currency={currency} onSelect={onSelectRow} /> : null}
+      {rows.length > 0 ? <RankedList rows={rows} currency={currency} fxTable={fxTable} onSelect={onSelectRow} /> : null}
       {issues.length > 0 ? (
         <IssuesAccordion
           issues={issues}

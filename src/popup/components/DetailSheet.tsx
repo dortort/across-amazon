@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { MARKETPLACE_BY_CODE, marketDisplayDomain, marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
-import type { ComparisonResult, Money, SourceContext } from "../../shared/types";
+import type { ComparisonResult, FxTable, Money, SourceContext } from "../../shared/types";
 import {
   deliveredLocalTotal,
   formatLocal,
@@ -23,6 +23,7 @@ const FOCUSABLE =
 interface DetailSheetProps {
   row?: RankedRow;
   source?: SourceContext;
+  fxTable?: FxTable;
   destination: string;
   onClose: () => void;
   onOpen: (result: ComparisonResult) => void;
@@ -64,7 +65,7 @@ function SheetLine({ label, value, variant }: SheetLineProps): ReactElement {
   );
 }
 
-function SheetContent({ row, source, destination, onClose, onOpen }: SheetContentProps): ReactElement {
+function SheetContent({ row, source, fxTable, destination, onClose, onOpen }: SheetContentProps): ReactElement {
   const { result } = row;
   const breakdown = result.breakdown;
   const local = (value?: Money): string => (value ? formatLocal(value, result.marketplace) : "—");
@@ -84,7 +85,7 @@ function SheetContent({ row, source, destination, onClose, onOpen }: SheetConten
           value={breakdown?.shipping?.amount ? local(breakdown.shipping) : "Free"}
         />
         <SheetLine label="Import fees deposit" value={importFeesValue(row, local)} />
-        <SheetLine label="Delivered total" value={local(deliveredLocalTotal(result))} variant="total" />
+        <SheetLine label="Delivered total" value={local(deliveredLocalTotal(result, fxTable))} variant="total" />
         <SheetLine label="Roughly" value={`${formatMoney(row.total)} at today’s rate`} variant="conv" />
       </div>
       <div className={`dB-trust${needsMatchCheck(result) ? " warn" : ""}`}>

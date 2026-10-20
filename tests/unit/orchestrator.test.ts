@@ -1719,6 +1719,31 @@ describe("background orchestrator", () => {
       expect(harness.openTempTabs()).toEqual([]);
     });
 
+    it("normalizes an offer with the item in pounds and the delivery in Swiss francs by converting each", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "UK"],
+        sourceAsinOn: ["UK"],
+        locations: { US: "CH", UK: "CH" },
+        offersOn: { UK: "UK-item-in-pounds-delivery-in-francs.html" },
+        prepare: onlyOtherSellersOn("UK")
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "UK",
+          status: "OK",
+          confidence: 0.96,
+          productUrl: "https://www.amazon.co.uk/dp/B000000001",
+          breakdown: { item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" } },
+          otherSeller: { seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2 },
+          notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"],
+          normalizedTotal: { amount: 1018.98, currency: "USD" }
+        }
+      ]);
+    });
+
     it("reports a store whose other offers cannot ship there as unavailable, saying no other seller delivers", async () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "MX"],
