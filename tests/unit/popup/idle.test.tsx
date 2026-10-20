@@ -112,6 +112,7 @@ describe("idle view", () => {
     ["a non-Amazon site", "https://www.google.com/search?q=sony"],
     ["a look-alike host", "https://www.amazon.com.example.net/dp/B09XS7JWHH"],
     ["an unsupported Amazon host", "https://www.amazon.nl/dp/B09XS7JWHH"],
+    ["a mobile Amazon host", "https://m.amazon.co.uk/dp/B09XS7JWHH"],
     ["a browser page", "chrome://extensions/"],
     ["a tab without a url", undefined]
   ])("does not read the page on %s and shows the notice directly", async (_label, url) => {
@@ -123,11 +124,8 @@ describe("idle view", () => {
     expect(app.sentOfType(LOAD_SOURCE)).toEqual([]);
   });
 
-  it.each([
-    ["a desktop host", "https://www.amazon.de/dp/B09XS7JWHH?th=1"],
-    ["a mobile host", "https://m.amazon.co.uk/dp/B09XS7JWHH"]
-  ])("reads the page on %s of a supported marketplace", async (_label, url) => {
-    const app = await renderLoaded({ tabs: [{ id: ACTIVE_TAB_ID, url }] });
+  it("reads the page on a supported marketplace", async () => {
+    const app = await renderLoaded({ tabs: [{ id: ACTIVE_TAB_ID, url: "https://www.amazon.de/dp/B09XS7JWHH?th=1" }] });
 
     expect(app.sentOfType(LOAD_SOURCE)).toEqual([{ type: LOAD_SOURCE, payload: { activeTabId: ACTIVE_TAB_ID } }]);
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeEnabled();
