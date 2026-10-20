@@ -95,8 +95,12 @@ export function parseMoney(text: string, marketCurrency: string): ParsedMoney | 
   };
 }
 
+function findCurrencyMarkedToken(text: string): RegExpExecArray | undefined {
+  return PREFIXED_MONEY.exec(text) ?? SUFFIXED_MONEY.exec(text) ?? undefined;
+}
+
 export function parseCurrencyMarkedMoney(text: string, marketCurrency: string): ParsedMoney | undefined {
-  const token = PREFIXED_MONEY.exec(text)?.[0] ?? SUFFIXED_MONEY.exec(text)?.[0];
+  const token = findCurrencyMarkedToken(text)?.[0];
   return token ? parseMoney(token, marketCurrency) : undefined;
 }
 
@@ -122,24 +126,25 @@ export function readPriceText(price: Element): string | undefined {
   return collapseText(price);
 }
 
-export function hasFreeMarker(text: string | undefined): boolean {
-  if (!text) {
-    return false;
-  }
+const FREE_MARKER = /free|gratuit|gratis|kostenlos|無料/i;
 
-  const normalizedText = normalize(text);
-  return (
-    normalizedText.includes("free") ||
-    normalizedText.includes("gratuit") ||
-    normalizedText.includes("gratis") ||
-    normalizedText.includes("kostenlos") ||
-    normalizedText.includes("無料")
-  );
+export function hasFreeMarker(text: string | undefined): boolean {
+  return Boolean(text) && FREE_MARKER.test(normalize(text ?? ""));
 }
 
 export interface ChargeReading {
   amount?: ParsedMoney;
   isFree: boolean;
+}
+
+export function readChargeText(text: string, marketCurrency: string): ChargeReading | undefined {
+  const token = findCurrencyMarkedToken(text);
+  const free = FREE_MARKER.exec(text);
+  if (token && (!free || token.index < free.index)) {
+    const amount = parseMoney(token[0], marketCurrency);
+    return amount ? { amount, isFree: false } : undefined;
+  }
+  return free ? { isFree: true } : undefined;
 }
 
 const PRIMARY_DELIVERY_PRICE = "[id^='mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE'] [data-csa-c-delivery-price]";
