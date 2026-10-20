@@ -1679,7 +1679,8 @@ describe("background orchestrator", () => {
       seller: "Star Brick City",
       dispatcher: "Amazon",
       fulfilledByAmazon: true,
-      offerCount: 4
+      offerCount: 4,
+      deliveringNewCount: 4
     };
 
     function onlyOtherSellersOn(market: Marketplace): Prepare {
@@ -1740,7 +1741,7 @@ describe("background orchestrator", () => {
           confidence: 0.96,
           productUrl: "https://www.amazon.co.uk/dp/B000000001",
           breakdown: { item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" } },
-          otherSeller: { seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2 },
+          otherSeller: { seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 },
           notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"],
           normalizedTotal: { amount: 1018.98, currency: "USD" }
         }

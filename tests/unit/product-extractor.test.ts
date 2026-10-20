@@ -1239,7 +1239,7 @@ describe("product extractor other sellers' offers", () => {
     return extractProductData(page.window.document, { marketplace: market, sourceDestinationCountryCode: "CH" }, page.window.location.href);
   }
 
-  it("quotes the first new offer that delivers when the page shows no price", async () => {
+  it("quotes the first new offer that delivers when the page shows no price and lists every one that does", async () => {
     const page = legoPage("DE");
     const fetchRef = fetchAnswering({ body: panelBody("DE-four-new-offers.html") });
 
@@ -1253,7 +1253,37 @@ describe("product extractor other sellers' offers", () => {
       availability: "available",
       parseConfidence: 0.8,
       breakdown: { item: { amount: 651.25, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
-      otherSeller: { seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4 },
+      otherSeller: { seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4, deliveringNewCount: 4 },
+      otherOffers: [
+        {
+          item: { amount: 651.25, currency: "EUR" },
+          shipping: { amount: 55.26, currency: "EUR" },
+          seller: "Star Brick City",
+          dispatcher: "Amazon",
+          fulfilledByAmazon: true
+        },
+        {
+          item: { amount: 714.28, currency: "EUR" },
+          shipping: { amount: 55.26, currency: "EUR" },
+          seller: "BricksBoutique",
+          dispatcher: "Amazon",
+          fulfilledByAmazon: true
+        },
+        {
+          item: { amount: 720.48, currency: "EUR" },
+          shipping: { amount: 55.26, currency: "EUR" },
+          seller: "Nucleus Investments",
+          dispatcher: "Amazon",
+          fulfilledByAmazon: true
+        },
+        {
+          item: { amount: 973.41, currency: "EUR" },
+          shipping: { amount: 19, currency: "EUR" },
+          seller: "RamanDz",
+          dispatcher: "RamanDz",
+          fulfilledByAmazon: false
+        }
+      ],
       notes: [QUOTED_NOTE, NO_IMPORT_FEES_NOTE]
     });
     expect(result).toMatchObject({ asin: LEGO_ASIN, destinationCountryCode: "CH", destinationMatched: true });
@@ -1289,7 +1319,17 @@ describe("product extractor other sellers' offers", () => {
     const result = await read(legoPage("UK"), "UK", fetchAnswering({ body: panelBody("UK-item-in-pounds-delivery-in-francs.html") }));
 
     expect(result.breakdown).toEqual({ item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" } });
-    expect(result.otherSeller).toEqual({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2 });
+    expect(result.otherSeller).toEqual({
+      seller: "BuyMyBricks",
+      dispatcher: "Amazon",
+      fulfilledByAmazon: true,
+      offerCount: 2,
+      deliveringNewCount: 2
+    });
+    expect(result.otherOffers?.map(({ item, shipping, seller }) => ({ item, shipping, seller }))).toEqual([
+      { item: { amount: 574.97, currency: "GBP" }, shipping: { amount: 252.53, currency: "CHF" }, seller: "BuyMyBricks" },
+      { item: { amount: 699, currency: "GBP" }, shipping: { amount: 40.86, currency: "CHF" }, seller: "RamanDz" }
+    ]);
     expect(deliveredTotal(result.breakdown)).toBeUndefined();
   });
 

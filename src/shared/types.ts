@@ -74,11 +74,20 @@ export interface VariantOption {
 
 export type ListingAvailability = "available" | "unavailable" | "undeliverable" | "unknown";
 
+export interface OfferQuote {
+  item: Money;
+  shipping: Money;
+  seller?: string;
+  dispatcher?: string;
+  fulfilledByAmazon: boolean;
+}
+
 export interface OtherSeller {
   seller?: string;
   dispatcher?: string;
   fulfilledByAmazon: boolean;
   offerCount: number;
+  deliveringNewCount: number;
 }
 
 export interface ProductExtractionResult {
@@ -97,6 +106,7 @@ export interface ProductExtractionResult {
   parseConfidence: number;
   breakdown?: PriceBreakdown;
   otherSeller?: OtherSeller;
+  otherOffers?: OfferQuote[];
   notes: string[];
 }
 

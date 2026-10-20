@@ -121,6 +121,6 @@ function isQuotable(offer: OtherOffer): offer is QuotableOffer {
   return offer.isNew && offer.item !== undefined && offer.shipping !== undefined;
 }
 
-export function pickOtherOffer(offers: OtherOffer[]): QuotableOffer | undefined {
-  return offers.find(isQuotable);
+export function quotableOffers(offers: OtherOffer[]): QuotableOffer[] {
+  return offers.filter(isQuotable);
 }
