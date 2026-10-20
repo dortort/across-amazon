@@ -204,6 +204,17 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
     expect(panel.offers[3].shipping).toEqual({ amount: 0, currency: "EUR" });
   });
 
+  it("reads the delivery amount of a message that also offers free delivery above a threshold", () => {
+    const panel = parsePanel(DE_PANEL, "EUR", (document) => {
+      const upsell = firstOffer(document).querySelector("#mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE");
+      if (upsell) {
+        upsell.textContent = "€3.99 delivery · FREE delivery on orders over €29";
+      }
+    });
+
+    expect(panel.offers[0].shipping).toEqual({ amount: 3.99, currency: "EUR" });
+  });
+
   it("reads the item price from its accessibility label when the visible price parts are missing", () => {
     const panel = parsePanel(DE_PANEL, "EUR", (document) => {
       firstOffer(document).querySelector("#aod-offer-price .a-price")?.remove();

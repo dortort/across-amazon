@@ -74,12 +74,12 @@ function readShipping(offer: Element, item: ParsedMoney | undefined, marketCurre
 
   for (const message of Array.from(offer.querySelectorAll(DELIVERY_MESSAGES))) {
     const text = message.textContent ?? "";
-    if (hasFreeMarker(text)) {
-      return free;
-    }
     const amount = parseCurrencyMarkedMoney(text, marketCurrency);
     if (amount) {
       return amount;
+    }
+    if (hasFreeMarker(text)) {
+      return free;
     }
   }
 
