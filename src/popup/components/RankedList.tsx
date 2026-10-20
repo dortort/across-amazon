@@ -1,24 +1,26 @@
 import type { ReactElement } from "react";
 import { MARKETPLACE_BY_CODE, marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
-import type { Marketplace } from "../../shared/types";
+import type { FxTable, Marketplace } from "../../shared/types";
 import { costLine, deliveredLocalTotal, formatDelta, formatLocal, needsMatchCheck } from "../view-model";
 import type { RankedRow } from "../view-model";
 
 interface RankedListProps {
   rows: RankedRow[];
   currency: string;
+  fxTable?: FxTable;
   onSelect: (marketplace: Marketplace) => void;
 }
 
 interface RowButtonProps {
   row: RankedRow;
+  fxTable?: FxTable;
   onSelect: (marketplace: Marketplace) => void;
 }
 
-function RowButton({ row, onSelect }: RowButtonProps): ReactElement {
+function RowButton({ row, fxTable, onSelect }: RowButtonProps): ReactElement {
   const { marketplace } = row.result;
-  const local = deliveredLocalTotal(row.result);
+  const local = deliveredLocalTotal(row.result, fxTable);
   const delta = formatDelta(row.delta, row.isSource);
 
   return (
@@ -48,7 +50,7 @@ function RowButton({ row, onSelect }: RowButtonProps): ReactElement {
   );
 }
 
-export function RankedList({ rows, currency, onSelect }: RankedListProps): ReactElement {
+export function RankedList({ rows, currency, fxTable, onSelect }: RankedListProps): ReactElement {
   return (
     <>
       <div className="dB-sectitle">
@@ -57,7 +59,7 @@ export function RankedList({ rows, currency, onSelect }: RankedListProps): React
       </div>
       <div className="dB-list">
         {rows.map((row) => (
-          <RowButton key={row.result.marketplace} row={row} onSelect={onSelect} />
+          <RowButton key={row.result.marketplace} row={row} fxTable={fxTable} onSelect={onSelect} />
         ))}
       </div>
     </>

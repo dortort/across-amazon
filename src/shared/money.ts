@@ -98,13 +98,17 @@ function roundCents(amount: number): number {
   return Number(amount.toFixed(2));
 }
 
+function charges(breakdown: PriceBreakdown): Money[] {
+  return [breakdown.item, breakdown.shipping, breakdown.importFees].filter((part): part is Money => Boolean(part));
+}
+
 export function deliveredTotal(breakdown: PriceBreakdown | undefined): Money | undefined {
   if (!breakdown) {
     return undefined;
   }
 
   const { currency } = breakdown.item;
-  const parts = [breakdown.item, breakdown.shipping, breakdown.importFees].filter((part): part is Money => Boolean(part));
+  const parts = charges(breakdown);
   if (parts.some((part) => part.currency !== currency)) {
     return undefined;
   }
@@ -149,4 +153,20 @@ export function formatMoney(value: Money | undefined, locale = "en-US"): string 
     currency: value.currency,
     maximumFractionDigits: value.currency === "JPY" ? 0 : 2
   }).format(value.amount);
+}
+
+export function deliveredTotalIn(breakdown: PriceBreakdown | undefined, currency: string, fxTable: FxTable): Money | undefined {
+  const local = deliveredTotal(breakdown);
+  if (local) {
+    return convertMoney(local, currency, fxTable);
+  }
+  if (!breakdown) {
+    return undefined;
+  }
+
+  const converted = charges(breakdown).map((part) => convertMoney(part, currency, fxTable));
+  if (!converted.every((part): part is Money => part !== undefined)) {
+    return undefined;
+  }
+  return { amount: roundCents(converted.reduce((total, part) => total + part.amount, 0)), currency };
 }

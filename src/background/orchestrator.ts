@@ -10,7 +10,7 @@ import {
   sharesSourceAsin,
   variantConflicts
 } from "../shared/matching";
-import { convertMoney, deliveredTotal, getDefaultCurrencyForMarketplace } from "../shared/money";
+import { deliveredTotalIn, getDefaultCurrencyForMarketplace } from "../shared/money";
 import { sortComparisonResults } from "../shared/comparison";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
 import type {
@@ -260,16 +260,7 @@ function normalizeResult(result: ComparisonResult, currency: string, fxTable: Fx
     return result;
   }
 
-  const total = deliveredTotal(result.breakdown);
-  if (!total) {
-    return {
-      ...result,
-      status: "UNAVAILABLE",
-      notes: [...(result.notes ?? []), "Unable to build delivered total"]
-    };
-  }
-
-  const normalizedTotal = convertMoney(total, currency, fxTable);
+  const normalizedTotal = deliveredTotalIn(result.breakdown, currency, fxTable);
   if (!normalizedTotal) {
     return {
       ...result,

@@ -262,12 +262,29 @@ describe("deliveredLocalTotal", () => {
     expect(deliveredLocalTotal(okResult("JP", 52800, 1200, 0, 0.95))).toEqual(money(54000, "JPY"));
   });
 
-  it("returns undefined when the charges are in different currencies", () => {
+  it("returns undefined without an FX table when the charges are in different currencies", () => {
     const result: ComparisonResult = {
       ...de,
       breakdown: { ...de.breakdown!, shipping: money(12.99, "USD") }
     };
     expect(deliveredLocalTotal(result)).toBeUndefined();
+  });
+
+  it("converts a charge in another currency into the item's currency with the FX table", () => {
+    const result: ComparisonResult = {
+      ...de,
+      breakdown: { ...de.breakdown!, shipping: money(12.99, "USD") }
+    };
+    expect(deliveredLocalTotal(result, fxTable)).toEqual(money(322.23, "EUR"));
+    expect(deliveredLocalTotal(de, fxTable)).toEqual(money(323.19, "EUR"));
+  });
+
+  it("returns undefined when the FX table cannot convert a charge in another currency", () => {
+    const result: ComparisonResult = {
+      ...de,
+      breakdown: { ...de.breakdown!, shipping: money(12.99, "CHF") }
+    };
+    expect(deliveredLocalTotal(result, fxTable)).toBeUndefined();
   });
 
   it("returns undefined when there is no breakdown", () => {
@@ -277,6 +294,26 @@ describe("deliveredLocalTotal", () => {
 });
 
 describe("displayTotal", () => {
+  const poundsAndFrancs: ComparisonResult = {
+    marketplace: "UK",
+    status: "OK",
+    confidence: 0.96,
+    breakdown: { item: money(574.97, "GBP"), shipping: money(252.53, "CHF") },
+    normalizedTotal: money(1018.98, "USD")
+  };
+  const withFrancs: FxTable = { ...fxTable, rates: { ...fxTable.rates, CHF: 0.94 } };
+
+  it("converts each charge of a quote in two currencies into the display currency", () => {
+    expect(displayTotal(poundsAndFrancs, "USD", withFrancs)).toEqual(money(1018.98, "USD"));
+    expect(displayTotal(poundsAndFrancs, "GBP", withFrancs)).toEqual(money(803.86, "GBP"));
+    expect(displayTotal(poundsAndFrancs, "JPY", withFrancs)).toEqual(money(146733, "JPY"));
+  });
+
+  it("falls back to the normalized total of a quote in two currencies without an FX table", () => {
+    expect(displayTotal(poundsAndFrancs, "USD")).toEqual(money(1018.98, "USD"));
+    expect(displayTotal(poundsAndFrancs, "GBP")).toBeUndefined();
+  });
+
   it("converts the summed charges when the displayed total understates them", () => {
     const understated: ComparisonResult = {
       ...de,
