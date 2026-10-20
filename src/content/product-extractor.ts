@@ -590,7 +590,7 @@ async function fetchOtherOffers(documentRef: Document, url: string, fetchRef: Fe
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), OTHER_OFFERS_TIMEOUT_MS);
   try {
-    const response = await fetchRef(url, { credentials: "include", headers: OTHER_OFFERS_HEADERS, signal: controller.signal });
+    const response = await fetchRef(url, { credentials: "same-origin", headers: OTHER_OFFERS_HEADERS, signal: controller.signal });
     if (!response.ok) {
       throw new Error(`Amazon answered HTTP ${response.status}`);
     }

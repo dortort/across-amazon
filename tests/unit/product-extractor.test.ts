@@ -1298,7 +1298,7 @@ describe("product extractor other sellers' offers", () => {
     expect(fetchRef).toHaveBeenCalledTimes(1);
     expect(fetchRef).toHaveBeenCalledWith(
       `https://www.amazon.de${OFFERS_PATH}${PANEL_QUERY}`,
-      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) })
+      expect.objectContaining({ credentials: "same-origin", signal: expect.any(AbortSignal) })
     );
   });
 
