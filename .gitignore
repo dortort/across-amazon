@@ -5,3 +5,5 @@ coverage
 playwright-report
 test-results
 .claude/worktrees
+docs-site/dist
+docs-site/.astro
