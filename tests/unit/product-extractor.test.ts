@@ -1079,6 +1079,14 @@ describe("product extractor AmazonGlobal details", () => {
     expect(result.notes).toEqual([]);
   });
 
+  it("reads zero import fees when the delivery message's price equals the AmazonGlobal line's sum", () => {
+    const result = extract(primaryDelivery("$76.32") + globalLine("$76.32 Shipping &amp; Import Charges to Switzerland"));
+
+    expect(result.breakdown?.shipping).toEqual({ amount: 76.32, currency: "USD" });
+    expect(result.breakdown?.importFees).toEqual({ amount: 0, currency: "USD" });
+    expect(result.notes).toEqual([]);
+  });
+
   it.each([
     ["no delivery price", ""],
     ["a conditional free delivery", primaryDelivery("FREE")],
