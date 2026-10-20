@@ -1,0 +1,63 @@
+---
+import Base from "../layouts/Base.astro";
+import PageIntro from "../components/PageIntro.astro";
+
+const destinations = [
+  { href: "/", label: "Home", description: "What Across Amazon does, in one page." },
+  { href: "/how-it-works/", label: "How it works", description: "What happens when you press the button." },
+  { href: "/faq/", label: "FAQ", description: "Delivered totals, import fees, “Check match” and more." },
+  { href: "/support/", label: "Support", description: "How to get help or report a problem." },
+  { href: "/privacy/", label: "Privacy policy", description: "What the extension reads, stores and sends." },
+  { href: "/changelog/", label: "Changelog", description: "What each version does." },
+];
+---
+
+<Base title="Page not found" description="There is no page at this address on the Across Amazon website." noindex>
+  <PageIntro
+    title="Page not found"
+    lede="There is no page at this address. Check the link for a typo, or carry on from one of these pages."
+  />
+  <div class="container page-body">
+    <ul class="destinations" role="list">
+      {
+        destinations.map((destination) => (
+          <li>
+            <a href={destination.href}>{destination.label}</a>
+            <p>{destination.description}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</Base>
+
+<style>
+  .destinations {
+    display: grid;
+    max-width: 720px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .destinations li {
+    padding-block: 16px;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .destinations li:last-child {
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .destinations a {
+    display: inline-flex;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 1.125rem;
+    font-weight: 650;
+  }
+
+  .destinations p {
+    color: var(--color-muted);
+  }
+</style>
