@@ -510,6 +510,38 @@ describe("product extractor on pages for a delivery address in Switzerland", () 
     expect(result.notes).toEqual([]);
   });
 
+  it.each([
+    { label: "as captured", remove: [], totalDisplayed: { amount: 206.27, currency: "USD" } },
+    { label: "without its AmazonGlobal details", remove: ["#amazonGlobal_feature_div .a-popover-preload"], totalDisplayed: undefined }
+  ])("reads the shipping and import charges of an amazon.com page that charges both $label", ({ remove, totalDisplayed }) => {
+    const result = extractLive("US-shipping-and-import-charges.html", "US", "US", (document) => {
+      remove.forEach((selector) => document.querySelectorAll(selector).forEach((element) => element.remove()));
+    });
+
+    expect(result.breakdown).toEqual({
+      item: { amount: 129.95, currency: "USD" },
+      shipping: { amount: 39.1, currency: "USD" },
+      importFees: { amount: 37.22, currency: "USD" },
+      totalDisplayed
+    });
+    expect(deliveredTotal(result.breakdown)).toEqual({ amount: 206.27, currency: "USD" });
+    expect(result.notes).toEqual([]);
+  });
+
+  it("quotes the AmazonGlobal line's sum as shipping when the amazon.com page shows neither its details nor a delivery price", () => {
+    const result = extractLive("US-shipping-and-import-charges.html", "US", "US", (document) => {
+      document.querySelectorAll("#amazonGlobal_feature_div .a-popover-preload, #deliveryBlockMessage").forEach((element) => element.remove());
+    });
+
+    expect(result.breakdown).toEqual({
+      item: { amount: 129.95, currency: "USD" },
+      shipping: { amount: 76.32, currency: "USD" },
+      importFees: undefined
+    });
+    expect(deliveredTotal(result.breakdown)).toEqual({ amount: 206.27, currency: "USD" });
+    expect(result.notes).toEqual(["Import fees not displayed for destination"]);
+  });
+
   it("still reads the Swiss franc price and delivery of a product that ships there from amazon.de", () => {
     const result = extractLive("DE-ships-to-switzerland.html", "DE");
 
@@ -993,7 +1025,7 @@ describe("product extractor AmazonGlobal details", () => {
           `<tr><td class="a-span9 a-text-left"><span class="a-size-base a-color-secondary"> ${label} </span></td><td class="a-span1 a-text-right"></td><td class="a-span2 a-text-right"><span class="a-size-base a-color-base"> ${value} </span></td></tr>`
       )
       .join('<tr><td><hr class="a-divider-normal"></td></tr>');
-    return `<div id="amazonGlobal_feature_div"><span class="a-size-base a-color-secondary">$12.99 Shipping &amp; $8.53 Import Charges to Switzerland</span><div class="a-popover-preload"><h3>Shipping &amp; Fee Details</h3><table class="a-lineitem"><tbody>${cells}</tbody></table></div></div>`;
+    return `<div id="amazonGlobal_feature_div"><span class="a-size-base a-color-secondary">$21.52 Shipping &amp; Import Charges to Switzerland</span><div class="a-popover-preload"><h3>Shipping &amp; Fee Details</h3><table class="a-lineitem"><tbody>${cells}</tbody></table></div></div>`;
   }
 
   it("prefers the AmazonGlobal shipping and import charges over a conditional free delivery line", () => {
@@ -1027,11 +1059,36 @@ describe("product extractor AmazonGlobal details", () => {
     expect(result.notes).toEqual([]);
   });
 
-  it("reads the shipping and import charges the AmazonGlobal line quotes", () => {
-    const result = extract(globalLine("$12.99 Shipping &amp; $8.53 Import Charges to Switzerland"));
+  it("reads the import charges and free shipping the AmazonGlobal line quotes", () => {
+    const result = extract(globalLine("$32.67 Import Charges &amp; FREE Shipping to Switzerland"));
 
-    expect(result.breakdown?.shipping).toEqual({ amount: 12.99, currency: "USD" });
-    expect(result.breakdown?.importFees).toEqual({ amount: 8.53, currency: "USD" });
+    expect(result.breakdown?.shipping).toEqual({ amount: 0, currency: "USD" });
+    expect(result.breakdown?.importFees).toEqual({ amount: 32.67, currency: "USD" });
+    expect(result.notes).toEqual([]);
+  });
+
+  function primaryDelivery(price: string): string {
+    return `<div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"><span data-csa-c-delivery-price="${price}"> Delivery <span class="a-text-bold">Thursday, November 5</span> to Switzerland</span></div>`;
+  }
+
+  it("splits the AmazonGlobal line's sum of shipping and import charges with the delivery message's price", () => {
+    const result = extract(primaryDelivery("$39.10") + globalLine("$76.32 Shipping &amp; Import Charges to Switzerland"));
+
+    expect(result.breakdown?.shipping).toEqual({ amount: 39.1, currency: "USD" });
+    expect(result.breakdown?.importFees).toEqual({ amount: 37.22, currency: "USD" });
+    expect(result.notes).toEqual([]);
+  });
+
+  it.each([
+    ["no delivery price", ""],
+    ["a conditional free delivery", primaryDelivery("FREE")],
+    ["a delivery price above the sum", primaryDelivery("$80.00")]
+  ])("quotes the AmazonGlobal line's sum of shipping and import charges as shipping beside %s", (_label, delivery) => {
+    const result = extract(delivery + globalLine("$76.32 Shipping &amp; Import Charges to Switzerland"));
+
+    expect(result.breakdown?.shipping).toEqual({ amount: 76.32, currency: "USD" });
+    expect(result.breakdown?.importFees).toBeUndefined();
+    expect(result.notes).toEqual(["Import fees not displayed for destination"]);
   });
 
   it("prefers the AmazonGlobal line to a conditional free delivery in the delivery message", () => {
@@ -1051,7 +1108,7 @@ describe("product extractor AmazonGlobal details", () => {
         ["AmazonGlobal Shipping", "$12.99"],
         ["Estimated Import Charges", "$8.53"],
         ["Total", "$71.51"]
-      ]).replace("$12.99 Shipping &amp; $8.53 Import Charges", "No Import Charges &amp; $11.00 Shipping")
+      ]).replace("$21.52 Shipping &amp; Import Charges", "No Import Charges &amp; $11.00 Shipping")
     );
 
     expect(result.breakdown?.shipping).toEqual({ amount: 12.99, currency: "USD" });

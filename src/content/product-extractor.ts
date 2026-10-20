@@ -430,6 +430,7 @@ function readAmazonGlobalCharges(documentRef: Document, marketCurrency: string):
 const IMPORT_CHARGE = /import fee|import charge/;
 const NO_IMPORT_CHARGE = /\bno import fee|\bno import charge/;
 const SHIPPING_CHARGE = /shipping|delivery/;
+const COMBINED_CHARGES = /shipping & import fee|shipping & import charge/;
 
 interface ChargeLine {
   shipping?: ChargeReading;
@@ -445,10 +446,26 @@ function readChargeClause(clause: string, isFree: boolean, marketCurrency: strin
   return amount ? { amount, isFree: false } : undefined;
 }
 
-function readAmazonGlobalLine(documentRef: Document, marketCurrency: string): ChargeLine {
+function splitCombinedCharges(combined: ParsedMoney, delivery: ChargeReading): ChargeLine {
+  const shipping = delivery.amount;
+  if (!shipping || shipping.currency !== combined.currency || shipping.amount <= 0 || shipping.amount > combined.amount) {
+    return { shipping: { amount: combined, isFree: false } };
+  }
+
+  const importFees = Math.round((combined.amount - shipping.amount) * 100) / 100;
+  return { shipping: delivery, importFees: { amount: { amount: importFees, currency: combined.currency }, isFree: false } };
+}
+
+function readAmazonGlobalLine(documentRef: Document, marketCurrency: string, delivery: ChargeReading): ChargeLine {
   for (const line of Array.from(documentRef.querySelectorAll("#amazonGlobal_feature_div > .a-color-secondary"))) {
+    const lineText = line.textContent ?? "";
+    const combined = COMBINED_CHARGES.test(normalize(lineText)) ? parseCurrencyMarkedMoney(lineText, marketCurrency) : undefined;
+    if (combined) {
+      return splitCombinedCharges(combined, delivery);
+    }
+
     const charges: ChargeLine = {};
-    for (const clause of (line.textContent ?? "").split("&")) {
+    for (const clause of lineText.split("&")) {
       const text = normalize(clause);
       if (IMPORT_CHARGE.test(text)) {
         charges.importFees ??= readChargeClause(clause, NO_IMPORT_CHARGE.test(text), marketCurrency);
@@ -574,12 +591,10 @@ export function extractProductData(
   }
 
   const globalCharges = readAmazonGlobalCharges(documentRef, marketCurrency);
-  const globalLine = readAmazonGlobalLine(documentRef, marketCurrency);
-  const { amount: shippingAmount, isFree: shippingIsFree } =
-    tableCharge(globalCharges.shipping) ??
-    globalLine.shipping ??
-    readDeliveryPrice(documentRef, marketCurrency) ??
-    readCharge(documentRef, SHIPPING_KEYWORDS, hasFreeMarker, marketCurrency);
+  const delivery =
+    readDeliveryPrice(documentRef, marketCurrency) ?? readCharge(documentRef, SHIPPING_KEYWORDS, hasFreeMarker, marketCurrency);
+  const globalLine = readAmazonGlobalLine(documentRef, marketCurrency, delivery);
+  const { amount: shippingAmount, isFree: shippingIsFree } = tableCharge(globalCharges.shipping) ?? globalLine.shipping ?? delivery;
   const { amount: importAmount, isFree: importIsFree } =
     tableCharge(globalCharges.importFees) ?? globalLine.importFees ?? readImportCharge(documentRef, marketCurrency);
 
