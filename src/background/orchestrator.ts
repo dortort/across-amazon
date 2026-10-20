@@ -23,6 +23,7 @@ import type {
   LocationResult,
   Marketplace,
   MatchScore,
+  OfferQuote,
   ProductExtractionRequest,
   ProductExtractionResult,
   RunComparisonProgressPayload,
@@ -276,11 +277,16 @@ function normalizeResult(result: ComparisonResult, currency: string, fxTable: Fx
   };
 }
 
+interface ExtractedBaseline {
+  baseline: ComparisonResult;
+  otherOffers?: OfferQuote[];
+}
+
 async function extractBaseline(
   activeTabId: number,
   source: SourceContext,
   readOtherOffers: boolean
-): Promise<ComparisonResult | undefined> {
+): Promise<ExtractedBaseline | undefined> {
   try {
     const extraction = await extractProductData(activeTabId, {
       marketplace: source.marketplace,
@@ -296,19 +302,21 @@ async function extractBaseline(
 
     const currency = breakdown.item.currency;
     return {
-      marketplace: source.marketplace,
-      status: "OK",
-      confidence: 1,
-      productUrl: source.sourceUrl,
-      breakdown: {
-        item: breakdown.item,
-        shipping: breakdown.shipping ?? { amount: 0, currency },
-        importFees: breakdown.importFees ?? { amount: 0, currency },
-        ...(breakdown.totalDisplayed ? { totalDisplayed: breakdown.totalDisplayed } : {})
+      baseline: {
+        marketplace: source.marketplace,
+        status: "OK",
+        confidence: 1,
+        productUrl: source.sourceUrl,
+        breakdown: {
+          item: breakdown.item,
+          shipping: breakdown.shipping ?? { amount: 0, currency },
+          importFees: breakdown.importFees ?? { amount: 0, currency },
+          ...(breakdown.totalDisplayed ? { totalDisplayed: breakdown.totalDisplayed } : {})
+        },
+        ...(extraction.otherSeller ? { otherSeller: extraction.otherSeller } : {}),
+        notes: extraction.notes
       },
-      ...(extraction.otherSeller ? { otherSeller: extraction.otherSeller } : {}),
-      ...(extraction.otherOffers ? { otherOffers: extraction.otherOffers } : {}),
-      notes: extraction.notes
+      otherOffers: extraction.otherOffers
     };
   } catch {
     return undefined;
@@ -632,7 +640,7 @@ export async function cancelComparison(activeTabId: number): Promise<void> {
 export async function loadSource(activeTabId: number): Promise<LoadSourcePayload> {
   try {
     const source = await extractSourceContext(activeTabId);
-    const baseline = await extractBaseline(activeTabId, source, false);
+    const baseline = (await extractBaseline(activeTabId, source, false))?.baseline;
     return { source, baseline };
   } catch (error) {
     return { error: errorMessage(error, "Unable to read the active tab") };
@@ -675,12 +683,13 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       };
     }
 
-    baseline = await extractBaseline(activeTabId, source, true);
+    const extracted = await extractBaseline(activeTabId, source, true);
+    baseline = extracted?.baseline;
     const table = await getDailyFxTable();
     fxTable = table;
 
     const comparisonCurrency = resolveComparisonCurrency(settings, source);
-    baseline = baseline && normalizeResult(baseline, comparisonCurrency, table);
+    baseline = extracted && normalizeResult({ ...extracted.baseline, otherOffers: extracted.otherOffers }, comparisonCurrency, table);
 
     const queries = buildSearchQueries(source);
     const total = targetMarkets.length;

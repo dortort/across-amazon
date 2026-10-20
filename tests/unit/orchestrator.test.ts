@@ -1840,6 +1840,38 @@ describe("background orchestrator", () => {
       }
     });
 
+    it("keeps the offer list out of the baseline of a run that cannot load exchange rates", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["DE", "US"],
+        activeUrl: "https://www.amazon.de/dp/B000000005",
+        offersOn: { DE: "DE-four-new-offers.html" },
+        fxAvailable: false,
+        prepare: (group, _market, document) => {
+          if (group === "source") {
+            offerOnlyOtherSellers(document);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBe("Unable to load FX reference rates from ECB or Frankfurter");
+      expect(payload.baseline).toEqual({
+        marketplace: "DE",
+        status: "OK",
+        confidence: 1,
+        productUrl: "https://www.amazon.de/dp/B000000005",
+        breakdown: {
+          item: { amount: 651.25, currency: "EUR" },
+          shipping: { amount: 55.26, currency: "EUR" },
+          importFees: { amount: 0, currency: "EUR" }
+        },
+        otherSeller: { seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4, deliveringNewCount: 4 },
+        notes: ["Quoted another seller's offer", "Import fees not displayed for destination"]
+      });
+      expect(payload.baseline).not.toHaveProperty("otherOffers");
+    });
+
     it("reads the page you are on without its other offers when the popup opens, and quotes them for the run's baseline", async () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["DE", "US"],
