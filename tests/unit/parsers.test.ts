@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { extractProductData } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import { extractSourceContext } from "../../src/content/source-extractor";
-import { marketplaceIso } from "../../src/shared/markets";
 import type { Marketplace, SearchCandidate } from "../../src/shared/types";
 import { destinationFields } from "./destination-fields";
 
@@ -50,6 +49,10 @@ const PRODUCT_AMOUNTS_BY_MARKET: Record<Marketplace, { item: number; shipping: n
   AU: { item: 78.99, shipping: 9.9, importFees: 6.5 }
 };
 
+function isoCode(market: Marketplace): string {
+  return market === "UK" ? "GB" : market;
+}
+
 function loadFixture(group: "source" | "search" | "product", market: Marketplace): JSDOM {
   const file = join(process.cwd(), "tests", "fixtures", group, `${market}.html`);
   const html = readFileSync(file, "utf8");
@@ -88,7 +91,7 @@ describe("content parsers", () => {
         dom.window.document,
         {
           marketplace: market,
-          sourceDestinationCountryCode: marketplaceIso(market)
+          sourceDestinationCountryCode: isoCode(market)
         },
         dom.window.location.href
       );
@@ -117,7 +120,7 @@ describe("content parsers", () => {
     const dom = loadFixture("product", market);
     const result = extractProductData(
       dom.window.document,
-      { marketplace: market, sourceDestinationCountryCode: marketplaceIso(market) },
+      { marketplace: market, sourceDestinationCountryCode: isoCode(market) },
       dom.window.location.href
     );
     const currency = CURRENCY_BY_MARKET[market];

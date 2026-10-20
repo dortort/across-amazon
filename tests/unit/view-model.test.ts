@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName, marketplaceIso } from "../../src/shared/markets";
+import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName } from "../../src/shared/markets";
 import { formatMoney } from "../../src/shared/money";
 import type {
   ComparisonResult,
@@ -708,12 +708,6 @@ describe("countryName", () => {
     for (const code of MARKETPLACE_CODES) {
       expect(countryName(code)).toBe(MARKETPLACE_BY_CODE[code].label);
     }
-  });
-});
-
-describe("marketplaceIso", () => {
-  it("gives every marketplace its ISO 3166-1 code, GB for the United Kingdom", () => {
-    expect(MARKETPLACE_CODES.map(marketplaceIso)).toEqual(["US", "CA", "MX", "GB", "DE", "FR", "IT", "ES", "JP", "AU"]);
   });
 });
 

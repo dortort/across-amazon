@@ -172,7 +172,7 @@ Everything lives in `chrome.storage.local`:
 | `src/content/product-extractor.ts` | Reads the page ASIN and title, the selected variant and the variants its twister offers, item price, shipping, import fees (including the AmazonGlobal details), displayed total, destination, deliverability and whether the listing is available, undeliverable or unavailable from a product page. |
 | `src/shared/types.ts` | Shared data types (`SourceContext`, `ComparisonResult`, payloads, settings). |
 | `src/shared/messages.ts` | Message type constants, request shapes and type guards. |
-| `src/shared/markets.ts` | The ten marketplaces: ISO code, domain, currency, locale, flag; search and product URLs; country names through `Intl.DisplayNames`. |
+| `src/shared/markets.ts` | The ten marketplaces: domain, currency, locale, flag; search and product URLs; country names through `Intl.DisplayNames`. |
 | `src/shared/matching.ts` | ASIN identity, model-number checks, title, brand and variant scoring, the match threshold and the variant check of a matched page. |
 | `src/shared/money.ts` | Localized price parsing, delivered totals, currency conversion and formatting. |
 | `src/shared/comparison.ts` | Result ordering: comparable results by normalized total, then the rest. |
