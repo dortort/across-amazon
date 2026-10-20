@@ -33,7 +33,7 @@ When the popup opens it reads the page you are on and shows:
 - the product title and image
 - the variant it detected (here "Black") and the item price on the current marketplace
 - one button, **Check 9 other Amazons**. The number is how many marketplaces will be checked.
-- a time estimate of about 3 seconds per marketplace, and a note that each marketplace's delivery location will be [set to your destination](#your-destination-and-the-other-marketplaces) and stay that way after the check
+- a time estimate of about 3 seconds per marketplace, and, when the page's destination country is known, a note that each marketplace's delivery location may be [set to your destination](#your-destination-and-the-other-marketplaces) and is left that way after the check
 
 While the page is still being read, the popup shows "Reading this page…" in place of the product card.
 
