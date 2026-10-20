@@ -7,6 +7,7 @@ import { VerdictCard } from "./VerdictCard";
 
 interface DoneViewProps {
   verdict: Verdict;
+  baseline?: ComparisonResult;
   error?: string;
   rows: RankedRow[];
   issues: ComparisonResult[];
@@ -24,6 +25,7 @@ interface DoneViewProps {
 
 export function DoneView({
   verdict,
+  baseline,
   error,
   rows,
   issues,
@@ -42,6 +44,7 @@ export function DoneView({
     <div className="dB-scroll" tabIndex={-1}>
       <VerdictCard
         verdict={verdict}
+        baseline={baseline}
         error={error}
         destination={destination}
         sourceDomain={sourceDomain}

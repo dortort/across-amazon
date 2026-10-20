@@ -41,8 +41,26 @@ function verdictCard(container: HTMLElement) {
 
 const cheapBaseline = {
   ...baseline,
-  breakdown: { item: { amount: 299.99, currency: "USD" } },
+  breakdown: {
+    item: { amount: 299.99, currency: "USD" },
+    shipping: { amount: 0, currency: "USD" },
+    importFees: { amount: 0, currency: "USD" }
+  },
   normalizedTotal: undefined
+};
+
+const quotedBaseline = {
+  ...baseline,
+  breakdown: { item: { amount: 399.99, currency: "USD" }, shipping: { amount: 0, currency: "USD" } },
+  otherSeller: {
+    seller: "Acme Outlet",
+    dispatcher: "Acme Outlet",
+    fulfilledByAmazon: false,
+    offerCount: 1,
+    readCount: 1,
+    readComplete: true,
+    deliveringNewCount: 1
+  }
 };
 
 describe("done view verdicts", () => {
@@ -116,6 +134,26 @@ describe("done view verdicts", () => {
 
     expect(verdictCard(app.container).lede).toBe(
       "Buy from Germany for $315.35 delivered. Item and shipping included. Amazon showed no import fees, so duties may still be due on delivery. We could not read the price on this page to compare."
+    );
+  });
+
+  it("says the price on the page you are on leaves out import fees when it came from another seller and Amazon showed none", async () => {
+    const app = await renderDone(resultPayload({ baseline: quotedBaseline }));
+
+    expect(verdictCard(app.container).lede).toBe(
+      "Buy from Germany for $349.05 delivered — 13% less than the $399.99 you would pay here. Item, shipping and import fees included. The price on amazon.com leaves out import fees, which Amazon did not show."
+    );
+    expect(rowSummary(rowElements(app.container).find((row) => rowSummary(row).name === "United States")!).local).toBe(
+      "$399.99 incl. shipping, import fees not shown"
+    );
+  });
+
+  it("says stay here, with the import fees the page price leaves out, when nothing beats a quote from another seller", async () => {
+    const quotedCheap = { ...quotedBaseline, breakdown: { ...quotedBaseline.breakdown, item: { amount: 299.99, currency: "USD" } } };
+    const app = await renderDone(resultPayload({ baseline: quotedCheap }));
+
+    expect(verdictCard(app.container).lede).toBe(
+      "Nothing came in under the $299.99 you would pay on amazon.com. The price on amazon.com leaves out import fees, which Amazon did not show."
     );
   });
 
