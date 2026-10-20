@@ -301,6 +301,7 @@ async function extractBaseline(
     }
 
     const currency = breakdown.item.currency;
+    const importFees = breakdown.importFees ?? (extraction.otherSeller ? undefined : { amount: 0, currency });
     return {
       baseline: {
         marketplace: source.marketplace,
@@ -310,7 +311,7 @@ async function extractBaseline(
         breakdown: {
           item: breakdown.item,
           shipping: breakdown.shipping ?? { amount: 0, currency },
-          importFees: breakdown.importFees ?? { amount: 0, currency },
+          ...(importFees ? { importFees } : {}),
           ...(breakdown.totalDisplayed ? { totalDisplayed: breakdown.totalDisplayed } : {})
         },
         ...(extraction.otherSeller ? { otherSeller: extraction.otherSeller } : {}),

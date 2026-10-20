@@ -448,6 +448,7 @@ export function App(): ReactElement {
       {view === "done" ? (
         <DoneView
           verdict={verdict}
+          baseline={baseline}
           error={state.error}
           rows={rows}
           issues={issueResults}

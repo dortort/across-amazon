@@ -1865,11 +1865,7 @@ describe("background orchestrator", () => {
         status: "OK",
         confidence: 1,
         productUrl: "https://www.amazon.de/dp/B000000005",
-        breakdown: {
-          item: { amount: 651.25, currency: "EUR" },
-          shipping: { amount: 55.26, currency: "EUR" },
-          importFees: { amount: 0, currency: "EUR" }
-        },
+        breakdown: { item: { amount: 651.25, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
         otherSeller: {
           seller: "Star Brick City",
           dispatcher: "Amazon",
@@ -1909,11 +1905,7 @@ describe("background orchestrator", () => {
         status: "OK",
         confidence: 1,
         productUrl: "https://www.amazon.de/dp/B000000005",
-        breakdown: {
-          item: { amount: 651.25, currency: "EUR" },
-          shipping: { amount: 55.26, currency: "EUR" },
-          importFees: { amount: 0, currency: "EUR" }
-        },
+        breakdown: { item: { amount: 651.25, currency: "EUR" }, shipping: { amount: 55.26, currency: "EUR" } },
         otherSeller: STAR_BRICK_CITY,
         notes: ["Quoted another seller's offer", "Import fees not displayed for destination"],
         normalizedTotal: { amount: 706.51, currency: "EUR" }

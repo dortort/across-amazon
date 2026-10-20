@@ -2,12 +2,13 @@ import type { ReactElement, ReactNode } from "react";
 import { marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
 import type { ComparisonResult } from "../../shared/types";
-import { costSentence, needsMatchCheck, percentFormat } from "../view-model";
+import { costSentence, needsMatchCheck, percentFormat, sourceCostSentence } from "../view-model";
 import type { Verdict } from "../view-model";
 import { OpenButton } from "./OpenButton";
 
 interface VerdictCardProps {
   verdict: Verdict;
+  baseline?: ComparisonResult;
   error?: string;
   destination: string;
   sourceDomain: string;
@@ -40,7 +41,7 @@ function MutedCard({ eyebrow, headline, children }: MutedCardProps): ReactElemen
   );
 }
 
-export function VerdictCard({ verdict, error, destination, sourceDomain, onOpen }: VerdictCardProps): ReactElement {
+export function VerdictCard({ verdict, baseline, error, destination, sourceDomain, onOpen }: VerdictCardProps): ReactElement {
   if (error) {
     return (
       <MutedCard eyebrow="Something went wrong" headline="Couldn't compare">
@@ -48,6 +49,9 @@ export function VerdictCard({ verdict, error, destination, sourceDomain, onOpen 
       </MutedCard>
     );
   }
+
+  const sourceNote = sourceCostSentence(baseline, sourceDomain);
+  const sourceLine = sourceNote ? ` ${sourceNote}` : "";
 
   switch (verdict.kind) {
     case "save":
@@ -62,6 +66,7 @@ export function VerdictCard({ verdict, error, destination, sourceDomain, onOpen 
             Buy from <b>{marketLabel(verdict.best.marketplace)}</b> for <b>{formatMoney(verdict.bestTotal)}</b>{" "}
             delivered — {percentFormat(verdict.percent)}% less than the {formatMoney(verdict.baselineTotal)} you would
             pay here. {costSentence(verdict.best)}
+            {sourceLine}
             {matchSentence(verdict.best)}
           </p>
           <OpenButton className="dB-vbtn" result={verdict.best} onOpen={onOpen} />
@@ -86,7 +91,7 @@ export function VerdictCard({ verdict, error, destination, sourceDomain, onOpen 
     case "stay":
       return (
         <MutedCard eyebrow="Result" headline="Stay here">
-          Nothing came in under the {formatMoney(verdict.baselineTotal)} you would pay on {sourceDomain}.
+          Nothing came in under the {formatMoney(verdict.baselineTotal)} you would pay on {sourceDomain}.{sourceLine}
         </MutedCard>
       );
     case "none":

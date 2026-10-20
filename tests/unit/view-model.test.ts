@@ -38,6 +38,7 @@ import {
   rankAvailable,
   rankedRows,
   resolveDisplayCurrency,
+  sourceCostSentence,
   statusText,
   targetMarkets,
   trustSentence
@@ -492,7 +493,23 @@ describe("import fees", () => {
     expect(importFeesValue(row(de), euros)).toBe(`31,20${NBSP}€`);
     expect(importFeesValue(row(zeroDeposit), euros)).toBe("—");
     expect(importFeesValue(row(withoutImportFees), euros)).toBe("Not shown");
-    expect(importFeesValue(row(withoutImportFees, true), euros)).toBe("—");
+    expect(importFeesValue(row(withoutImportFees, true), euros)).toBe("Not shown");
+    expect(importFeesValue(row(zeroDeposit, true), euros)).toBe("—");
+  });
+
+  it("gives the page you are on the same import fees wording as the other marketplaces", () => {
+    expect(costLine({ result: zeroDeposit, total: money(291.99, "EUR"), isSource: true, isBest: false })).toBe("incl. shipping & import");
+    expect(costLine({ result: withoutImportFees, total: money(291.99, "EUR"), isSource: true, isBest: false })).toBe(
+      "incl. shipping, import fees not shown"
+    );
+  });
+
+  it("says when the price on the page you are on leaves out import fees", () => {
+    expect(sourceCostSentence(withoutImportFees, "amazon.de")).toBe(
+      "The price on amazon.de leaves out import fees, which Amazon did not show."
+    );
+    expect(sourceCostSentence(zeroDeposit, "amazon.de")).toBe("");
+    expect(sourceCostSentence(undefined, "amazon.de")).toBe("");
   });
 });
 

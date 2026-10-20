@@ -268,7 +268,13 @@ export function costSentence(result: ComparisonResult): string {
 }
 
 export function costLine(row: RankedRow): string {
-  return row.isSource || importFeesShown(row.result) ? "incl. shipping & import" : "incl. shipping, import fees not shown";
+  return importFeesShown(row.result) ? "incl. shipping & import" : "incl. shipping, import fees not shown";
+}
+
+export function sourceCostSentence(baseline: ComparisonResult | undefined, sourceDomain: string): string {
+  return baseline && !importFeesShown(baseline)
+    ? `The price on ${sourceDomain} leaves out import fees, which Amazon did not show.`
+    : "";
 }
 
 export function importFeesValue(row: RankedRow, formatted: (value: Money) => string): string {
@@ -276,7 +282,7 @@ export function importFeesValue(row: RankedRow, formatted: (value: Money) => str
   if (importFees?.amount) {
     return formatted(importFees);
   }
-  return row.isSource || importFeesShown(row.result) ? "—" : "Not shown";
+  return importFeesShown(row.result) ? "—" : "Not shown";
 }
 
 export function statusText(status: ComparisonStatus): string {
