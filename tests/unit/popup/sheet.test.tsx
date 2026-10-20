@@ -148,6 +148,25 @@ describe("detail sheet", () => {
     ]);
   });
 
+  it("says when the run set the marketplace's delivery location", async () => {
+    const switched = { ...deWithoutImportFees, notes: ["Matched by ASIN", "Delivery location set to Switzerland"] };
+    const app = await renderDone(resultPayload({ source: { ...source, destinationCountryCode: "CH" }, results: [switched] }));
+
+    await app.user.click(rowFor(app.container, "Germany"));
+
+    expect(screen.getByRole("dialog", { name: "🇩🇪 Germany" }).querySelector(".dB-location")?.textContent).toBe(
+      "Delivery location set to Switzerland"
+    );
+  });
+
+  it("says nothing about the delivery location of a marketplace the run left as it was", async () => {
+    const app = await renderDone(resultPayload({ results: [deWithoutImportFees] }));
+
+    await app.user.click(rowFor(app.container, "Germany"));
+
+    expect(screen.getByRole("dialog", { name: "🇩🇪 Germany" }).querySelector(".dB-location")).toBeNull();
+  });
+
   it("titles the page you are on with the product title alone when it has no variant", async () => {
     const plain = { ...source, variationTokens: [] };
     const app = await renderDone(resultPayload({ source: plain }), { loadSource: { source: plain, baseline } });

@@ -26,6 +26,7 @@ import {
   importFeesValue,
   issueNote,
   issues,
+  locationNote,
   issuesLabel,
   needsMatchCheck,
   percentFormat,
@@ -782,6 +783,20 @@ describe("issueNote", () => {
   it("returns an empty note for an OK result, notes or not", () => {
     expect(issueNote(de, "US")).toBe("");
     expect(issueNote({ ...de, notes: undefined })).toBe("");
+  });
+});
+
+describe("locationNote", () => {
+  it("returns the note of a store whose delivery location the run set", () => {
+    const set = { ...de, notes: ["Matched by ASIN", "Delivery location set to Switzerland"] };
+
+    expect(locationNote(set)).toBe("Delivery location set to Switzerland");
+  });
+
+  it("returns nothing for a store the run left as it was", () => {
+    expect(locationNote(de)).toBeUndefined();
+    expect(locationNote({ ...de, notes: undefined })).toBeUndefined();
+    expect(locationNote(failedResult("JP", "DESTINATION_MISMATCH", 0.93, ["Delivery location not set: timed out after 20 seconds"]))).toBeUndefined();
   });
 });
 

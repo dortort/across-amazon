@@ -285,6 +285,7 @@ export function statusText(status: ComparisonStatus): string {
 
 const AMAZON_REASON_PREFIX = "Amazon says: ";
 const LOCATION_NOT_OFFERED_PREFIX = "Delivery location not offered";
+const LOCATION_SET_PREFIX = "Delivery location set to ";
 
 function amazonReason(result: ComparisonResult): string | undefined {
   const note = result.notes?.find((entry) => entry.startsWith(AMAZON_REASON_PREFIX));
@@ -310,6 +311,10 @@ export function issueNote(result: ComparisonResult, destinationCountryCode?: str
     default:
       return "";
   }
+}
+
+export function locationNote(result: ComparisonResult): string | undefined {
+  return result.notes?.find((note) => note.startsWith(LOCATION_SET_PREFIX));
 }
 
 export function phaseLabel(phase?: ComparisonPhase): string {

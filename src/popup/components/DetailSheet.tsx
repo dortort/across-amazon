@@ -8,6 +8,7 @@ import {
   formatLocal,
   formatVariantTokens,
   importFeesValue,
+  locationNote,
   needsMatchCheck,
   trustSentence
 } from "../view-model";
@@ -67,6 +68,7 @@ function SheetContent({ row, source, destination, onClose, onOpen }: SheetConten
   const { result } = row;
   const breakdown = result.breakdown;
   const local = (value?: Money): string => (value ? formatLocal(value, result.marketplace) : "—");
+  const location = row.isSource ? undefined : locationNote(result);
 
   return (
     <>
@@ -89,6 +91,7 @@ function SheetContent({ row, source, destination, onClose, onOpen }: SheetConten
         <span className="dot" />
         <span>{trustSentence(result, row.isSource)}</span>
       </div>
+      {location ? <p className="dB-hint is-left dB-location">{location}</p> : null}
       {row.isSource ? (
         <button type="button" className="dB-cta secondary" id="b-close" onClick={onClose}>
           Close
