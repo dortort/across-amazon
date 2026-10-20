@@ -215,7 +215,14 @@ describe("detail sheet", () => {
     const quoted = {
       ...ukFromAnotherSeller,
       notes: [...ukFromAnotherSeller.notes!, "Delivery location set to Switzerland"],
-      otherSeller: { seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 }
+      otherSeller: {
+        seller: "BuyMyBricks",
+        dispatcher: "Amazon",
+        fulfilledByAmazon: true,
+        offerCount: 2,
+        deliveringNewCount: 2,
+        comparedCount: 2
+      }
     };
     const app = await renderDone(resultPayload({ source: switzerland, results: [quoted], fxTable: fxTableWithFrancs }));
 

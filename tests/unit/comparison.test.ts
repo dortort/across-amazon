@@ -79,7 +79,14 @@ describe("withCheapestOtherOffer", () => {
       status: "OK",
       confidence: 0.96,
       breakdown: { item: money(699, "GBP"), shipping: money(40.86, "CHF") },
-      otherSeller: { seller: "RamanDz", dispatcher: "RamanDz", fulfilledByAmazon: false, offerCount: 5, deliveringNewCount: 2 },
+      otherSeller: {
+        seller: "RamanDz",
+        dispatcher: "RamanDz",
+        fulfilledByAmazon: false,
+        offerCount: 5,
+        deliveringNewCount: 2,
+        comparedCount: 2
+      },
       notes: ["Matched by ASIN", "Quoted another seller's offer"]
     });
   });
@@ -95,14 +102,14 @@ describe("withCheapestOtherOffer", () => {
     const chosen = withCheapestOtherOffer(quotedFirst(offers), "EUR", noRates);
 
     expect(chosen.breakdown).toEqual({ item: money(600, "EUR"), shipping: money(55.26, "EUR") });
-    expect(chosen.otherSeller?.seller).toBe("BricksBoutique");
+    expect(chosen.otherSeller).toMatchObject({ seller: "BricksBoutique", comparedCount: 3 });
   });
 
   it("chooses among the offers it can convert when some cannot be converted", () => {
     const unconvertible = offer(money(10, "SEK"), money(1, "SEK"), "Cheap but unconvertible");
     const chosen = withCheapestOtherOffer(quotedFirst([unconvertible, buyMyBricks, ramanDz]), "USD", fxTable);
 
-    expect(chosen.otherSeller?.seller).toBe("RamanDz");
+    expect(chosen.otherSeller).toMatchObject({ seller: "RamanDz", deliveringNewCount: 3, comparedCount: 2 });
   });
 
   it("keeps Amazon's first offer when no offer converts into the comparison currency", () => {
@@ -112,7 +119,7 @@ describe("withCheapestOtherOffer", () => {
     const chosen = withCheapestOtherOffer(quotedFirst([first, second]), "USD", fxTable);
 
     expect(chosen.breakdown).toEqual({ item: money(10, "SEK"), shipping: money(1, "SEK") });
-    expect(chosen.otherSeller?.seller).toBe("First");
+    expect(chosen.otherSeller).toMatchObject({ seller: "First", comparedCount: 0 });
     expect(chosen).not.toHaveProperty("otherOffers");
   });
 

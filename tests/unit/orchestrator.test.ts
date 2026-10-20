@@ -1680,7 +1680,8 @@ describe("background orchestrator", () => {
       dispatcher: "Amazon",
       fulfilledByAmazon: true,
       offerCount: 4,
-      deliveringNewCount: 4
+      deliveringNewCount: 4,
+      comparedCount: 4
     };
 
     function onlyOtherSellersOn(market: Marketplace): Prepare {
@@ -1741,7 +1742,14 @@ describe("background orchestrator", () => {
           confidence: 0.96,
           productUrl: "https://www.amazon.co.uk/dp/B000000001",
           breakdown: { item: { amount: 699, currency: "GBP" }, shipping: { amount: 40.86, currency: "CHF" } },
-          otherSeller: { seller: "RamanDz", dispatcher: "RamanDz", fulfilledByAmazon: false, offerCount: 2, deliveringNewCount: 2 },
+          otherSeller: {
+            seller: "RamanDz",
+            dispatcher: "RamanDz",
+            fulfilledByAmazon: false,
+            offerCount: 2,
+            deliveringNewCount: 2,
+            comparedCount: 2
+          },
           notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"],
           normalizedTotal: { amount: 933.01, currency: "USD" }
         }

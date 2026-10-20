@@ -877,38 +877,54 @@ describe("locationNote", () => {
 
 describe("otherSellerNote", () => {
   const quoted = (otherSeller: ComparisonResult["otherSeller"]): ComparisonResult => ({ ...de, otherSeller });
+  const counts = (listed: number, compared = listed) => ({ offerCount: listed, deliveringNewCount: listed, comparedCount: compared });
 
   it("names the seller, Amazon as the dispatcher and how many offers that deliver new it was the cheapest of", () => {
-    expect(
-      otherSellerNote(
-        quoted({ seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4, deliveringNewCount: 4 })
-      )
-    ).toBe("Sold by Star Brick City, dispatched by Amazon. Cheapest of the 4 offers Amazon lists that deliver new.");
+    expect(otherSellerNote(quoted({ seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(4) }))).toBe(
+      "Sold by Star Brick City, dispatched by Amazon. Cheapest of the 4 offers Amazon lists that deliver new."
+    );
   });
 
   it("counts only the offers that deliver new, not every offer of the panel", () => {
-    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 5, deliveringNewCount: 2 }))).toBe(
+    const otherSeller = { seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(2), offerCount: 5 };
+
+    expect(otherSellerNote(quoted(otherSeller))).toBe(
       "Sold by BuyMyBricks, dispatched by Amazon. Cheapest of the 2 offers Amazon lists that deliver new."
     );
   });
 
   it("calls any Amazon dispatcher Amazon and names a third-party dispatcher", () => {
-    expect(otherSellerNote(quoted({ seller: "Amazon Europa", dispatcher: "Amazon Europa", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 }))).toBe(
+    expect(otherSellerNote(quoted({ seller: "Amazon Europa", dispatcher: "Amazon Europa", fulfilledByAmazon: true, ...counts(2) }))).toBe(
       "Sold by Amazon Europa, dispatched by Amazon. Cheapest of the 2 offers Amazon lists that deliver new."
     );
-    expect(otherSellerNote(quoted({ seller: "RamanDz", dispatcher: "RamanDz", fulfilledByAmazon: false, offerCount: 2, deliveringNewCount: 2 }))).toBe(
+    expect(otherSellerNote(quoted({ seller: "RamanDz", dispatcher: "RamanDz", fulfilledByAmazon: false, ...counts(2) }))).toBe(
       "Sold by RamanDz, dispatched by RamanDz. Cheapest of the 2 offers Amazon lists that deliver new."
     );
   });
 
+  it("claims the cheapest only among the offers whose prices could be converted", () => {
+    expect(otherSellerNote(quoted({ seller: "RamanDz", dispatcher: "RamanDz", fulfilledByAmazon: false, ...counts(3, 2) }))).toBe(
+      "Sold by RamanDz, dispatched by RamanDz. Cheapest of the 2 of the 3 offers Amazon lists that deliver new whose prices could be converted."
+    );
+  });
+
+  it("calls the quoted offer the first that delivers when no offer could be compared", () => {
+    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(2, 0) }))).toBe(
+      "Sold by BuyMyBricks, dispatched by Amazon. The first of the 2 offers Amazon lists that deliver new."
+    );
+    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 }))).toBe(
+      "Sold by BuyMyBricks, dispatched by Amazon. The first of the 2 offers Amazon lists that deliver new."
+    );
+  });
+
   it("says when the quoted offer is the only one that delivers new", () => {
-    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 3, deliveringNewCount: 1 }))).toBe(
+    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, ...counts(1), offerCount: 3 }))).toBe(
       "Sold by BuyMyBricks, dispatched by Amazon. The only offer Amazon lists that delivers new."
     );
   });
 
   it("leaves out what the offer did not name", () => {
-    expect(otherSellerNote(quoted({ fulfilledByAmazon: false, offerCount: 3, deliveringNewCount: 3 }))).toBe(
+    expect(otherSellerNote(quoted({ fulfilledByAmazon: false, ...counts(3) }))).toBe(
       "Sold by another seller. Cheapest of the 3 offers Amazon lists that deliver new."
     );
   });

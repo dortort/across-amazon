@@ -8,6 +8,7 @@ import type {
   FxTable,
   Marketplace,
   Money,
+  OtherSeller,
   SourceContext
 } from "../shared/types";
 
@@ -327,6 +328,18 @@ export function locationNote(result: ComparisonResult): string | undefined {
   return result.notes?.find((note) => note.startsWith(LOCATION_SET_PREFIX));
 }
 
+function offersSentence({ deliveringNewCount: listed, comparedCount: compared = 0 }: OtherSeller): string {
+  if (listed <= 1) {
+    return "The only offer Amazon lists that delivers new.";
+  }
+  if (compared === listed) {
+    return `Cheapest of the ${listed} offers Amazon lists that deliver new.`;
+  }
+  return compared > 0
+    ? `Cheapest of the ${compared} of the ${listed} offers Amazon lists that deliver new whose prices could be converted.`
+    : `The first of the ${listed} offers Amazon lists that deliver new.`;
+}
+
 export function otherSellerNote(result: ComparisonResult): string | undefined {
   const other = result.otherSeller;
   if (!other) {
@@ -334,11 +347,7 @@ export function otherSellerNote(result: ComparisonResult): string | undefined {
   }
   const dispatcher = other.fulfilledByAmazon ? "Amazon" : other.dispatcher;
   const soldBy = `Sold by ${other.seller ?? "another seller"}${dispatcher ? `, dispatched by ${dispatcher}` : ""}.`;
-  const offers =
-    other.deliveringNewCount > 1
-      ? `Cheapest of the ${other.deliveringNewCount} offers Amazon lists that deliver new.`
-      : "The only offer Amazon lists that delivers new.";
-  return `${soldBy} ${offers}`;
+  return `${soldBy} ${offersSentence(other)}`;
 }
 
 export function phaseLabel(phase?: ComparisonPhase): string {
