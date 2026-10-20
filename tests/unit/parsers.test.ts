@@ -644,7 +644,7 @@ describe("source brand and ASIN", () => {
 
     it.each([
       ["the vas state of a store that geo-detected Switzerland", { vas: "CH", input: "CH", nav: null }, "CH"],
-      ["the $Nav config of a store with no country input", { vas: "CH", nav: "CH" }, "CH"],
+      ["the vas state ahead of the $Nav config of a store with no country input", { vas: "CH", nav: "US" }, "CH"],
       ["the $Nav config alone", { nav: "ch" }, "CH"],
       ["the vas state of a domestic address", { vas: "MX", nav: null }, "MX"]
     ] as const)("reads %s", (_label, fields, expected) => {
