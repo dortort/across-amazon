@@ -1338,7 +1338,7 @@ describe("product extractor other sellers' offers", () => {
 
     const result = await read(page, "MX", fetchAnswering({ body: panelBody("MX-one-offer-not-shippable.html") }));
 
-    expect(result).toEqual({ ...readPageAlone(page, "MX"), notes: [...readPageAlone(page, "MX").notes, "No other seller delivers to the destination"] });
+    expect(result).toEqual({ ...readPageAlone(page, "MX"), notes: [...readPageAlone(page, "MX").notes, "No other seller delivers the item new to the destination"] });
     expect(result.breakdown).toBeUndefined();
     expect(result.otherSeller).toBeUndefined();
   });

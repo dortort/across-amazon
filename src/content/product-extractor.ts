@@ -583,7 +583,7 @@ const SEE_ALL_BUYING_OPTIONS = "#buybox-see-all-buying-choices";
 const OTHER_OFFERS_TIMEOUT_MS = 15_000;
 const OTHER_OFFERS_HEADERS = { "X-Requested-With": "XMLHttpRequest", Accept: "text/html,*/*" };
 const OTHER_OFFERS_UNREAD = "Other offers could not be read: ";
-const NO_OTHER_SELLER = "No other seller delivers to the destination";
+const NO_OTHER_SELLER = "No other seller delivers the item new to the destination";
 const OTHER_SELLER_QUOTED = "Quoted another seller's offer";
 
 async function fetchOtherOffers(documentRef: Document, url: string, fetchRef: FetchLike): Promise<Document> {
