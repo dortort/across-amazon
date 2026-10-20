@@ -1,0 +1,353 @@
+---
+import Base from "../layouts/Base.astro";
+import PageIntro from "../components/PageIntro.astro";
+import TableScroll from "../components/TableScroll.astro";
+import Toc from "../components/Toc.astro";
+import { stores } from "../data/stores";
+
+const questions = {
+  "delivered-total": "What is the delivered total?",
+  "import-fees": "Why does it say import fees are not shown, and do I still pay duties?",
+  "check-match": "What does “Check match” mean?",
+  "stores-that-dont-ship": "Why can’t some stores be compared?",
+  "exchange-rates": "Where do the exchange rates come from?",
+  "delete-data": "How do I delete my data?",
+  "delivery-location": "Why does another Amazon store’s “Deliver to” box now show my country?",
+  cache: "Why did “Check again” come back instantly?",
+  buy: "Does it buy anything or touch my cart?",
+  affiliation: "Is it affiliated with Amazon, and does it earn commissions?",
+  stores: "Which Amazon stores does it work on?",
+  "background-tabs": "Why do tabs open during a check?",
+  "robot-check": "What happens when a store shows a robot check?",
+  "stay-here": "What does “Stay here” mean?",
+} as const;
+
+const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${id}`, label: question }));
+---
+
+<Base
+  title="FAQ"
+  description="Answers about delivered totals, import fees, “Check match”, exchange rates, deleting your data and the stores Across Amazon checks."
+>
+  <PageIntro
+    title="Frequently asked questions"
+    lede="Short answers about delivered totals, matches, stores and the data the extension keeps."
+  />
+  <div class="container page-body">
+    <Toc items={tocItems} />
+
+    <article class="prose faq-answers">
+      <h2 id="delivered-total">{questions["delivered-total"]}</h2>
+      <p>
+        The delivered total is the item price, plus shipping to your destination, plus the import fees deposit. Your
+        destination is the country in Amazon’s “Deliver to” box on the page you are on.
+      </p>
+      <p>
+        The extension reads each part as Amazon quotes it on the product page, in the currency the page shows. If Amazon
+        displays a total that is higher than that sum, the displayed total is used.
+      </p>
+      <p>
+        To rank the stores, each delivered total is converted to your display currency at the
+        day’s <a href="#exchange-rates">exchange rate</a>. The page you are on is always the reference: the saving and
+        the difference on each row are measured against its delivered total. Click a row in the ranked list to see each
+        part in that store’s own currency.
+      </p>
+
+      <h2 id="import-fees">{questions["import-fees"]}</h2>
+      <p>
+        Amazon quotes import fees for an address abroad only on some pages. On amazon.com, for example, they are in its
+        AmazonGlobal details. When a store’s page prices the item and the delivery but shows no import fees, its
+        delivered total is the item price plus shipping. Any import charges collected on delivery are not included.
+      </p>
+      <p>The popup says so wherever that total appears:</p>
+      <ul>
+        <li>The store’s row reads “incl. shipping, import fees not shown”.</li>
+        <li>Its breakdown sheet shows “Not shown” for the import fees deposit.</li>
+        <li>
+          If it is the cheapest store, the verdict card reads “Item and shipping included. Amazon showed no import fees,
+          so duties may still be due on delivery.”
+        </li>
+      </ul>
+      <p>
+        So yes, you may still pay duties. In that case the saving leaves out any duties collected on delivery, while the
+        price on the page you are on may include them.
+      </p>
+
+      <h2 id="check-match">{questions["check-match"]}</h2>
+      <p>
+        <span class="nowrap">“Check match”</span> is a pill on a row in the ranked list, and on the verdict card when
+        that row is the cheapest. It means the listing was found by searching and the extension is less than 90% sure it
+        is the same product.
+      </p>
+      <p>
+        A listing found under your product’s ASIN, Amazon’s own product identifier, is the same product. It counts as an
+        exact match and never shows the pill. A listing found by searching is scored, not certain. Its confidence
+        combines how closely the listing’s title, brand and variant match your product with how cleanly its product page
+        could be read. A listing from your product’s brand with the same model number counts as a close title match even
+        when the store words the title differently, but it usually still scores below 90% and so carries the pill.
+      </p>
+      <p>
+        Before a listing found by searching is ranked, its page is checked for your colour, pack and size. When the page
+        shows another variant but offers yours, the extension opens your variant’s page and reads that instead; when the
+        page does not offer your variant, the store is reported as “No confident match”. Open the listing and check the
+        variant before you buy.
+      </p>
+      <p>
+        When you see the pill, also confirm that it is the same product in the same condition. Listings that score below
+        the matching threshold are never ranked. They appear with
+        the <a href="#stores-that-dont-ship">stores that could not be compared</a> as “No confident match”.
+      </p>
+
+      <h2 id="stores-that-dont-ship">{questions["stores-that-dont-ship"]}</h2>
+      <p>
+        Some stores will not compare, and that is expected. They are collapsed at the bottom of the results, under a
+        line such as <span class="nowrap">“4 marketplaces could not be compared”</span>. Expand it to see each store’s
+        status:
+      </p>
+      <TableScroll label="Why a store could not be compared">
+        <table class="table-stack">
+          <thead>
+            <tr>
+              <th scope="col">Status</th>
+              <th scope="col">What happened</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">No confident match</th>
+              <td>
+                The store does not list your product’s ASIN and no search result scored above the matching threshold.
+                Or the closest listing is another variant, and its page does not offer yours. Nothing is compared rather
+                than risking the wrong product.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Delivered total not quotable</th>
+              <td>
+                Amazon did not show the item price or the shipping for your destination, for example because the item
+                cannot be shipped there. The note names the destination, for example: “Amazon did not show a delivered
+                price to Switzerland.” When Amazon gives a reason, the note repeats it.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Could not read the page</th>
+              <td>The product page could not be read, or the tab failed to load in time.</td>
+            </tr>
+            <tr>
+              <th scope="row">Could not set delivery location</th>
+              <td>
+                The store kept quoting delivery to another place because its delivery location could not be switched to
+                your destination, for example because it does not offer that country. The note says which: “This store
+                does not offer delivery to Switzerland.” or “Could not set this store’s delivery location to Switzerland,
+                so its price is for another place.”
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </TableScroll>
+      <p>
+        You will see two of these most often. “Delivered total not quotable” usually means the store does not ship this
+        item to your delivery country. “Could not set delivery location” means the store would not switch to, or does
+        not offer, your delivery country. For example, amazon.com.au offers few countries. A store with that status is
+        never ranked, because its price is for another place.
+      </p>
+
+      <h2 id="exchange-rates">{questions["exchange-rates"]}</h2>
+      <p>
+        They are the European Central Bank (ECB) daily reference rates. When the ECB feed cannot be loaded, the extension
+        gets the same rates from Frankfurter (api.frankfurter.dev) instead.
+      </p>
+      <p>
+        The rates are normally downloaded once per UTC day and reused for the rest of that day. If a download fails, it
+        is tried again on the next check. These requests carry no information about you or the product. Like any web
+        request, they let those servers see your IP address. The popup’s footer shows the date of the rates in use.
+        Until a check has loaded rates, it reads “ECB daily rates”.
+      </p>
+      <p>
+        Totals are converted to your display currency, which you choose
+        under <span class="nowrap">“Show prices in”</span> in the popup’s settings, or on the extension’s options page.
+        Each store prices in its own currency, so the rate your bank or Amazon’s currency converter applies decides what
+        you finally pay.
+      </p>
+
+      <h2 id="delete-data">{questions["delete-data"]}</h2>
+      <p>
+        Everything the extension keeps is in its local storage in your browser, and nothing it stores is sent to the
+        developer or to anyone else. <a href="/how-it-works/#storage">How it works</a> lists what is kept and for how long.
+      </p>
+      <p>Removing the extension from Chrome deletes everything it stored. To clear its storage without removing it:</p>
+      <ol>
+        <li>Open <code>chrome://extensions</code>.</li>
+        <li>Turn on Developer mode.</li>
+        <li>Click “service worker” under Across Amazon.</li>
+        <li>Run <code>chrome.storage.local.clear()</code> in the console that opens.</li>
+      </ol>
+      <p>
+        Removing the extension does not change back any Amazon store’s delivery location. Change it in that store’s
+        “Deliver to” box. It also does not remove the visits it made from Chrome’s history or from your Amazon history.
+        Clear those in Chrome and on Amazon.
+      </p>
+      <p>The full wording is in the privacy policy, under <a href="/privacy/#deleting-your-data">Deleting your data</a>.</p>
+
+      <h2 id="delivery-location">{questions["delivery-location"]}</h2>
+      <p>
+        So that every store quotes delivery to the same place, a check may set each other store’s delivery location to
+        the country in the “Deliver to” box of the page you started from. This is the same change as picking that
+        country in the store’s own “Choose your location” box, and the store is left set that way after the check. For
+        example, if you start on amazon.com with “Deliver to Switzerland”, the “Deliver to” box on amazon.de, amazon.fr
+        and the other stores it checks then shows Switzerland.
+      </p>
+      <p>
+        Only a country is set, never an address. The store you started from is never changed. Your own tabs on a changed
+        store show the new location after their next reload. To change a store back, pick another location in its
+        “Deliver to” box. <a href="/how-it-works/#delivery-location">How it works</a> explains the change in full.
+      </p>
+      <p>
+        A store whose box shows your country may still not ship your item there. The check then lists it as “Delivered
+        total not quotable”. A store that does not offer your country, or whose change Amazon refuses, keeps quoting its
+        previous place and is listed as “Could not set delivery location”. Both appear with
+        the <a href="#stores-that-dont-ship">stores that could not be compared</a>.
+      </p>
+
+      <h2 id="cache">{questions.cache}</h2>
+      <p>
+        A finished check is reused for 30 minutes. An older result is deleted only when exactly the same check runs
+        again; otherwise it stays until you remove the extension or clear its storage.
+      </p>
+      <p>
+        If you press <span class="nowrap">“Check again”</span> within those 30 minutes, for the same product, variant,
+        destination, “Deliver to” text and set of stores, you get the stored result back at once, and no tabs open.
+        After 30 minutes a fresh check runs.
+      </p>
+      <p>
+        A stored result includes the “Deliver to” text and the address of the product page. To remove it sooner,
+        see <a href="#delete-data">how to delete your data</a>.
+      </p>
+
+      <h2 id="buy">{questions.buy}</h2>
+      <p>
+        No. It never adds to cart, checks out or buys anything. <span class="nowrap">“Open on …”</span> opens that
+        store’s listing in a new tab. You review it and decide whether to buy it there, on Amazon.
+      </p>
+      <p>
+        Your saved addresses and cart are not touched, and it never reads your passwords, your orders or your cookies.
+        It does change the <a href="#delivery-location">delivery location of the other stores</a> it checks.
+      </p>
+
+      <h2 id="affiliation">{questions.affiliation}</h2>
+      <p>No. Across Amazon is not affiliated with or endorsed by Amazon.</p>
+      <p>
+        It earns no commission either. Every <span class="nowrap">“Open on …”</span> link is the store’s plain product
+        page address, with no affiliate or referral code added. The extension has no analytics and no server of its own,
+        and nothing is sent to the developer.
+      </p>
+
+      <h2 id="stores">{questions.stores}</h2>
+      <p>Product pages on these ten Amazon stores:</p>
+      <TableScroll label="Supported Amazon stores">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Store</th>
+              <th scope="col">Domain</th>
+              <th scope="col">Currency</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              stores.map((store) => (
+                <tr>
+                  <th scope="row">{store.country}</th>
+                  <td>{store.domain}</td>
+                  <td class="nowrap">{store.currency}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </TableScroll>
+      <p>
+        A check covers every store switched on in the settings except the one you are on, so by default the other nine.
+        Turn stores on or off under <span class="nowrap">“Marketplaces to check”</span> in the popup’s settings, or on
+        the extension’s options page. Fewer stores make the check faster.
+      </p>
+      <p>
+        On any other site, or on an Amazon page that is not a product page, such as search results or the cart, the
+        popup asks you to open an Amazon product page and the button stays disabled.
+      </p>
+
+      <h2 id="background-tabs">{questions["background-tabs"]}</h2>
+      <p>
+        The extension reads each store’s prices from that store’s own pages, as Amazon shows them. So it opens those
+        pages one store at a time, in background tabs that never take focus, and closes each tab as soon as it has been
+        read. A check takes about 3 seconds per store.
+      </p>
+      <p>
+        The pages it opens are ordinary visits: they appear in Chrome’s history and, if you are signed in to Amazon, may
+        appear in your Amazon browsing and search history. They are made by your browser with your own Amazon session and
+        may also influence Amazon’s recommendations.
+      </p>
+      <p>
+        <span class="nowrap">“Stop checking”</span> cancels the run and closes any background tabs it opened. Closing
+        the popup does not stop a check: it finishes in the background. Reopen the popup on the same tab to follow its
+        progress.
+      </p>
+
+      <h2 id="robot-check">{questions["robot-check"]}</h2>
+      <p>
+        A store that shows a robot check may report “No confident match” or “Could not read the page”. It is then listed
+        with the <a href="#stores-that-dont-ship">stores that could not be compared</a> and is not ranked. If
+        you <a href="/support/#report">report a problem</a>, say whether that store shows a robot check when you open
+        it yourself.
+      </p>
+
+      <h2 id="stay-here">{questions["stay-here"]}</h2>
+      <p>
+        It means no other store beat the delivered total on the page you are on. The verdict card turns slate and
+        reads <span class="nowrap">“Stay here”</span>. The page you are on is the highlighted top row, and every other
+        row shows how much more it would cost.
+      </p>
+      <p>The card has other answers too:</p>
+      <ul>
+        <li>
+          The cheapest delivered total with no saving, when the price on the page you are on could not be read. The
+          popup still names the cheapest store but has nothing to compare it with.
+        </li>
+        <li>No delivered price, when none of the stores could quote a delivered price to your destination.</li>
+        <li>
+          <span class="nowrap">“Couldn’t compare”</span>, with the reason, when the check itself fails, for example
+          because the exchange rates could not be loaded.
+        </li>
+      </ul>
+
+      <p class="faq-more">
+        Not answered here? The <a href="/support/">support page</a> explains how to ask the developer.
+      </p>
+    </article>
+  </div>
+</Base>
+
+<style>
+  .faq-answers h2 {
+    margin-top: 1.75em;
+    padding-top: 1.25em;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .faq-answers h2:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .faq-answers th[scope="row"] {
+    font-weight: 650;
+  }
+
+  .faq-more {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--color-hairline);
+    color: var(--color-muted);
+  }
+</style>
