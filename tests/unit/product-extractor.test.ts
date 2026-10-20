@@ -1420,15 +1420,16 @@ describe("product extractor other sellers' offers", () => {
       seller: string;
       item: string;
       delivery?: string;
+      noPrice?: boolean;
     }
 
-    const UNSHIPPABLE = "This item cannot be shipped for now.";
+    const UNSHIPPABLE = "This item cannot be shipped to your selected delivery location.";
 
     function offers(count: number, from = 1, delivery?: string): SyntheticOffer[] {
       return Array.from({ length: count }, (_, index) => ({ seller: `Seller ${from + index}`, item: `€${700 + from + index}.00`, delivery }));
     }
 
-    function pagedPanel(total: number, listed: SyntheticOffer[]): string {
+    function pagedPanel(total: number | undefined, listed: SyntheticOffer[], { moreToShow = false } = {}): string {
       const document = new JSDOM(readFileSync(join(OFFERS_FIXTURES, "DE-four-new-offers.html"), "utf8")).window.document;
       const template = document.querySelector("#aod-offer-list #aod-offer");
       const container = template?.parentElement;
@@ -1436,7 +1437,7 @@ describe("product extractor other sellers' offers", () => {
         throw new Error("No offer to copy in the amazon.de panel");
       }
       container.querySelectorAll("#aod-offer").forEach((offer) => offer.remove());
-      for (const { seller, item, delivery } of listed) {
+      for (const { seller, item, delivery, noPrice } of listed) {
         const offer = template.cloneNode(true) as Element;
         const price = offer.querySelector("#aod-offer-price .apex-pricetopay-value .a-offscreen");
         const sellerName = offer.querySelector("#aod-offer-soldBy .a-col-right > a");
@@ -1447,9 +1448,20 @@ describe("product extractor other sellers' offers", () => {
         price.textContent = item;
         sellerName.textContent = seller;
         message.textContent = delivery ?? "€55.26 delivery";
+        if (noPrice) {
+          offer.querySelector("#aod-offer-price")?.remove();
+        }
         container.append(offer);
       }
-      document.querySelector("#aod-total-offer-count")?.setAttribute("value", String(total));
+      const totalInput = document.querySelector("#aod-total-offer-count");
+      if (total === undefined) {
+        totalInput?.remove();
+      } else {
+        totalInput?.setAttribute("value", String(total));
+      }
+      if (moreToShow) {
+        document.querySelector("#aod-show-more-offers")?.classList.remove("aod-hide");
+      }
       return document.body.innerHTML;
     }
 
@@ -1547,6 +1559,61 @@ describe("product extractor other sellers' offers", () => {
       expect(settledEarly).toBe(false);
       expect(settledAt).toBe(13_000);
       expect(result.otherOffers).toHaveLength(10);
+    });
+
+    it("does not take page 1's count for a total the panel did not give, and says so when nothing is quotable", async () => {
+      const page = legoPage("DE");
+      const fetchRef = fetchPages({ 1: pagedPanel(undefined, offers(10, 1, UNSHIPPABLE), { moreToShow: true }) });
+
+      const result = await read(page, "DE", fetchRef);
+
+      expect(requestedPages(fetchRef)).toEqual([1, 2]);
+      expect(result.notes.at(-1)).toBe("Other offers could not be read: the panel gave no total");
+      expect(result.breakdown).toBeUndefined();
+    });
+
+    it("quotes from a panel without a total but marks the read incomplete while its list says there is more", async () => {
+      const fetchRef = fetchPages({ 1: pagedPanel(undefined, offers(10), { moreToShow: true }) });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(result.otherSeller).toMatchObject({ offerCount: 10, readCount: 10, readComplete: false });
+    });
+
+    it("reads a panel without a total as complete once its See more link is hidden", async () => {
+      const fetchRef = fetchPages({ 1: pagedPanel(undefined, offers(2, 1, UNSHIPPABLE)) });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(requestedPages(fetchRef)).toEqual([1]);
+      expect(result.notes.at(-1)).toBe("No other seller delivers the item new to the destination");
+    });
+
+    it("does not claim no seller delivers when a delivery message gives neither a price nor a reason it cannot ship", async () => {
+      const fetchRef = fetchPages({
+        1: pagedPanel(2, [
+          { seller: "Seller 1", item: "€701.00", delivery: UNSHIPPABLE },
+          { seller: "Seller 2", item: "€702.00", delivery: "Delivery Monday 4 November" }
+        ])
+      });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(result.notes.at(-1)).toBe("Other offers could not be read: a delivery price could not be read");
+      expect(result.breakdown).toBeUndefined();
+    });
+
+    it("does not claim no seller delivers when an offer's price could not be read", async () => {
+      const fetchRef = fetchPages({
+        1: pagedPanel(2, [
+          { seller: "Seller 1", item: "€701.00", delivery: UNSHIPPABLE },
+          { seller: "Seller 2", item: "€702.00", noPrice: true }
+        ])
+      });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(result.notes.at(-1)).toBe("Other offers could not be read: an item price could not be read");
     });
 
     it("reads at most three pages", async () => {

@@ -10,6 +10,7 @@ import type { OtherOffer, OtherOffersPanel, QuotableOffer } from "./other-offers
 import {
   collapseText,
   hasFreeMarker,
+  isUndeliverableNotice,
   normalize,
   parseCurrencyMarkedMoney,
   parseMoney,
@@ -231,16 +232,6 @@ function readAvailabilityMessage(documentRef: Document): string | undefined {
   return undefined;
 }
 
-const UNDELIVERABLE_NOTICES = [
-  "cannot be shipped to your selected delivery location",
-  "cannot be dispatched to your selected delivery location",
-  "kann nicht an den ausgewählten Lieferort",
-  "ne peut pas être expédié",
-  "non può essere spedito",
-  "no se puede enviar",
-  "お届け先に発送できません"
-].map(normalize);
-
 const UNAVAILABLE_NOTICES = [
   "currently unavailable",
   "derzeit nicht verfügbar",
@@ -270,7 +261,7 @@ function readAvailability(documentRef: Document, priced: boolean): ListingAvaila
   }
 
   const notice = normalize(AVAILABILITY_BLOCK_SELECTORS.map((selector) => readBlockText(documentRef, selector)).join(" "));
-  if (UNDELIVERABLE_NOTICES.some((text) => notice.includes(text))) {
+  if (isUndeliverableNotice(notice)) {
     return "undeliverable";
   }
   if (UNAVAILABLE_NOTICES.some((text) => notice.includes(text))) {
@@ -608,7 +599,12 @@ async function fetchOtherOffers(documentRef: Document, url: string, fetchRef: Fe
 
 interface OffersRead {
   offers: OtherOffer[];
-  total: number;
+  total?: number;
+  complete: boolean;
+}
+
+function isReadComplete(offers: OtherOffer[], total: number | undefined, listEnded: boolean): boolean {
+  return total === undefined ? listEnded : offers.length >= total;
 }
 
 async function readOtherOffers(
@@ -628,8 +624,8 @@ async function readOtherOffers(
     throw new Error("Amazon's answer held no offer list");
   }
 
-  let { offers, offerCount: total } = first;
-  for (let page = 2; page <= OTHER_OFFERS_MAX_PAGES && offers.length < total; page += 1) {
+  let { offers, total, listEnded } = first;
+  for (let page = 2; page <= OTHER_OFFERS_MAX_PAGES && !isReadComplete(offers, total, listEnded); page += 1) {
     const remaining = deadline - Date.now();
     if (remaining < OTHER_OFFERS_MIN_PAGE_MS) {
       break;
@@ -640,9 +636,23 @@ async function readOtherOffers(
       break;
     }
     offers = [...offers, ...added];
-    total = Math.max(total, next.offerCount);
+    total = next.total === undefined ? total : Math.max(total ?? 0, next.total);
+    listEnded = next.listEnded;
   }
-  return { offers, total };
+  return { offers, total, complete: isReadComplete(offers, total, listEnded) };
+}
+
+function unquotedNote(read: OffersRead): string {
+  if (!read.complete) {
+    return read.total === undefined
+      ? `${OTHER_OFFERS_UNREAD}the panel gave no total`
+      : `${OTHER_OFFERS_UNREAD}listed ${read.offers.length} of ${read.total} new offers`;
+  }
+  const unreadable = read.offers.find((offer) => offer.isNew && (!offer.item || (!offer.shipping && !offer.undeliverable)));
+  if (!unreadable) {
+    return NO_OTHER_SELLER;
+  }
+  return `${OTHER_OFFERS_UNREAD}${unreadable.item ? "a delivery price could not be read" : "an item price could not be read"}`;
 }
 
 function withNote(result: ProductExtractionResult, note: string): ProductExtractionResult {
@@ -685,9 +695,9 @@ function quoteOtherOffers(result: ProductExtractionResult, offers: QuotableOffer
       seller: first.seller,
       dispatcher: first.dispatcher,
       fulfilledByAmazon: first.fulfilledByAmazon,
-      offerCount: read.total,
+      offerCount: read.total ?? read.offers.length,
       readCount: read.offers.length,
-      readComplete: read.offers.length >= read.total,
+      readComplete: read.complete,
       deliveringNewCount: offers.length
     },
     otherOffers: offers.map(offerQuote),
@@ -720,12 +730,7 @@ export async function extractProductDataWithOffers(
   }
 
   const quotable = quotableOffers(read.offers);
-  if (quotable.length > 0) {
-    return quoteOtherOffers(result, quotable, read);
-  }
-  return read.offers.length >= read.total
-    ? withNote(result, NO_OTHER_SELLER)
-    : withNote(result, `${OTHER_OFFERS_UNREAD}listed ${read.offers.length} of ${read.total} new offers`);
+  return quotable.length > 0 ? quoteOtherOffers(result, quotable, read) : withNote(result, unquotedNote(read));
 }
 
 declare global {

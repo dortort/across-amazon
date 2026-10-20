@@ -58,6 +58,7 @@ function offer(overrides: Partial<OtherOffer>): OtherOffer {
     seller: "Seller",
     dispatcher: "Amazon",
     fulfilledByAmazon: true,
+    undeliverable: false,
     ...overrides
   };
 }
@@ -117,7 +118,7 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
   it("reads the four new offers amazon.de lists in its own order, skipping the empty featured offer", () => {
     const panel = parsePanel(DE_PANEL, "EUR");
 
-    expect(panel.offerCount).toBe(4);
+    expect(panel).toMatchObject({ total: 4, listEnded: true });
     expect(panel.offers).toEqual([
       {
         index: 0,
@@ -127,7 +128,8 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
         shipping: { amount: 55.26, currency: "EUR" },
         seller: "Star Brick City",
         dispatcher: "Amazon",
-        fulfilledByAmazon: true
+        fulfilledByAmazon: true,
+        undeliverable: false
       },
       {
         index: 1,
@@ -137,7 +139,8 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
         shipping: { amount: 55.26, currency: "EUR" },
         seller: "BricksBoutique",
         dispatcher: "Amazon",
-        fulfilledByAmazon: true
+        fulfilledByAmazon: true,
+        undeliverable: false
       },
       {
         index: 2,
@@ -147,7 +150,8 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
         shipping: { amount: 55.26, currency: "EUR" },
         seller: "Nucleus Investments",
         dispatcher: "Amazon",
-        fulfilledByAmazon: true
+        fulfilledByAmazon: true,
+        undeliverable: false
       },
       {
         index: 3,
@@ -157,7 +161,8 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
         shipping: { amount: 19, currency: "EUR" },
         seller: "RamanDz",
         dispatcher: "RamanDz",
-        fulfilledByAmazon: false
+        fulfilledByAmazon: false,
+        undeliverable: false
       }
     ]);
   });
@@ -165,7 +170,7 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
   it("reads the amazon.co.uk offers with the item in pounds and the delivery in Swiss francs", () => {
     const panel = parsePanel(UK_PANEL, "GBP");
 
-    expect(panel.offerCount).toBe(2);
+    expect(panel).toMatchObject({ total: 2, listEnded: true });
     expect(panel.offers.map(({ item, shipping, seller, dispatcher }) => ({ item, shipping, seller, dispatcher }))).toEqual([
       {
         item: { amount: 574.97, currency: "GBP" },
@@ -186,7 +191,8 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
     const panel = parsePanel(MX_PANEL, "MXN");
 
     expect(panel).toEqual({
-      offerCount: 1,
+      total: 1,
+      listEnded: true,
       offers: [
         {
           index: 0,
@@ -196,7 +202,8 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
           shipping: undefined,
           seller: "Amazon Europa",
           dispatcher: "Amazon Europa",
-          fulfilledByAmazon: true
+          fulfilledByAmazon: true,
+          undeliverable: true
         }
       ]
     });
@@ -249,12 +256,45 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
     expect(panel.offers[0].item).toEqual({ amount: 651.25, currency: "EUR" });
   });
 
-  it("counts the offers it read when the panel carries no total", () => {
+  it("gives no total when the panel carries none, rather than counting the offers it read", () => {
     const panel = parsePanel(DE_PANEL, "EUR", (document) => {
       document.querySelector("#aod-total-offer-count")?.remove();
     });
 
-    expect(panel.offerCount).toBe(4);
+    expect(panel.total).toBeUndefined();
+    expect(panel.offers).toHaveLength(4);
+  });
+
+  it("reads the list as ended when its See more link is hidden or its End of results shows", () => {
+    const moreToShow = (document: Document): void => {
+      document.querySelector("#aod-show-more-offers")?.classList.remove("aod-hide");
+    };
+
+    expect(parsePanel(DE_PANEL, "EUR").listEnded).toBe(true);
+    expect(parsePanel(DE_PANEL, "EUR", moreToShow).listEnded).toBe(false);
+    expect(
+      parsePanel(DE_PANEL, "EUR", (document) => {
+        moreToShow(document);
+        document.querySelector("#aod-end-of-results")?.classList.remove("aod-hide");
+      }).listEnded
+    ).toBe(true);
+    expect(
+      parsePanel(DE_PANEL, "EUR", (document) => {
+        document.querySelector("#aod-show-more-offers")?.remove();
+      }).listEnded
+    ).toBe(false);
+  });
+
+  it("tells an offer that cannot ship apart from one whose delivery price it cannot read", () => {
+    const panel = parsePanel(DE_PANEL, "EUR", (document) => {
+      const upsell = firstOffer(document).querySelector("#mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE");
+      if (upsell) {
+        upsell.textContent = "Delivery Monday 4 November";
+      }
+    });
+
+    expect(panel.offers[0]).toMatchObject({ shipping: undefined, undeliverable: false });
+    expect(parsePanel(MX_PANEL, "MXN").offers[0]).toMatchObject({ shipping: undefined, undeliverable: true });
   });
 
   it.each(["Nieuw", "Nowy", "Yeni", "Novo", "全新"])(
