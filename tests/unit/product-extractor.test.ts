@@ -1485,6 +1485,60 @@ describe("product extractor other sellers' offers", () => {
       expect(result.otherSeller).toMatchObject({ offerCount: 12, deliveringNewCount: 10 });
     });
 
+    function pagesAnswering(pages: Record<number, { body: string; after: number }>) {
+      return vi.fn(
+        (url: string, init?: RequestInit) =>
+          new Promise<{ ok: boolean; status: number; text: () => Promise<string> }>((resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+            const answer = pages[Number(new URL(url).searchParams.get("pageno"))];
+            if (answer) {
+              setTimeout(() => resolve({ ok: true, status: 200, text: async () => answer.body }), answer.after);
+            }
+          })
+      );
+    }
+
+    async function readUnderDeadline(fetchRef: ReturnType<typeof pagesAnswering>, settleAfter: number) {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      const start = Date.now();
+      let settledAt: number | undefined;
+      const pending = read(legoPage("DE"), "DE", fetchRef).finally(() => {
+        settledAt = Date.now() - start;
+      });
+      await vi.advanceTimersByTimeAsync(settleAfter - 1);
+      const settledEarly = settledAt !== undefined;
+      await vi.advanceTimersByTimeAsync(1);
+      return { result: await pending, settledEarly, settledAt };
+    }
+
+    it("returns page 1's quote by the 15 second deadline when page 2 never answers", async () => {
+      const fetchRef = pagesAnswering({ 1: { body: pagedPanel(12, offers(10)), after: 12_000 } });
+
+      const { result, settledEarly, settledAt } = await readUnderDeadline(fetchRef, 15_000);
+
+      expect(requestedPages(fetchRef)).toEqual([1, 2]);
+      expect(fetchRef.mock.calls[1][1]?.signal?.aborted).toBe(true);
+      expect(settledEarly).toBe(false);
+      expect(settledAt).toBe(15_000);
+      expect(result.otherOffers).toHaveLength(10);
+      expect(result.otherSeller).toMatchObject({ seller: "Seller 1", offerCount: 12 });
+      expect(result.notes).toEqual([QUOTED_NOTE, NO_IMPORT_FEES_NOTE]);
+    });
+
+    it("asks for no further page when less than 3 seconds of the deadline remain", async () => {
+      const fetchRef = pagesAnswering({
+        1: { body: pagedPanel(12, offers(10)), after: 13_000 },
+        2: { body: pagedPanel(12, offers(2, 11)), after: 0 }
+      });
+
+      const { result, settledEarly, settledAt } = await readUnderDeadline(fetchRef, 13_000);
+
+      expect(requestedPages(fetchRef)).toEqual([1]);
+      expect(settledEarly).toBe(false);
+      expect(settledAt).toBe(13_000);
+      expect(result.otherOffers).toHaveLength(10);
+    });
+
     it("reads at most three pages", async () => {
       const fetchRef = fetchPages({
         1: pagedPanel(40, offers(10, 1)),
