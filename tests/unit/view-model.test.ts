@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES } from "../../src/shared/markets";
+import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName, marketplaceIso } from "../../src/shared/markets";
 import { formatMoney } from "../../src/shared/money";
 import type {
   ComparisonResult,
@@ -687,6 +687,32 @@ describe("statusText", () => {
     ["NO_CONFIDENT_MATCH", "No confident match"]
   ])("maps %s to %s", (status, text) => {
     expect(statusText(status)).toBe(text);
+  });
+});
+
+describe("countryName", () => {
+  it.each([
+    ["CH", "Switzerland"],
+    ["ch", "Switzerland"],
+    ["GB", "United Kingdom"],
+    ["UK", "United Kingdom"],
+    ["US", "United States"],
+    ["XK", "Kosovo"],
+    ["USA", "USA"]
+  ])("names %s %s", (code, name) => {
+    expect(countryName(code)).toBe(name);
+  });
+
+  it("keeps each marketplace's own label", () => {
+    for (const code of MARKETPLACE_CODES) {
+      expect(countryName(code)).toBe(MARKETPLACE_BY_CODE[code].label);
+    }
+  });
+});
+
+describe("marketplaceIso", () => {
+  it("gives every marketplace its ISO 3166-1 code, GB for the United Kingdom", () => {
+    expect(MARKETPLACE_CODES.map(marketplaceIso)).toEqual(["US", "CA", "MX", "GB", "DE", "FR", "IT", "ES", "JP", "AU"]);
   });
 });
 
