@@ -32,6 +32,10 @@ function navSwitzerlandWith(countryCode: string, storeContext = "industrial", ur
   return new JSDOM(html, { url: url ?? "https://www.amazon.de/dp/B09LCMVB3F" });
 }
 
+function formDeclaring(token: string): string {
+  return fixture("DE-modal.html").replace('CSRF_TOKEN : "TEST-POST-TOKEN"', token);
+}
+
 function fetchAnswering(...answers: Answer[]) {
   const queue = [...answers];
   return vi.fn(async (_url: string, _init?: RequestInit) => {
@@ -187,6 +191,31 @@ describe("setDeliveryLocation", () => {
 
   it("fails without posting when the form carries no token, as Amazon answers a request without the page token", async () => {
     const fetchMock = fetchAnswering({ body: fixture("degraded-modal.html") });
+
+    await expect(run(navSwitzerlandWith("US"), request("CH"), fetchMock)).resolves.toEqual({
+      status: "FAILED",
+      reason: "Amazon's location form carried no token"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["in single quotes", "CSRF_TOKEN : 'TEST-POST-TOKEN'", "TEST-POST-TOKEN"],
+    ["under a quoted key", '"CSRF_TOKEN": "TEST-POST-TOKEN"', "TEST-POST-TOKEN"],
+    ["under a single-quoted key", "'CSRF_TOKEN': 'TEST-POST-TOKEN'", "TEST-POST-TOKEN"],
+    ["with escaped characters", String.raw`"CSRF_TOKEN": "TEST\/POST\u002BTOKEN\x3D\"\'"`, `TEST/POST+TOKEN="'`]
+  ])("posts the form token written %s", async (_label, declaration, token) => {
+    const fetchMock = fetchAnswering({ body: formDeclaring(declaration) }, { body: SUCCESS });
+
+    await expect(run(navSwitzerlandWith("US"), request("CH"), fetchMock)).resolves.toEqual({ status: "SET", countryCode: "CH" });
+    expect(headersOf(fetchMock.mock.calls[1][1])["anti-csrftoken-a2z"]).toBe(token);
+  });
+
+  it.each([
+    ["an escape it cannot resolve", String.raw`CSRF_TOKEN : "TEST\nPOST-TOKEN"`],
+    ["a value cut short by an escaped quote", String.raw`CSRF_TOKEN : "TEST-POST-TOKEN\"`]
+  ])("fails without posting a form token with %s", async (_label, declaration) => {
+    const fetchMock = fetchAnswering({ body: formDeclaring(declaration) });
 
     await expect(run(navSwitzerlandWith("US"), request("CH"), fetchMock)).resolves.toEqual({
       status: "FAILED",

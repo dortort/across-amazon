@@ -14,7 +14,8 @@ interface ModalAction {
 }
 
 const ADDRESS_CHANGE_PATH = "/portal-migration/hz/glow/address-change?actionSource=glow";
-const CSRF_TOKEN = /CSRF_TOKEN\s*:\s*"([^"]+)"/;
+const CSRF_TOKEN = /(["']?)CSRF_TOKEN\1\s*:\s*(["'])((?:\\.|(?!\2)[^\\\r\n])*)\2/;
+const TOKEN_ESCAPE = /\\(u[\dA-Fa-f]{4}|x[\dA-Fa-f]{2}|.)/g;
 const XHR_HEADERS = { "X-Requested-With": "XMLHttpRequest", Accept: "text/html,*/*" };
 
 const ISO_CODE = /^[A-Z]{2}$/;
@@ -75,6 +76,22 @@ function readModalAction(documentRef: Document, origin: string): ModalAction | u
   }
 }
 
+function readFormToken(html: string): string | undefined {
+  const raw = CSRF_TOKEN.exec(html)?.[3];
+  let resolved = true;
+  const token = raw?.replace(TOKEN_ESCAPE, (sequence, code: string) => {
+    if (code.length > 1) {
+      return String.fromCharCode(Number.parseInt(code.slice(1), 16));
+    }
+    if (`"'\\/`.includes(code)) {
+      return code;
+    }
+    resolved = false;
+    return sequence;
+  });
+  return resolved && token ? token : undefined;
+}
+
 function homeIso(marketplace: Marketplace): string {
   return marketplace === "UK" ? "GB" : marketplace;
 }
@@ -128,7 +145,7 @@ export async function setDeliveryLocation(
       return failed(`Amazon answered HTTP ${form.status}`);
     }
     const html = await form.text();
-    const csrf = CSRF_TOKEN.exec(html)?.[1];
+    const csrf = readFormToken(html);
     if (!csrf) {
       return failed("Amazon's location form carried no token");
     }
