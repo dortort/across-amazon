@@ -1176,8 +1176,8 @@ describe("product extractor other sellers' offers", () => {
   const OFFERS_FIXTURES = join(process.cwd(), "tests", "fixtures", "offers-live");
   const QUOTED_NOTE = "Quoted another seller's offer";
   const NO_IMPORT_FEES_NOTE = "Import fees not displayed for destination";
-  const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc";
-  const PANEL_QUERY = `?asin=${LEGO_ASIN}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp`;
+  const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
+  const PANEL_QUERY = `?asin=${LEGO_ASIN}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp&pageno=1&filters=%257B%2522all%2522%253Atrue%252C%2522new%2522%253Atrue%257D`;
   const BUYING_OPTIONS =
     '<span id="buybox-see-all-buying-choices"><span class="a-button-inner"><a class="a-button-text">See All Buying Options</a></span></span>';
 

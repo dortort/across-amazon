@@ -68,13 +68,13 @@ describe("buildOtherOffersUrl", () => {
       .document;
   }
 
-  it("builds the panel URL from the page's all-offers parameters on the page's own origin", () => {
+  it("builds the request for the first page of new offers from the page's all-offers parameters on its own origin", () => {
     const page = pageWith(
       '<div id="olpLinkWidget_feature_div"><input type="hidden" id="all-offers-display-params" data-asin="B0CGVJVQV8" data-m="" data-qid="" data-smid="" data-sourcecustomerorglistid="" data-sourcecustomerorglistitemid="" data-sr=""></div>'
     );
 
     expect(buildOtherOffersUrl(page, "https://www.amazon.de")).toBe(
-      "https://www.amazon.de/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc?asin=B0CGVJVQV8&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp"
+      "https://www.amazon.de/gp/product/ajax/aodAjaxMain/ref=aod_f_new?asin=B0CGVJVQV8&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp&pageno=1&filters=%257B%2522all%2522%253Atrue%252C%2522new%2522%253Atrue%257D"
     );
   });
 
@@ -84,7 +84,7 @@ describe("buildOtherOffersUrl", () => {
     );
 
     expect(buildOtherOffersUrl(page, "https://www.amazon.co.uk")).toBe(
-      "https://www.amazon.co.uk/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc?asin=B0CGVJVQV8&m=A0000000000001&qid=1760954400&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=8-1&pc=dp"
+      "https://www.amazon.co.uk/gp/product/ajax/aodAjaxMain/ref=aod_f_new?asin=B0CGVJVQV8&m=A0000000000001&qid=1760954400&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=8-1&pc=dp&pageno=1&filters=%257B%2522all%2522%253Atrue%252C%2522new%2522%253Atrue%257D"
     );
   });
 
@@ -92,9 +92,19 @@ describe("buildOtherOffersUrl", () => {
     const page = pageWith('<input id="all-offers-display-params">');
 
     expect(buildOtherOffersUrl(page, "https://www.amazon.com.mx", "B0CGVJVQV8")).toBe(
-      "https://www.amazon.com.mx/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc?asin=B0CGVJVQV8&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp"
+      "https://www.amazon.com.mx/gp/product/ajax/aodAjaxMain/ref=aod_f_new?asin=B0CGVJVQV8&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp&pageno=1&filters=%257B%2522all%2522%253Atrue%252C%2522new%2522%253Atrue%257D"
     );
     expect(buildOtherOffersUrl(pageWith(""), "https://www.amazon.com.mx", "B0CGVJVQV8")).toContain("?asin=B0CGVJVQV8&m=&");
+  });
+
+  it("asks for a later page of new offers with the same parameters", () => {
+    const page = pageWith('<input type="hidden" id="all-offers-display-params" data-asin="B0CGVJVQV8" data-m="" data-sr="">');
+    const url = new URL(buildOtherOffersUrl(page, "https://www.amazon.de", undefined, 3) ?? "");
+
+    expect(url.pathname).toBe("/gp/product/ajax/aodAjaxMain/ref=aod_f_new");
+    expect(url.searchParams.get("pageno")).toBe("3");
+    expect(JSON.parse(decodeURIComponent(url.searchParams.get("filters") ?? ""))).toEqual({ all: true, new: true });
+    expect(url.search).not.toContain("isonlyrenderofferlist");
   });
 
   it("builds nothing without an ASIN", () => {

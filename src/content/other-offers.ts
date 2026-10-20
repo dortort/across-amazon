@@ -1,8 +1,9 @@
 import { collapseText, hasFreeMarker, normalize, parseCurrencyMarkedMoney, parseMoney, readDeliveryPrice, readPriceText } from "./price-reading";
 import type { ParsedMoney } from "./price-reading";
 
-const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=dp_aod_unknown_mbc";
+const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
 const OFFERS_QUERY = ["asin", "m", "qid", "smid", "sourcecustomerorglistid", "sourcecustomerorglistitemid", "sr"];
+const NEW_OFFERS_FILTER = encodeURIComponent(JSON.stringify({ all: true, new: true }));
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
 const PRICE_TO_PAY = "#aod-offer-price .apex-pricetopay-value";
@@ -38,7 +39,7 @@ export interface OtherOffersPanel {
   offerCount: number;
 }
 
-export function buildOtherOffersUrl(documentRef: Document, origin: string, fallbackAsin?: string): string | undefined {
+export function buildOtherOffersUrl(documentRef: Document, origin: string, fallbackAsin?: string, page = 1): string | undefined {
   const params = documentRef.querySelector("#all-offers-display-params");
   const asin = params?.getAttribute("data-asin")?.trim() || fallbackAsin;
   if (!asin || !ASIN_PATTERN.test(asin)) {
@@ -50,6 +51,8 @@ export function buildOtherOffersUrl(documentRef: Document, origin: string, fallb
     url.searchParams.set(name, name === "asin" ? asin : (params?.getAttribute(`data-${name}`)?.trim() ?? ""));
   }
   url.searchParams.set("pc", "dp");
+  url.searchParams.set("pageno", String(page));
+  url.searchParams.set("filters", NEW_OFFERS_FILTER);
   return url.href;
 }
 
