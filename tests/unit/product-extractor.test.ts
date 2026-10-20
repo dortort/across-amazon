@@ -1405,6 +1405,138 @@ describe("product extractor other sellers' offers", () => {
     expect(result).toEqual({ ...readPageAlone(page, "DE"), notes: [...readPageAlone(page, "DE").notes, `Other offers could not be read: ${reason}`] });
   });
 
+  describe("over several pages of new offers", () => {
+    interface SyntheticOffer {
+      seller: string;
+      item: string;
+      delivery?: string;
+    }
+
+    const UNSHIPPABLE = "This item cannot be shipped for now.";
+
+    function offers(count: number, from = 1, delivery?: string): SyntheticOffer[] {
+      return Array.from({ length: count }, (_, index) => ({ seller: `Seller ${from + index}`, item: `€${700 + from + index}.00`, delivery }));
+    }
+
+    function pagedPanel(total: number, listed: SyntheticOffer[]): string {
+      const document = new JSDOM(readFileSync(join(OFFERS_FIXTURES, "DE-four-new-offers.html"), "utf8")).window.document;
+      const template = document.querySelector("#aod-offer-list #aod-offer");
+      const container = template?.parentElement;
+      if (!template || !container) {
+        throw new Error("No offer to copy in the amazon.de panel");
+      }
+      container.querySelectorAll("#aod-offer").forEach((offer) => offer.remove());
+      for (const { seller, item, delivery } of listed) {
+        const offer = template.cloneNode(true) as Element;
+        const price = offer.querySelector("#aod-offer-price .apex-pricetopay-value .a-offscreen");
+        const sellerName = offer.querySelector("#aod-offer-soldBy .a-col-right > a");
+        const message = offer.querySelector("#mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE");
+        if (!price || !sellerName || !message) {
+          throw new Error("The amazon.de offer lost its price, seller or delivery message");
+        }
+        price.textContent = item;
+        sellerName.textContent = seller;
+        message.textContent = delivery ?? "€55.26 delivery";
+        container.append(offer);
+      }
+      document.querySelector("#aod-total-offer-count")?.setAttribute("value", String(total));
+      return document.body.innerHTML;
+    }
+
+    function fetchPages(pages: Record<number, string>) {
+      return vi.fn(async (url: string, _init?: RequestInit) => {
+        const body = pages[Number(new URL(url).searchParams.get("pageno"))];
+        return body === undefined
+          ? { ok: false, status: 404, text: async () => "" }
+          : { ok: true, status: 200, text: async () => body };
+      });
+    }
+
+    function requestedPages(fetchRef: ReturnType<typeof fetchPages>): number[] {
+      return fetchRef.mock.calls.map(([url]) => Number(new URL(url).searchParams.get("pageno")));
+    }
+
+    it("reads the next page while Amazon lists more new offers than it has read, and lists them all", async () => {
+      const fetchRef = fetchPages({
+        1: pagedPanel(12, offers(10)),
+        2: pagedPanel(12, [
+          { seller: "Seller 11", item: "€640.00" },
+          { seller: "Seller 12", item: "€720.00" }
+        ])
+      });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(requestedPages(fetchRef)).toEqual([1, 2]);
+      expect(result.otherOffers).toHaveLength(12);
+      expect(result.otherOffers?.[10]).toMatchObject({ seller: "Seller 11", item: { amount: 640, currency: "EUR" } });
+      expect(result.otherSeller).toMatchObject({ seller: "Seller 1", offerCount: 12, deliveringNewCount: 12 });
+      expect(result.notes).toEqual([QUOTED_NOTE, NO_IMPORT_FEES_NOTE]);
+    });
+
+    it("stops when a page only repeats the offers already read", async () => {
+      const firstPage = pagedPanel(12, offers(10));
+      const fetchRef = fetchPages({ 1: firstPage, 2: firstPage, 3: pagedPanel(12, offers(2, 11)) });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(requestedPages(fetchRef)).toEqual([1, 2]);
+      expect(result.otherOffers).toHaveLength(10);
+      expect(result.otherSeller).toMatchObject({ offerCount: 12, deliveringNewCount: 10 });
+    });
+
+    it("reads at most three pages", async () => {
+      const fetchRef = fetchPages({
+        1: pagedPanel(40, offers(10, 1)),
+        2: pagedPanel(40, offers(10, 11)),
+        3: pagedPanel(40, offers(10, 21)),
+        4: pagedPanel(40, offers(10, 31))
+      });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(requestedPages(fetchRef)).toEqual([1, 2, 3]);
+      expect(result.otherOffers).toHaveLength(30);
+    });
+
+    it("keeps the offers already read when a later page cannot be read", async () => {
+      const fetchRef = fetchPages({ 1: pagedPanel(12, offers(10)) });
+
+      const result = await read(legoPage("DE"), "DE", fetchRef);
+
+      expect(requestedPages(fetchRef)).toEqual([1, 2]);
+      expect(result.otherOffers).toHaveLength(10);
+      expect(result.notes).toEqual([QUOTED_NOTE, NO_IMPORT_FEES_NOTE]);
+    });
+
+    it("says how many new offers it listed, not that none delivers, when it stops short of the total", async () => {
+      const page = legoPage("DE");
+      const firstPage = pagedPanel(12, offers(10, 1, UNSHIPPABLE));
+      const fetchRef = fetchPages({ 1: firstPage, 2: firstPage });
+
+      const result = await read(page, "DE", fetchRef);
+
+      expect(result).toEqual({
+        ...readPageAlone(page, "DE"),
+        notes: [...readPageAlone(page, "DE").notes, "Other offers could not be read: listed 10 of 12 new offers"]
+      });
+    });
+
+    it("says no other seller delivers the item new only after reading every new offer Amazon lists", async () => {
+      const page = legoPage("DE");
+      const fetchRef = fetchPages({
+        1: pagedPanel(2, offers(1, 1, UNSHIPPABLE)),
+        2: pagedPanel(2, offers(1, 2, UNSHIPPABLE))
+      });
+
+      const result = await read(page, "DE", fetchRef);
+
+      expect(requestedPages(fetchRef)).toEqual([1, 2]);
+      expect(result.notes.at(-1)).toBe("No other seller delivers the item new to the destination");
+      expect(result.breakdown).toBeUndefined();
+    });
+  });
+
   it("gives up on a panel that has not answered after 15 seconds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const fetchRef = vi.fn(

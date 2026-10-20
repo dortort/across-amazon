@@ -127,3 +127,12 @@ function isQuotable(offer: OtherOffer): offer is QuotableOffer {
 export function quotableOffers(offers: OtherOffer[]): QuotableOffer[] {
   return offers.filter(isQuotable);
 }
+
+function offerKey({ seller, item, shipping }: OtherOffer): string {
+  return JSON.stringify([seller, item?.amount, item?.currency, shipping?.amount, shipping?.currency]);
+}
+
+export function unseenOffers(read: OtherOffer[], page: OtherOffer[]): OtherOffer[] {
+  const seen = new Set(read.map(offerKey));
+  return page.filter((offer) => !seen.has(offerKey(offer)));
+}

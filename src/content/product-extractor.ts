@@ -5,8 +5,8 @@ import type {
   ProductExtractionResult,
   VariantOption
 } from "../shared/types";
-import { buildOtherOffersUrl, parseOtherOffers, quotableOffers } from "./other-offers";
-import type { QuotableOffer } from "./other-offers";
+import { buildOtherOffersUrl, parseOtherOffers, quotableOffers, unseenOffers } from "./other-offers";
+import type { OtherOffer, OtherOffersPanel, QuotableOffer } from "./other-offers";
 import {
   collapseText,
   hasFreeMarker,
@@ -581,6 +581,7 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<FetchedText>;
 
 const SEE_ALL_BUYING_OPTIONS = "#buybox-see-all-buying-choices";
 const OTHER_OFFERS_TIMEOUT_MS = 15_000;
+const OTHER_OFFERS_MAX_PAGES = 3;
 const OTHER_OFFERS_HEADERS = { "X-Requested-With": "XMLHttpRequest", Accept: "text/html,*/*" };
 const OTHER_OFFERS_UNREAD = "Other offers could not be read: ";
 const NO_OTHER_SELLER = "No other seller delivers the item new to the destination";
@@ -602,6 +603,40 @@ async function fetchOtherOffers(documentRef: Document, url: string, fetchRef: Fe
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+interface OffersRead {
+  offers: OtherOffer[];
+  total: number;
+}
+
+async function readOtherOffers(
+  documentRef: Document,
+  urlFor: (page: number) => string | undefined,
+  marketCurrency: string,
+  fetchRef: FetchLike
+): Promise<OffersRead> {
+  const load = async (page: number): Promise<OtherOffersPanel | undefined> => {
+    const url = urlFor(page);
+    return url ? parseOtherOffers(await fetchOtherOffers(documentRef, url, fetchRef), marketCurrency) : undefined;
+  };
+
+  const first = await load(1);
+  if (!first) {
+    throw new Error("Amazon's answer held no offer list");
+  }
+
+  let { offers, offerCount: total } = first;
+  for (let page = 2; page <= OTHER_OFFERS_MAX_PAGES && offers.length < total; page += 1) {
+    const next = await load(page).catch(() => undefined);
+    const added = next ? unseenOffers(offers, next.offers) : [];
+    if (!next || added.length === 0) {
+      break;
+    }
+    offers = [...offers, ...added];
+    total = Math.max(total, next.offerCount);
+  }
+  return { offers, total };
 }
 
 function withNote(result: ProductExtractionResult, note: string): ProductExtractionResult {
@@ -663,25 +698,26 @@ export async function extractProductDataWithOffers(
     return result;
   }
 
-  const url = buildOtherOffersUrl(documentRef, new URL(pageUrl).origin, result.asin);
-  if (!url) {
+  const origin = new URL(pageUrl).origin;
+  const urlFor = (page: number): string | undefined => buildOtherOffersUrl(documentRef, origin, result.asin, page);
+  if (!urlFor(1)) {
     return withNote(result, `${OTHER_OFFERS_UNREAD}the page names no ASIN`);
   }
 
-  let panel: Document;
+  let read: OffersRead;
   try {
-    panel = await fetchOtherOffers(documentRef, url, fetchRef);
+    read = await readOtherOffers(documentRef, urlFor, MARKET_DEFAULT_CURRENCY[request.marketplace], fetchRef);
   } catch (error) {
     return withNote(result, `${OTHER_OFFERS_UNREAD}${error instanceof Error ? error.message : "Unknown request error"}`);
   }
 
-  const offers = parseOtherOffers(panel, MARKET_DEFAULT_CURRENCY[request.marketplace]);
-  if (!offers) {
-    return withNote(result, `${OTHER_OFFERS_UNREAD}Amazon's answer held no offer list`);
+  const quotable = quotableOffers(read.offers);
+  if (quotable.length > 0) {
+    return quoteOtherOffers(result, quotable, read.total);
   }
-
-  const quotable = quotableOffers(offers.offers);
-  return quotable.length > 0 ? quoteOtherOffers(result, quotable, offers.offerCount) : withNote(result, NO_OTHER_SELLER);
+  return read.offers.length >= read.total
+    ? withNote(result, NO_OTHER_SELLER)
+    : withNote(result, `${OTHER_OFFERS_UNREAD}listed ${read.offers.length} of ${read.total} new offers`);
 }
 
 declare global {
