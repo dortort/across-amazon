@@ -1769,7 +1769,7 @@ describe("background orchestrator", () => {
             "Price not displayed for destination",
             "Shipping not displayed for destination",
             "Import fees not displayed for destination",
-            "No other seller delivers to the destination"
+            "No other seller delivers the item new to the destination"
           ]
         }
       ]);

@@ -284,6 +284,7 @@ export function statusText(status: ComparisonStatus): string {
 
 const AMAZON_REASON_PREFIX = "Amazon says: ";
 const OTHER_OFFERS_UNREAD_PREFIX = "Other offers could not be read: ";
+const NO_OTHER_SELLER = "No other seller delivers the item new to the destination";
 const LOCATION_NOT_OFFERED_PREFIX = "Delivery location not offered";
 const LOCATION_SET_PREFIX = "Delivery location set to ";
 
@@ -309,6 +310,7 @@ export function issueNote(result: ComparisonResult, destinationCountryCode?: str
       return [
         `Amazon did not show a delivered price to ${destination}.`,
         ...(reason ? [`Amazon says: “${reason}”`] : []),
+        ...(result.notes?.includes(NO_OTHER_SELLER) ? ["No other seller delivers the item new there either."] : []),
         ...(unread ? [asSentence(`${OTHER_OFFERS_UNREAD_PREFIX}${unread}`)] : [])
       ].join(" ");
     }

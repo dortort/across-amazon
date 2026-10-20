@@ -811,10 +811,23 @@ describe("issueNote", () => {
     );
   });
 
-  it("keeps the other sellers' notes out of the sentence when they say nothing went wrong", () => {
-    const noSeller = failedResult("MX", "UNAVAILABLE", 0.82, ["Price not displayed for destination", "No other seller delivers to the destination"]);
+  it("says when no other seller delivers the item new there either", () => {
+    const noSeller = failedResult("MX", "UNAVAILABLE", 0.82, ["Price not displayed for destination", "No other seller delivers the item new to the destination"]);
 
-    expect(issueNote(noSeller, "CH")).toBe("Amazon did not show a delivered price to Switzerland.");
+    expect(issueNote(noSeller, "CH")).toBe(
+      "Amazon did not show a delivered price to Switzerland. No other seller delivers the item new there either."
+    );
+  });
+
+  it("puts Amazon's reason before the sentence about the other sellers", () => {
+    const both = failedResult("MX", "UNAVAILABLE", 0.82, [
+      "Amazon says: Este producto no se puede enviar a la dirección de entrega seleccionada.",
+      "No other seller delivers the item new to the destination"
+    ]);
+
+    expect(issueNote(both, "CH")).toBe(
+      "Amazon did not show a delivered price to Switzerland. Amazon says: “Este producto no se puede enviar a la dirección de entrega seleccionada.” No other seller delivers the item new there either."
+    );
   });
 
   it("keeps Amazon's reason out of the other statuses", () => {
