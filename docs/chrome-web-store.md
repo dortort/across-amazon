@@ -35,7 +35,7 @@ Plain text: the dashboard does not render Markdown.
 ```text
 Across Amazon tells you whether the product you are looking at costs less, delivered to you, from another Amazon store.
 
-Open a product page on a supported store, click the extension's icon and press "Check 9 other Amazons". The extension looks for the same product on the other stores, first by its ASIN (Amazon's product number) and otherwise by searching for its brand, model, title and selected variant. On each store it reads the item price, the shipping and any import fees quoted for your delivery destination, then ranks the stores by delivered total, converted to one currency.
+Open a product page on a supported store, click the extension's icon and press "Check 9 other Amazons". The extension looks for the same product on the other stores, first by its ASIN (Amazon's product number) and otherwise by searching for its brand, model, title and selected variant. On each store it reads the item price, the shipping and any import fees quoted for your delivery destination, then ranks the stores by delivered total, converted to one currency. When a store's own listing shows no price for your destination, it checks the other sellers' offers on that page and quotes the cheapest that delivers new.
 
 Supported stores: United States, Canada, Mexico, United Kingdom, Germany, France, Italy, Spain, Japan and Australia. You can switch any of them off in the settings.
 
@@ -55,7 +55,7 @@ What it does not do
 Not affiliated with or endorsed by Amazon.
 ```
 
-Sources: the button label is `checkLabel` and the 3 seconds per store `SECONDS_PER_MARKET` in `src/popup/view-model.ts`; the ASIN lookup and search fallback are `compareMarket` in `src/background/orchestrator.ts`; the supported stores are `MARKETPLACES` in `src/shared/markets.ts`; the popup reads the page on open in `src/popup/App.tsx` (`requestSource`); the search terms are `buildSearchQueries` in `src/shared/matching.ts`; the location step is `src/content/location-setter.ts`; rates are `src/background/fx-service.ts`; the 30-minute reuse is `COMPARISON_TTL_MS` in `orchestrator.ts`.
+Sources: the button label is `checkLabel` and the 3 seconds per store `SECONDS_PER_MARKET` in `src/popup/view-model.ts`; the ASIN lookup and search fallback are `compareMarket` in `src/background/orchestrator.ts`; the supported stores are `MARKETPLACES` in `src/shared/markets.ts`; the popup reads the page on open in `src/popup/App.tsx` (`requestSource`); the search terms are `buildSearchQueries` in `src/shared/matching.ts`; the location step is `src/content/location-setter.ts`; rates are `src/background/fx-service.ts`; the 30-minute reuse is `COMPARISON_TTL_MS` in `orchestrator.ts`; the other sellers' offers fallback is `src/content/other-offers.ts`, with the quoted offer chosen by `withCheapestOtherOffer` in `src/shared/comparison.ts`.
 
 ### Category and language
 
@@ -85,7 +85,7 @@ Across Amazon compares the delivered price (item, shipping and import fees) of t
 
 | Permission | Justification |
 | --- | --- |
-| `scripting` | The extension declares no content scripts, so nothing runs on a page by itself. When the user opens the popup on an Amazon product page, and when they start a check, the service worker injects the extension's own packaged scripts with `chrome.scripting.executeScript` into the user's Amazon tab and into the temporary background tabs it opens on the other Amazon stores. The scripts read the product, its price, shipping and import fees and the delivery destination, and set a store's delivery country when needed (`runScriptFile`, `readWindowValue` and `writeWindowValue` in `src/background/orchestrator.ts`). |
+| `scripting` | The extension declares no content scripts, so nothing runs on a page by itself. When the user opens the popup on an Amazon product page, and when they start a check, the service worker injects the extension's own packaged scripts with `chrome.scripting.executeScript` into the user's Amazon tab and into the temporary background tabs it opens on the other Amazon stores. The scripts read the product, its price, shipping and import fees and the delivery destination, set a store's delivery country when needed and, when a page shows no price but offers "See All Buying Options", request that page's own All Offers Display and read its offers (`runScriptFile`, `readWindowValue` and `writeWindowValue` in `src/background/orchestrator.ts`). |
 | `storage` | `chrome.storage.local` keeps the user's settings (enabled stores and display currency, key `settings:v1`), the result of a finished check so that checking again within 30 minutes returns it at once (keys `cmp:<hash>`), and the day's exchange rate table so the rates are normally downloaded once per UTC day (keys `fx:YYYY-MM-DD`). See `src/shared/storage.ts` and `src/background/fx-service.ts`. |
 
 | Host permission | Justification |
@@ -100,7 +100,7 @@ Across Amazon compares the delivered price (item, shipping and import fees) of t
 No, I am not using remote code.
 ```
 
-Every script the extension runs is bundled in the package; `chrome.scripting.executeScript` only injects packaged files and functions, and nothing is fetched and evaluated at run time.
+Every script the extension runs is bundled in the package; `chrome.scripting.executeScript` only injects packaged files and functions, and nothing is fetched and evaluated at run time. The All Offers Display that the product extractor fetches when a page shows no price is HTML data, parsed in an inert document and never run.
 
 ### Data usage
 
@@ -150,8 +150,8 @@ No account, sign-in or credentials are needed.
 1. Open a product page for a widely sold electronics item that Amazon itself sells and ships, on www.amazon.com or www.amazon.co.uk. A popular charger, power bank or pair of headphones works well. The page must be a product page (URL containing /dp/), not search results.
 2. Click the Across Amazon icon in the toolbar. The popup shows the product, its price on this store and a "Check 9 other Amazons" button. If the store knows the delivery country, a note says that the other stores' delivery location may be set to it and is left that way.
 3. Press "Check 9 other Amazons". For about 30 seconds a background tab opens briefly on each other store and closes again; tabs never take focus. A dial shows the progress and "Stop checking" cancels the run and closes the tabs.
-4. When it finishes, the card names the store with the cheapest delivered total (item + shipping + import fees, converted at the European Central Bank's daily rate) and the saving against the page you are on. The list ranks every store that quoted a price; click a row for its breakdown, and "Open on ..." opens that listing in a new tab. Nothing is ever added to a cart or bought.
-5. Some stores will not compare, and that is expected. They are listed under "N marketplaces could not be compared" with the reason, most often "Delivered total not quotable" (that store does not ship this item to your delivery country) or "Could not set delivery location" (the store would not switch to, or does not offer, your delivery country). A store that shows a robot check may report "No confident match" or "Could not read the page".
+4. When it finishes, the card names the store with the cheapest delivered total (item + shipping + import fees, converted at the European Central Bank's daily rate) and the saving against the page you are on. The list ranks every store that quoted a price; click a row for its breakdown, and "Open on ..." opens that listing in a new tab. Nothing is ever added to a cart or bought. When a store's page shows no price for your delivery country but offers "See All Buying Options", the check reads that list and quotes its cheapest new offer instead; the row's breakdown names the seller and the dispatcher.
+5. Some stores will not compare, and that is expected. They are listed under "N marketplaces could not be compared" with the reason, most often "Delivered total not quotable" (neither that store nor any seller it lists under "See All Buying Options" delivers this item new to your delivery country) or "Could not set delivery location" (the store would not switch to, or does not offer, your delivery country). A store that shows a robot check may report "No confident match" or "Could not read the page".
 6. Side effect: before reading a store, the extension sets that store's delivery location to the country of the page you started from, using the store's own "Choose your location" request. Only a country is set, never an address, and it is left that way. Open, for example, www.amazon.de afterwards and its "Deliver to" box shows that country. The store you started from is not changed. To undo it, pick another location in that store's "Deliver to" box. The pages the extension opens are ordinary visits, so they appear in Chrome's history and, for a signed-in Amazon user, in Amazon's browsing and search history.
 7. Press "Check again" within 30 minutes and the same result returns at once from the local cache, with no tabs opened.
 8. The gear icon in the popup (or the extension's options page) chooses the display currency and which stores to check.
