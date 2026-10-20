@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import {
   NON_AMAZON_URL,
+  brandMark,
   cheapBaseline,
   completeRun,
   emitProgress,
@@ -209,6 +210,20 @@ test.describe("popup frame", () => {
     await expect(page.locator("body")).toHaveCSS("background-color", WHITE);
     await expect(page.locator(".dB")).toHaveCSS("display", "flex");
     await expect(page.locator(".dB")).toHaveCSS("flex-direction", "column");
+  });
+
+  test("shows the 48 px extension icon as a 22 px header mark", async ({ page }) => {
+    await openPopup(page);
+
+    const mark = brandMark(page);
+    await expect(mark).toHaveAttribute("alt", "");
+    expect(await mark.evaluate((image: HTMLImageElement) => [image.naturalWidth, image.naturalHeight])).toEqual([
+      48, 48
+    ]);
+    const box = await boxOf(mark);
+    expect({ width: box.width, height: box.height }).toEqual({ width: 22, height: 22 });
+    const name = await boxOf(page.locator(".dB-brand"));
+    expect(box.y + box.height / 2).toBeCloseTo(name.y + name.height / 2, 0);
   });
 
   test("never scrolls the page itself in any view", async ({ page }) => {

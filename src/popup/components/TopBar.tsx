@@ -9,7 +9,7 @@ export function TopBar({ inSettings, onToggleSettings }: TopBarProps): ReactElem
   return (
     <div className="dB-top">
       <span className="dB-brand">
-        <span className="dB-mark">A</span>Across Amazon
+        <img className="dB-mark" src="/icons/icon-48.png" alt="" />Across Amazon
       </span>
       <button
         type="button"

@@ -38,6 +38,16 @@ describe("idle view", () => {
     expect(screen.queryByText("Open an Amazon product page")).not.toBeInTheDocument();
   });
 
+  it("shows the extension icon as a decorative mark beside the name", async () => {
+    const { container } = await renderLoaded();
+    const mark = container.querySelector(".dB-brand img");
+
+    expect(mark).toHaveClass("dB-mark");
+    expect(mark).toHaveAttribute("src", "/icons/icon-48.png");
+    expect(mark).toHaveAttribute("alt", "");
+    expect(container.querySelector(".dB-brand")).toHaveTextContent(/^Across Amazon$/);
+  });
+
   it("shows the product image when the page provided one", async () => {
     const { container } = await renderLoaded();
     const thumb = container.querySelector(".dB-thumb");
