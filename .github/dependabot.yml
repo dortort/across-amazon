@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directories: ["/"]
+    directories: ["/", "/docs-site"]
     schedule: { interval: monthly }
     cooldown: { default-days: 7, semver-major-days: 14 }
     commit-message: { prefix: chore, include: scope }
