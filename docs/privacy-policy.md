@@ -81,4 +81,4 @@ If this policy changes, the new version will be published at this address with a
 
 ## Contact
 
-Contact: email the developer at the address listed on the Chrome Web Store page.
+Questions and bug reports go through [the support page](https://across-amazon.dortort.dev/support/), which also explains how to report a security issue privately.
