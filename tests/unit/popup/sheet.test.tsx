@@ -20,8 +20,8 @@ const ukFromAnotherSeller: ComparisonResult = {
   status: "OK",
   confidence: 0.96,
   productUrl: productUrl("UK"),
-  breakdown: { item: money(574.97, "GBP"), shipping: money(252.53, "CHF") },
-  normalizedTotal: money(1018.98, "USD"),
+  breakdown: { item: money(699, "GBP"), shipping: money(40.86, "CHF") },
+  normalizedTotal: money(933.01, "USD"),
   notes: ["Matched by ASIN", "Quoted another seller's offer", "Import fees not displayed for destination"]
 };
 const fxTableWithFrancs = { ...fxTable, rates: { ...fxTable.rates, CHF: 0.94 } };
@@ -187,15 +187,15 @@ describe("detail sheet", () => {
       resultPayload({ source: switzerland, results: [ukFromAnotherSeller], fxTable: fxTableWithFrancs })
     );
 
-    expect(rowSummary(rowFor(app.container, "United Kingdom")).local).toBe("£803.86 incl. shipping, import fees not shown");
+    expect(rowSummary(rowFor(app.container, "United Kingdom")).local).toBe("£736.03 incl. shipping, import fees not shown");
     await app.user.click(rowFor(app.container, "United Kingdom"));
 
     expect(sheetLines(screen.getByRole("dialog", { name: "🇬🇧 United Kingdom" }))).toEqual([
-      ["dB-line", "Item price", "£574.97"],
-      ["dB-line", "Shipping to Switzerland", `CHF${NBSP}252.53`],
+      ["dB-line", "Item price", "£699.00"],
+      ["dB-line", "Shipping to Switzerland", `CHF${NBSP}40.86`],
       ["dB-line", "Import fees deposit", "Not shown"],
-      ["dB-line total", "Delivered total", "£803.86"],
-      ["dB-line conv", "Roughly", "$1,018.98 at today’s rate"]
+      ["dB-line total", "Delivered total", "£736.03"],
+      ["dB-line conv", "Roughly", "$933.01 at today’s rate"]
     ]);
   });
 
@@ -207,7 +207,7 @@ describe("detail sheet", () => {
 
     expect(sheetLines(screen.getByRole("dialog", { name: "🇬🇧 United Kingdom" })).slice(3)).toEqual([
       ["dB-line total", "Delivered total", "—"],
-      ["dB-line conv", "Roughly", "$1,018.98 at today’s rate"]
+      ["dB-line conv", "Roughly", "$933.01 at today’s rate"]
     ]);
   });
 
@@ -216,9 +216,9 @@ describe("detail sheet", () => {
       ...ukFromAnotherSeller,
       notes: [...ukFromAnotherSeller.notes!, "Delivery location set to Switzerland"],
       otherSeller: {
-        seller: "BuyMyBricks",
-        dispatcher: "Amazon",
-        fulfilledByAmazon: true,
+        seller: "RamanDz",
+        dispatcher: "RamanDz",
+        fulfilledByAmazon: false,
         offerCount: 2,
         deliveringNewCount: 2,
         comparedCount: 2
@@ -232,7 +232,7 @@ describe("detail sheet", () => {
     expect(Array.from(dialog.querySelectorAll(".dB-hint"), (hint) => [hint.className, hint.textContent])).toEqual([
       [
         "dB-hint is-left dB-seller",
-        "Sold by BuyMyBricks, dispatched by Amazon. Cheapest of the 2 offers Amazon lists that deliver new."
+        "Sold by RamanDz, dispatched by RamanDz. Cheapest of the 2 offers Amazon lists that deliver new."
       ],
       ["dB-hint is-left dB-location", "Delivery location set to Switzerland"]
     ]);
