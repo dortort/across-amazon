@@ -283,12 +283,17 @@ export function statusText(status: ComparisonStatus): string {
 }
 
 const AMAZON_REASON_PREFIX = "Amazon says: ";
+const OTHER_OFFERS_UNREAD_PREFIX = "Other offers could not be read: ";
 const LOCATION_NOT_OFFERED_PREFIX = "Delivery location not offered";
 const LOCATION_SET_PREFIX = "Delivery location set to ";
 
-function amazonReason(result: ComparisonResult): string | undefined {
-  const note = result.notes?.find((entry) => entry.startsWith(AMAZON_REASON_PREFIX));
-  return note?.slice(AMAZON_REASON_PREFIX.length).trim() || undefined;
+function noteAfter(result: ComparisonResult, prefix: string): string | undefined {
+  const note = result.notes?.find((entry) => entry.startsWith(prefix));
+  return note?.slice(prefix.length).trim() || undefined;
+}
+
+function asSentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 export function issueNote(result: ComparisonResult, destinationCountryCode?: string): string {
@@ -299,9 +304,13 @@ export function issueNote(result: ComparisonResult, destinationCountryCode?: str
         ? `This store does not offer delivery to ${destination}.`
         : `Could not set this store's delivery location to ${destination}, so its price is for another place.`;
     case "UNAVAILABLE": {
-      const reason = amazonReason(result);
-      const sentence = `Amazon did not show a delivered price to ${destination}.`;
-      return reason ? `${sentence} Amazon says: “${reason}”` : sentence;
+      const reason = noteAfter(result, AMAZON_REASON_PREFIX);
+      const unread = noteAfter(result, OTHER_OFFERS_UNREAD_PREFIX);
+      return [
+        `Amazon did not show a delivered price to ${destination}.`,
+        ...(reason ? [`Amazon says: “${reason}”`] : []),
+        ...(unread ? [asSentence(`${OTHER_OFFERS_UNREAD_PREFIX}${unread}`)] : [])
+      ].join(" ");
     }
     case "PARSE_FAILED":
       return "The product page could not be read.";
@@ -314,6 +323,20 @@ export function issueNote(result: ComparisonResult, destinationCountryCode?: str
 
 export function locationNote(result: ComparisonResult): string | undefined {
   return result.notes?.find((note) => note.startsWith(LOCATION_SET_PREFIX));
+}
+
+export function otherSellerNote(result: ComparisonResult): string | undefined {
+  const other = result.otherSeller;
+  if (!other) {
+    return undefined;
+  }
+  const dispatcher = other.fulfilledByAmazon ? "Amazon" : other.dispatcher;
+  const soldBy = `Sold by ${other.seller ?? "another seller"}${dispatcher ? `, dispatched by ${dispatcher}` : ""}.`;
+  const offers =
+    other.deliveringNewCount > 1
+      ? `Cheapest of the ${other.deliveringNewCount} offers Amazon lists that deliver new.`
+      : "The only offer Amazon lists that delivers new.";
+  return `${soldBy} ${offers}`;
 }
 
 export function phaseLabel(phase?: ComparisonPhase): string {
