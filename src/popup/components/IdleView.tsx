@@ -11,6 +11,7 @@ interface IdleViewProps {
   status: SourceStatus;
   targetCount: number;
   destination: string;
+  destinationKnown: boolean;
   onRun: () => void;
 }
 
@@ -47,7 +48,15 @@ function NotOnAmazonNotice(): ReactElement {
   );
 }
 
-export function IdleView({ source, baseline, status, targetCount, destination, onRun }: IdleViewProps): ReactElement {
+export function IdleView({
+  source,
+  baseline,
+  status,
+  targetCount,
+  destination,
+  destinationKnown,
+  onRun
+}: IdleViewProps): ReactElement {
   if (!source && status === "loading") {
     return (
       <div className="dB-scroll" tabIndex={-1}>
@@ -65,8 +74,8 @@ export function IdleView({ source, baseline, status, targetCount, destination, o
       {source ? (
         <p className="dB-hint">
           Takes about {estimatedSeconds(targetCount)} seconds. Each Amazon opens briefly in a background tab so we can
-          read its real delivered price to {destination}. Its delivery location is set to {destination} and stays that
-          way after the check.
+          read its real delivered price to {destination}.
+          {destinationKnown ? ` Its delivery location may be set to ${destination} and is left that way after the check.` : null}
         </p>
       ) : null}
     </div>

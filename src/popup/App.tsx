@@ -432,6 +432,7 @@ export function App(): ReactElement {
           status={state.sourceStatus}
           targetCount={targets.length}
           destination={destination}
+          destinationKnown={Boolean(source?.destinationCountryCode)}
           onRun={run}
         />
       ) : null}
