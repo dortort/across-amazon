@@ -156,7 +156,7 @@ test.describe("a full comparison", () => {
     await expect(runButton(page)).toBeEnabled();
     await expect(
       page.getByText(
-        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to United States."
+        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to United States. Its delivery location is set to United States and stays that way after the check."
       )
     ).toBeVisible();
     await expect(page.getByText("ECB daily rates")).toBeVisible();

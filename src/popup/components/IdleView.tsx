@@ -65,7 +65,8 @@ export function IdleView({ source, baseline, status, targetCount, destination, o
       {source ? (
         <p className="dB-hint">
           Takes about {estimatedSeconds(targetCount)} seconds. Each Amazon opens briefly in a background tab so we can
-          read its real delivered price to {destination}.
+          read its real delivered price to {destination}. Its delivery location is set to {destination} and stays that
+          way after the check.
         </p>
       ) : null}
     </div>
