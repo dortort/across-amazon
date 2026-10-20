@@ -89,6 +89,7 @@ export interface OtherSeller {
   fulfilledByAmazon: boolean;
   offerCount: number;
   deliveringNewCount: number;
+  comparedCount?: number;
 }
 
 export interface ProductExtractionResult {
