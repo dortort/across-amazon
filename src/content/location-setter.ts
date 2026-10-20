@@ -132,6 +132,9 @@ export async function setDeliveryLocation(
   if (!action) {
     return current ? { status: "NO_WIDGET", countryCode: current } : { status: "NO_WIDGET" };
   }
+  if (action.url.origin !== origin) {
+    return failed("Amazon's location form is on another origin");
+  }
   if (target === homeIso(request.marketplace)) {
     return failed("a postcode is needed for an address in the store's own country");
   }

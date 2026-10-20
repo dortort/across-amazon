@@ -32,6 +32,13 @@ function navSwitzerlandWith(countryCode: string, storeContext = "industrial", ur
   return new JSDOM(html, { url: url ?? "https://www.amazon.de/dp/B09LCMVB3F" });
 }
 
+function withFormUrl(dom: JSDOM, url: string): JSDOM {
+  const widget = dom.window.document.querySelector("#nav-global-location-data-modal-action");
+  const config = JSON.parse(widget?.getAttribute("data-a-modal") ?? "{}") as Record<string, unknown>;
+  widget?.setAttribute("data-a-modal", JSON.stringify({ ...config, url }));
+  return dom;
+}
+
 function formDeclaring(token: string): string {
   return fixture("DE-modal.html").replace('CSRF_TOKEN : "TEST-POST-TOKEN"', token);
 }
@@ -155,6 +162,28 @@ describe("setDeliveryLocation", () => {
 
     await expect(run(dom, request("CH"), fetchMock)).resolves.toEqual({ status: "SET", countryCode: "CH" });
     expect(headersOf(fetchMock.mock.calls[0][1])["anti-csrftoken-a2z"]).toBe("TEST-PAGE-TOKEN");
+  });
+
+  it.each([
+    ["on another host", "https://location.example.com/portal-migration/hz/glow/get-rendered-address-selections"],
+    ["on another host through a protocol-relative URL", "//location.example.com/portal-migration/hz/glow/get-rendered-address-selections"],
+    ["on the store's host over another scheme", "http://www.amazon.de/portal-migration/hz/glow/get-rendered-address-selections"]
+  ])("fails without a request when the form URL is %s", async (_label, url) => {
+    const fetchMock = fetchAnswering();
+
+    await expect(run(withFormUrl(navSwitzerlandWith("US"), url), request("CH"), fetchMock)).resolves.toEqual({
+      status: "FAILED",
+      reason: "Amazon's location form is on another origin"
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads a form URL written in full on the store's own origin", async () => {
+    const dom = withFormUrl(navSwitzerlandWith("US"), `https://www.amazon.de${FORM_PATH}?pageType=Detail&storeContext=industrial`);
+    const fetchMock = fetchAnswering({ body: fixture("DE-modal.html") }, { body: SUCCESS });
+
+    await expect(run(dom, request("CH"), fetchMock)).resolves.toEqual({ status: "SET", countryCode: "CH" });
+    expect(new URL(fetchMock.mock.calls[0][0]).origin).toBe("https://www.amazon.de");
   });
 
   it("posts the store context of the form URL, electronics on amazon.co.jp", async () => {
