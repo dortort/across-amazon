@@ -1,0 +1,204 @@
+---
+import Base from "../layouts/Base.astro";
+import PageIntro from "../components/PageIntro.astro";
+import StoreButton from "../components/StoreButton.astro";
+import Toc from "../components/Toc.astro";
+import { stores } from "../data/stores";
+import { isStoreLive, repositoryUrl, securityReportUrl, supportIssuesUrl } from "../site.config";
+
+const storeDomains = stores.map((store) => store.domain);
+const supportedStoreList = `${storeDomains.slice(0, -1).join(", ")} and ${storeDomains.at(-1)}`;
+const securityPolicyUrl = `${repositoryUrl}/security/policy`;
+
+const sections = {
+  "before-you-ask": "Check these first",
+  report: "Report a problem",
+  "feature-requests": "Suggest an improvement",
+  security: "Report a security problem",
+  "store-listing": "Chrome Web Store",
+} as const;
+
+const tocItems = Object.entries(sections).map(([id, heading]) => ({ href: `#${id}`, label: heading }));
+---
+
+<Base
+  title="Support"
+  description="How to get help with Across Amazon, report a problem on GitHub or report a security issue privately."
+>
+  <PageIntro
+    title="Support"
+    lede="Most questions have a short answer in the FAQ. For anything else, ask the developer on GitHub."
+  />
+  <div class="container page-body">
+    <Toc items={tocItems} />
+
+    <article class="prose">
+      <p>
+        Your settings and past results stay in your browser. The developer runs no server and receives nothing from the
+        extension, so a report has to say what the popup showed.
+      </p>
+      <p>The source code is <a href={repositoryUrl}>public on GitHub</a> under the MIT licence.</p>
+
+      <h2 id="before-you-ask">{sections["before-you-ask"]}</h2>
+      <p>
+        These are expected. If one keeps happening on a store where it did not before, <a href="#report">report it</a>.
+        The <a href="/faq/">FAQ</a> has more on each of them.
+      </p>
+      <ul class="checks" role="list">
+        <li>
+          <h3 id="stores-not-compared">Some stores could not be compared</h3>
+          <p>
+            They are listed at the bottom of the results, under a line
+            such as <span class="nowrap">“4 marketplaces could not be compared”</span>, each with a reason.
+            The status <span class="nowrap">“Delivered total not quotable”</span> most often means the store does
+            not ship the item to your country. <span class="nowrap">“Could not set delivery location”</span> means
+            the store would not switch to your country, or does not offer it. A store that shows a robot check may
+            report <span class="nowrap">“No confident match”</span> or <span class="nowrap">“Could not read the page”</span>.
+          </p>
+          <p><a href="/faq/#stores-that-dont-ship">Why some stores can’t be compared</a></p>
+        </li>
+        <li>
+          <h3 id="deliver-to-changed">Another store’s <span class="nowrap">“Deliver to”</span> box now shows your country</h3>
+          <p>
+            So that every store quotes delivery to the same place, the extension may set each other store’s delivery
+            location to the country in the <span class="nowrap">“Deliver to”</span> box of the page you started from,
+            and leave it that way. Only a country is set, never an address, and the store you started from is not
+            changed. To undo it, pick another location in that store’s <span class="nowrap">“Deliver to”</span> box.
+          </p>
+          <p>
+            <a href="/faq/#delivery-location">Why another store’s <span class="nowrap">“Deliver to”</span> box shows your country</a>
+          </p>
+        </li>
+        <li>
+          <h3 id="check-match">A result is marked <span class="nowrap">“Check match”</span></h3>
+          <p>
+            The listing was found by searching, not by its ASIN, and its match confidence is below 90%. Open the
+            listing and confirm it is the same product, variant and condition before you buy.
+          </p>
+          <p><a href="/faq/#check-match">What <span class="nowrap">“Check match”</span> means</a></p>
+        </li>
+        <li>
+          <h3 id="check-again-instant"><span class="nowrap">“Check again”</span> came back at once</h3>
+          <p>
+            A finished check is reused for 30 minutes. An older result is deleted only when exactly the same check
+            runs again; otherwise it stays until you remove the extension or clear its storage.
+          </p>
+          <p>
+            Within 30 minutes of a check, <span class="nowrap">“Check again”</span> returns the same result from
+            the local cache and opens no tabs. After that, a fresh check runs.
+          </p>
+          <p><a href="/faq/#cache">Why <span class="nowrap">“Check again”</span> can be instant</a></p>
+        </li>
+        <li>
+          <h3 id="stay-here">The card reads <span class="nowrap">“Stay here”</span></h3>
+          <p>
+            No other store beat the delivered total on the page you are on. That page is the highlighted top row, and
+            every other row shows how much more it would cost.
+          </p>
+          <p><a href="/faq/#stay-here">What <span class="nowrap">“Stay here”</span> means</a></p>
+        </li>
+        <li>
+          <h3 id="open-a-product-page">The popup asks you to open an Amazon product page</h3>
+          <p>
+            It shows this, with the check button disabled, on any site other than a supported Amazon store, and on an
+            Amazon page that is not a product page, such as search results or the cart.
+            It works on product pages on {supportedStoreList}.
+          </p>
+          <p><a href="/faq/#stores">Which stores it works on</a></p>
+        </li>
+      </ul>
+
+      <h2 id="report">{sections.report}</h2>
+      <p>If the FAQ does not cover it, open an issue on GitHub. Say what you expected and what happened instead.</p>
+      <p><a class="button button-primary" href={supportIssuesUrl}>Open an issue on GitHub</a></p>
+
+      <h3 id="what-to-include">What to include</h3>
+      <ul>
+        <li>
+          The store, and the product’s ASIN or the product page address. An address you reached from an Amazon search
+          can include your search terms, so you may prefer to give the ASIN.
+        </li>
+        <li>
+          Your destination country as Amazon’s <span class="nowrap">“Deliver to”</span> box shows it, for example
+          Switzerland. The country is enough: when you are signed in, that box can also show your first name, town
+          and postcode.
+        </li>
+        <li>
+          The exact text the popup showed, such as a store’s status and note
+          under <span class="nowrap">“could not be compared”</span>, or the reason on
+          a <span class="nowrap">“Couldn’t compare”</span> card. For example, the
+          status <span class="nowrap">“Could not set delivery location”</span> with the note “This store does not
+          offer delivery to Switzerland.”
+        </li>
+        <li>Your Chrome version.</li>
+        <li>Whether Amazon shows a robot check when you open that store yourself.</li>
+      </ul>
+
+      <h3 id="what-never-to-include">What never to include</h3>
+      <p>
+        Never include passwords, your address, order numbers or screenshots of your account pages. The extension never
+        reads your passwords, your orders or your cookies, so a report never needs them.
+      </p>
+
+      <h2 id="feature-requests">{sections["feature-requests"]}</h2>
+      <p>
+        Ideas go to the same place. <a href={supportIssuesUrl}>Open an issue on GitHub</a>, and say what you wanted to
+        do and where the extension fell short.
+      </p>
+
+      <h2 id="security">{sections.security}</h2>
+      <p>
+        If you find a security problem in the extension or this website, report it privately through GitHub, from the
+        repository’s Security tab. Please do not post it as a public issue.
+      </p>
+      <p>The repository’s <a href={securityPolicyUrl}>security policy</a> explains what to include.</p>
+      <p><a class="button button-secondary" href={securityReportUrl}>Report a vulnerability privately</a></p>
+
+      <h2 id="store-listing">{sections["store-listing"]}</h2>
+      {
+        isStoreLive ? (
+          <>
+            <p>Install Across Amazon, or read its listing, on the Chrome Web Store.</p>
+            <p>
+              <StoreButton />
+            </p>
+          </>
+        ) : (
+          <p>The Chrome Web Store listing is not published yet.</p>
+        )
+      }
+      <p>
+        The <a href="/privacy/">privacy policy</a> explains what the extension reads, what it keeps, where it connects
+        and who receives what.
+      </p>
+    </article>
+  </div>
+</Base>
+
+<style>
+  .checks {
+    padding: 0;
+    list-style: none;
+  }
+
+  .checks > li {
+    padding-block: 20px;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .checks > li + li {
+    margin-top: 0;
+  }
+
+  .checks > li:last-child {
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .checks h3 {
+    margin-top: 0;
+  }
+
+  .checks p + p {
+    margin-top: 0.5em;
+  }
+</style>
