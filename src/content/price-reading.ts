@@ -96,7 +96,9 @@ export function parseMoney(text: string, marketCurrency: string): ParsedMoney | 
 }
 
 function findCurrencyMarkedToken(text: string): RegExpExecArray | undefined {
-  return PREFIXED_MONEY.exec(text) ?? SUFFIXED_MONEY.exec(text) ?? undefined;
+  return [PREFIXED_MONEY.exec(text), SUFFIXED_MONEY.exec(text)]
+    .filter((match): match is RegExpExecArray => match !== null)
+    .sort((left, right) => left.index - right.index)[0];
 }
 
 export function parseCurrencyMarkedMoney(text: string, marketCurrency: string): ParsedMoney | undefined {

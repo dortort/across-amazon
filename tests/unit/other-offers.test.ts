@@ -225,7 +225,8 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
     ["€3.99 delivery · FREE delivery on orders over €29", { amount: 3.99, currency: "EUR" }],
     ["FREE delivery on orders over €29", { amount: 0, currency: "EUR" }],
     ["FREE delivery Monday", { amount: 0, currency: "EUR" }],
-    ["€55.26 delivery", { amount: 55.26, currency: "EUR" }]
+    ["€55.26 delivery", { amount: 55.26, currency: "EUR" }],
+    ["3,99 € Lieferung · KOSTENLOSE Lieferung ab €29", { amount: 3.99, currency: "EUR" }]
   ])("reads the delivery message %s by whichever comes first, an amount or the free marker", (text, shipping) => {
     const panel = parsePanel(DE_PANEL, "EUR", (document) => {
       const upsell = firstOffer(document).querySelector("#mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE");
