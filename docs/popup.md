@@ -93,13 +93,13 @@ Clicking a row slides up its breakdown, in the marketplace's own currency:
 
 | Line | Meaning |
 | --- | --- |
-| Item price | The price on the product page. |
+| Item price | The price on the product page, or the price of the other seller's offer the check quoted when the page showed none. |
 | Shipping to United States | Shipping to your destination, or "Free". |
 | Import fees deposit | The import fees Amazon quotes for your destination, "—" when there are none, or "Not shown" when the page showed no import fees for your destination. |
-| Delivered total | Item + shipping + import fees. |
+| Delivered total | Item + shipping + import fees, in the marketplace's currency. When Amazon quotes the shipping in another currency than the item, as amazon.co.uk can for a seller's offer to Switzerland, the shipping is converted into the item's currency at the day's rate first, and the line shows "—" when the day's rates are not available. |
 | Roughly | The delivered total converted to your display currency at the day's rate. |
 
-The note under the lines says how sure the match is, for example "We are 91% sure this is the same product — title, brand and variant all line up." A low-confidence match gets an amber note instead. When the check switched that marketplace's delivery location to your destination, a line below it says so, for example "Delivery location set to Switzerland". **Open on amazon.de** opens the listing. The sheet for the page you are on shows the product and variant and a **Close** button. Press Escape or click outside the sheet to close it.
+The note under the lines says how sure the match is, for example "We are 91% sure this is the same product — title, brand and variant all line up." A low-confidence match gets an amber note instead. When the marketplace's page showed no price for your destination and the check quoted the first new offer from its "See All Buying Options" list instead, a line below it says who sells and dispatches that offer and how many offers Amazon lists, for example "Sold by Star Brick City, dispatched by Amazon. Amazon lists 4 offers; this is the first new one that delivers." When the check switched that marketplace's delivery location to your destination, a line below says so, for example "Delivery location set to Switzerland". **Open on amazon.de** opens the listing. The sheet for the page you are on shows the product and variant and a **Close** button. Press Escape or click outside the sheet to close it.
 
 ## 5. Issues
 
@@ -110,7 +110,7 @@ Marketplaces that could not be compared are folded under **N marketplaces could 
 | Status | What happened |
 | --- | --- |
 | No confident match | The marketplace does not list your product's ASIN and no search result scored above the matching threshold, or the closest listing is another variant that its page does not offer in yours, so nothing is compared rather than risking the wrong product. |
-| Delivered total not quotable | Amazon did not show the item price or the shipping for your destination, for example because the item cannot be shipped there. The note names the destination ("Amazon did not show a delivered price to Switzerland."), and when Amazon gives a reason it repeats it, for example: Amazon says: “This item cannot be shipped to your selected delivery location.” |
+| Delivered total not quotable | Amazon did not show the item price or the shipping for your destination, for example because the item cannot be shipped there. The note names the destination ("Amazon did not show a delivered price to Switzerland."), and when Amazon gives a reason it repeats it, for example: Amazon says: “This item cannot be shipped to your selected delivery location.” When the page offered "See All Buying Options" but that list could not be read, the note ends with the reason, for example "Other offers could not be read: Amazon answered HTTP 503." |
 | Could not read the page | The product page could not be read, or the tab failed to load in time. |
 | Could not set delivery location | The marketplace kept quoting delivery to another place because its delivery location could not be switched to your destination, for example because it does not offer that country. The note says which: "This store does not offer delivery to Switzerland." or "Could not set this store's delivery location to Switzerland, so its price is for another place." |
 
@@ -156,7 +156,7 @@ A delivered price only compares with yours when every marketplace quotes the sam
 
 ## What the numbers mean
 
-- **Delivered total** = item price + shipping to your destination + import fees deposit, as quoted on the Amazon product page, in the currency the page shows. If Amazon displays a total that is higher than that sum, the displayed total is used. Amazon quotes import fees for an address abroad only on some pages (amazon.com shows them in its AmazonGlobal details). When a page prices the item and the delivery but shows no import fees, the delivered total is the item price plus shipping, any import charges collected on delivery are not included, and the verdict card, the row and the breakdown sheet say so.
+- **Delivered total** = item price + shipping to your destination + import fees deposit, as quoted on the Amazon product page, in the currency the page shows. If Amazon displays a total that is higher than that sum, the displayed total is used. When a page shows no price for your destination but offers "See All Buying Options", the check reads that list and quotes its first new offer with a price and a delivery price, in the order Amazon sorts it (by price and delivery, which is not always the cheapest delivered); its import fees are not shown. When no offer in the list delivers to you, the marketplace is not quotable. When Amazon quotes the offer's delivery in another currency than its item, each is converted on its own. Amazon quotes import fees for an address abroad only on some pages (amazon.com shows them in its AmazonGlobal details). When a page prices the item and the delivery but shows no import fees, the delivered total is the item price plus shipping, any import charges collected on delivery are not included, and the verdict card, the row and the breakdown sheet say so.
 - **Conversion**: totals are converted to your display currency with the European Central Bank daily reference rates (with [Frankfurter](https://frankfurter.dev/) as a fallback when the ECB feed is unavailable). Rates are fetched at most once a day, and the footer shows their date. Amazon charges you in the marketplace's own currency, so your card or bank's rate decides what you actually pay.
 - **Delta**: the converted delivered total minus the converted delivered total of the page you are on. The page you are on is always the reference.
 - **Saving percentage**: the saving divided by the delivered total on the page you are on.
