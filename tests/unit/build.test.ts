@@ -10,6 +10,23 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const REPO_ROOT = process.cwd();
 const FIXTURE_ROOT = join(REPO_ROOT, "tests", "fixtures");
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+interface Manifest {
+  icons: Record<string, string>;
+  action: { default_icon: Record<string, string> };
+}
+
+const MANIFEST = JSON.parse(readFileSync(join(REPO_ROOT, "manifest.json"), "utf8")) as Manifest;
+
+const MANIFEST_ICONS = [
+  ...Object.entries(MANIFEST.icons).map(([size, file]) => ({ key: "icons", size: Number(size), file })),
+  ...Object.entries(MANIFEST.action.default_icon).map(([size, file]) => ({
+    key: "action.default_icon",
+    size: Number(size),
+    file
+  }))
+];
 
 interface ContentScriptCase {
   file: string;
@@ -82,11 +99,15 @@ afterAll(async () => {
   }
 });
 
-async function readBuiltFile(file: string): Promise<string> {
+function builtPath(file: string): string {
   if (!outDir) {
     throw new Error("The build did not produce an output directory");
   }
-  return readFile(join(outDir, file), "utf8");
+  return join(outDir, file);
+}
+
+async function readBuiltFile(file: string): Promise<string> {
+  return readFile(builtPath(file), "utf8");
 }
 
 describe("production build of the content scripts", () => {
@@ -128,4 +149,19 @@ describe("production build of the content scripts", () => {
       }
     }
   );
+});
+
+describe("production build of the manifest icons", () => {
+  it("declares the toolbar and store icon sizes", () => {
+    expect(Object.keys(MANIFEST.icons)).toEqual(["16", "32", "48", "128"]);
+    expect(Object.keys(MANIFEST.action.default_icon)).toEqual(["16", "32", "48"]);
+  });
+
+  it.each(MANIFEST_ICONS)("$key $size is a $size x $size PNG at $file", async ({ size, file }) => {
+    const png = await readFile(builtPath(file));
+
+    expect(png.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true);
+    expect(png.toString("latin1", 12, 16)).toBe("IHDR");
+    expect({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }).toEqual({ width: size, height: size });
+  });
 });
