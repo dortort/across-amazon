@@ -73,10 +73,10 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
           the popup <a href="/faq/#import-fees">says so</a>, because duties may still be due on delivery. If Amazon
           shows a higher total than the sum, that total is used. When the page shows no price for your destination but
           offers <span class="nowrap">“See All Buying Options”</span>, and does not say the item is currently
-          unavailable, it loads that list of other sellers’ new offers,
-          up to three pages of it, as the button would, and quotes the offer with both an item and a delivery price (or
-          free delivery) that is cheapest delivered at the day’s rate. The result names the seller and the dispatcher
-          and shows no import fees.
+          unavailable, it loads that list of other sellers’ new offers, up to three pages of it, as the button would,
+          and quotes the offer that is cheapest delivered at the day’s rate among the new offers whose item and
+          delivery prices (or free delivery) it could read and convert. The result names the seller and the dispatcher,
+          says how many offers the quote was chosen from, and shows no import fees.
         </li>
         <li>
           <strong>Closes the tab.</strong> Each tab closes as soon as it has been read, and the next store starts.
