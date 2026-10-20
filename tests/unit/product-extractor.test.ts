@@ -174,6 +174,30 @@ describe("product extractor item price", () => {
     expect(breakdown?.item).toEqual({ amount: 18.99, currency: "USD" });
   });
 
+  it("reads a price to pay inside the product block", () => {
+    const breakdown = itemPrice(`<div id="ppd"><div id="centerCol"><div id="newer_price_feature_div">${priceToPay("$", "18", "99")}</div></div></div>`);
+
+    expect(breakdown?.item).toEqual({ amount: 18.99, currency: "USD" });
+  });
+
+  it("reads no price to pay or centred price outside the product block", () => {
+    const breakdown = itemPrice(
+      `<div id="dp-container"><div id="ppd"><div id="centerCol"></div><div id="rightCol"></div></div><div id="Desktop-Detailed-Evaluation-Zone">${priceToPay("$", "18", "99")}<span class="a-price aok-align-center"><span class="a-offscreen">$15.99</span></span></div></div>`
+    );
+
+    expect(breakdown).toBeUndefined();
+  });
+
+  it.each([
+    ["a sponsored card above the product block", '<div id="above-dp-container"><div id="desktop-dp-lpo_feature_div_0">PRICE</div></div>'],
+    ["a recommendation carousel", '<div id="sims-simsContainer_feature_div_0"><div id="sp_detail_thematic">PRICE</div></div>'],
+    ["the similar items of an out-of-stock box", '<div id="outOfStock" class="a-box">Currently unavailable. PRICE</div>']
+  ])("reads no item price from %s on a page without a product block", (_widget, body) => {
+    const price = '<span class="a-price aok-align-center"><span class="a-offscreen">$15.99</span></span>';
+
+    expect(itemPrice(body.replace("PRICE", price + priceToPay("$", "24", "99")))).toBeUndefined();
+  });
+
   it("prefers the buy box price to the centre column price", () => {
     const breakdown = itemPrice(
       '<div id="centerCol"><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">$19.49</span></span></div></div>' +
@@ -860,6 +884,23 @@ describe("product extractor listing availability", () => {
       asin: "B09XS7JWHH",
       title: "Sony WH-1000XM5 Wireless Industry Leading",
       availability: "unavailable",
+      breakdown: undefined
+    });
+    expect(result.notes).toEqual([
+      "Price not displayed for destination",
+      "Amazon says: Currently unavailable.",
+      "Shipping not displayed for destination",
+      "Import fees not displayed for destination"
+    ]);
+  });
+
+  it("reports the live amazon.com page of a dead listing as unavailable, not at the price of the sponsored items above it", () => {
+    const result = extractLive("US-currently-unavailable-sponsored.html", "US");
+
+    expect(result).toMatchObject({
+      asin: "B09HM94VDS",
+      availability: "unavailable",
+      isDeliverable: false,
       breakdown: undefined
     });
     expect(result.notes).toEqual([

@@ -196,17 +196,24 @@ function resolveDestinationCountryCode(documentRef: Document, request: ProductEx
   return postcode && !shownOnSource ? request.marketplace : undefined;
 }
 
-const ITEM_PRICE_SOURCES = [
-  "#corePrice_feature_div .a-price",
-  "#price_inside_buybox",
-  "#corePriceDisplay_desktop_feature_div .a-price",
-  "#apex_desktop .a-price",
-  ".a-price.priceToPay, .a-price.apexPriceToPay, .a-price.apex-pricetopay-value",
-  "#priceblock_ourprice",
-  "#priceblock_dealprice",
-  "#tp_price_block_total_price_ww .a-price",
-  ".a-price.aok-align-center"
+interface PriceSource {
+  selector: string;
+  unanchored?: boolean;
+}
+
+const ITEM_PRICE_SOURCES: PriceSource[] = [
+  { selector: "#corePrice_feature_div .a-price" },
+  { selector: "#price_inside_buybox" },
+  { selector: "#corePriceDisplay_desktop_feature_div .a-price" },
+  { selector: "#apex_desktop .a-price" },
+  { selector: ".a-price.priceToPay, .a-price.apexPriceToPay, .a-price.apex-pricetopay-value", unanchored: true },
+  { selector: "#priceblock_ourprice" },
+  { selector: "#priceblock_dealprice" },
+  { selector: "#tp_price_block_total_price_ww .a-price" },
+  { selector: ".a-price.aok-align-center", unanchored: true }
 ];
+
+const PRODUCT_BLOCK = "#ppd";
 
 const PRICE_TO_PAY = ".priceToPay, .apexPriceToPay, .apex-pricetopay-value";
 const OTHER_PRICE = [
@@ -216,7 +223,10 @@ const OTHER_PRICE = [
   ".basisPrice",
   "[data-a-strike='true']",
   "#twister_feature_div",
-  "[id^='inline-twister-row-']"
+  "[id^='inline-twister-row-']",
+  "#above-dp-container",
+  "[id^='sims-']",
+  "#outOfStock"
 ].join(", ");
 
 function isOtherPrice(price: Element): boolean {
@@ -242,8 +252,10 @@ function readPriceText(price: Element): string | undefined {
 }
 
 function findItemPrice(documentRef: Document, marketCurrency: string): ParsedMoney | undefined {
-  for (const selector of ITEM_PRICE_SOURCES) {
-    for (const price of Array.from(documentRef.querySelectorAll(selector))) {
+  const productBlock = documentRef.querySelector(PRODUCT_BLOCK) ?? documentRef;
+  for (const { selector, unanchored } of ITEM_PRICE_SOURCES) {
+    const scope = unanchored ? productBlock : documentRef;
+    for (const price of Array.from(scope.querySelectorAll(selector))) {
       const text = isOtherPrice(price) ? undefined : readPriceText(price);
       const amount = text ? parseMoney(text, marketCurrency) : undefined;
       if (amount) {

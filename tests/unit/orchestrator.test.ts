@@ -1013,6 +1013,19 @@ describe("background orchestrator", () => {
         expect(harness.openTempTabs()).toEqual([]);
       });
 
+      it("searches a marketplace whose dead listing shows priced sponsored items, instead of quoting their price", async () => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          sourceAsinOn: ["DE"],
+          prepare: onSourceAsinPage("US-currently-unavailable-sponsored.html", ["sponsored", "availability", "buybox"])
+        });
+
+        const payload = await runViaWorker(harness);
+
+        expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+        expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "SEARCH", "MATCH", "READ", undefined]);
+      });
+
       it("skips the dead listing's own card in the search results", async () => {
         const deadListingPage = onSourceAsinPage("DE-currently-unavailable.html", ["availability", "buybox"]);
         const harness = await bootServiceWorker({
