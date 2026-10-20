@@ -31,7 +31,7 @@ describe("idle view", () => {
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeEnabled();
     expect(
       screen.getByText(
-        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to United States. Its delivery location is set to United States and stays that way after the check."
+        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
       )
     ).toHaveClass("dB-hint");
     expect(screen.getByRole("button", { name: "Settings" })).toHaveTextContent("⚙");
@@ -72,8 +72,21 @@ describe("idle view", () => {
       `Sony · 279,00${NBSP}€ on amazon.de`
     );
     expect(
-      screen.getByText(/price to Germany\. Its delivery location is set to Germany and stays that way after the check\.$/)
+      screen.getByText(/price to Germany\. Its delivery location may be set to Germany and is left that way after the check\.$/)
     ).toBeInTheDocument();
+  });
+
+  it("leaves out the delivery location sentence when the page's destination is unknown", async () => {
+    await renderLoaded({
+      loadSource: { source: { ...source, destinationCountryCode: undefined }, baseline }
+    });
+
+    expect(
+      screen.getByText(
+        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to your address."
+      )
+    ).toHaveClass("dB-hint");
+    expect(screen.queryByText(/delivery location/)).not.toBeInTheDocument();
   });
 
   it("joins several variant tokens and omits the price when no baseline was read", async () => {
