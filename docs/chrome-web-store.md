@@ -64,6 +64,15 @@ Sources: the button label is `checkLabel` and the 3 seconds per store `SECONDS_P
 | Category | Shopping (under Lifestyle) |
 | Language | English. Every string in the popup and the options page is English. |
 
+### Website
+
+```text
+Homepage URL: https://across-amazon.dortort.dev/
+Support URL: https://across-amazon.dortort.dev/support/
+```
+
+Both pages are part of the website in `docs-site/`. The support page routes bug reports to GitHub Issues and security reports to private vulnerability reporting, so no email address is published.
+
 ## Privacy practices tab
 
 ### Single purpose
@@ -117,7 +126,7 @@ Retention in `chrome.storage.local`, for the privacy policy and any reviewer que
 | `cmp:<hash>` | Source product (including the "Deliver to" text and the full page URL), baseline, ranked results, exchange rates of a finished check | Reused for 30 minutes. A stale record is deleted only when the same key is looked up again (`readComparisonCache` in `src/shared/storage.ts`), and the key changes with the settings and the "Deliver to" text, so most records stay until the extension is removed or its storage cleared |
 | `fx:YYYY-MM-DD` | One day's exchange rate table | Reused for that UTC day; older tables are not deleted until the extension is removed or its storage cleared |
 
-Nothing is sent to a server of the developer. The extension's own requests go to the Amazon stores, `www.ecb.europa.eu` and `api.frankfurter.dev` (the `fetch` calls in `src/background/fx-service.ts` and `src/content/location-setter.ts`, and the tabs the service worker opens), and the popup loads the product image from the address on the source page, which is Amazon's image server (`extractImageUrl` in `src/content/source-extractor.ts`). The pages in the background tabs load whatever Amazon's own pages load. The only recipients of user data are the Amazon stores: the destination country in their location request, the ASIN in product page URLs, and the title, brand, model number and selected variant in search URLs.
+Nothing is sent to a server of the developer. The extension's own requests go to the Amazon stores, `www.ecb.europa.eu` and `api.frankfurter.dev` (the `fetch` calls in `src/background/fx-service.ts` and `src/content/location-setter.ts`, and the tabs the service worker opens), and the popup loads the product image from the address on the source page, which is Amazon's image server (`extractImageUrl` in `src/content/source-extractor.ts`). The pages in the background tabs load whatever Amazon's own pages load. The only services that receive user data are the Amazon stores: the destination country in their location request, the ASIN in product page URLs, and the title, brand, model number and selected variant in search URLs. The exchange rate and image requests carry nothing about the user beyond the IP address any request reveals, and the privacy policy says so.
 
 Certify all three Limited Use statements:
 
@@ -129,7 +138,7 @@ Sending the destination country, ASIN and search terms to the Amazon stores is t
 
 ### Privacy policy URL
 
-Host [privacy-policy.md](privacy-policy.md) at a public URL and paste that URL in the privacy policy field. The repository is private, so a link to the file on GitHub will not work for the public: publish it on a separate public host, such as a public GitHub Pages repository, a public gist or the developer's own site.
+The policy is published at https://across-amazon.dortort.dev/privacy/, which the website in `docs-site/` renders from [privacy-policy.md](privacy-policy.md) on every deploy, so the two cannot drift. Paste that URL in the privacy policy field.
 
 ## Test instructions for reviewers
 
@@ -168,7 +177,7 @@ From `.omc/artifacts/store-assets/final/`:
 - [ ] Turn on 2-Step Verification for the Google account that owns the developer account; the dashboard will not publish without it.
 - [ ] Make the Trader or Non-Trader declaration in the account settings, as required for the EU Digital Services Act.
 - [ ] Set and verify the contact email in the account settings.
-- [ ] Publish [privacy-policy.md](privacy-policy.md) on a public host (the repository is private) and paste its URL in the privacy practices tab.
+- [ ] Paste https://across-amazon.dortort.dev/privacy/ in the privacy policy field of the privacy practices tab, and the website and support URLs in the store listing.
 - [ ] Run `pnpm package` and upload `release/across-amazon-<version>.zip` (the script refuses to package when `manifest.json` and `package.json` disagree on the version).
 - [ ] Fill in the store listing, privacy practices and test instructions from this page, and upload the store graphics.
 - [ ] Decide on the summary: keep the current `description` or adopt the proposed one before packaging.
