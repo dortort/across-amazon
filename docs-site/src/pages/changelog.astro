@@ -1,0 +1,144 @@
+---
+import Base from "../layouts/Base.astro";
+import PageIntro from "../components/PageIntro.astro";
+import { stores } from "../data/stores";
+
+const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).format(
+  stores.map((store) => store.country),
+);
+---
+
+<Base title="Changelog" description="What each version of the Across Amazon extension does.">
+  <PageIntro title="Changelog" lede="One entry per version. Version numbers follow the extension’s manifest." />
+  <div class="container page-body">
+    <article class="prose">
+      <section class="release" aria-labelledby="v0-1-0">
+        <header class="release-head">
+          <div class="release-title">
+            <h2 id="v0-1-0">0.1.0</h2>
+            <p class="release-label">First release</p>
+          </div>
+          <p class="release-status">
+            Prepared for the Chrome Web Store. The listing appears on the <a href="/">homepage</a> once it is published.
+          </p>
+        </header>
+
+        <h3 id="v0-1-0-what-it-does">What it does</h3>
+        <ul>
+          <li>
+            <strong>Only when you ask.</strong> Opening the popup only reads the product page you are on. A check starts
+            when you press <span class="nowrap">“Check 9 other Amazons”</span>.
+          </li>
+          <li><strong>Ten stores.</strong> {storeCountries}.</li>
+          <li>
+            <strong>The same product.</strong> Each store is looked up by the product’s ASIN, Amazon’s product number.
+            When a store does not list it, the extension searches for the brand and model number when the title has
+            one, then for the title, brand and selected variant.
+          </li>
+          <li>
+            <strong>Careful matching.</strong> A listing found by searching carries a confidence score and, where the
+            listings name them, is checked against your colour, pack and size. Weak matches are left out. Open the
+            listing and <a href="/faq/#check-match">check it is the same product</a> before you buy.
+          </li>
+          <li>
+            <strong>Background tabs.</strong> Stores are read one at a time, in background tabs that never take focus.
+            Each tab closes as soon as it has been read. A check takes about 3 seconds per store. The pages it opens
+            are ordinary visits: they appear in Chrome’s history and, if you are signed in to Amazon, may appear in
+            your Amazon browsing and search history.
+          </li>
+          <li>
+            <strong>One destination.</strong> So that every price is quoted for the same place, the extension may set
+            each other store’s delivery location to the country in the “Deliver to” box of the page you started from,
+            and leaves it that way. The store you started from is never changed.
+            You can <a href="/how-it-works/#changing-it-back">change it back</a> in that store’s “Deliver to” box.
+          </li>
+          <li>
+            <strong>Delivered total.</strong> Stores are ranked by item price plus shipping and import fees, as shown on
+            Amazon’s own pages. When a store shows no import fees for your destination, the result says so, because
+            duties may still be due on delivery.
+          </li>
+          <li>
+            <strong>Exchange rates.</strong> Totals are converted to one currency at the European Central Bank’s daily
+            reference rates, with Frankfurter as a fallback.
+          </li>
+          <li>
+            <strong>Kept locally.</strong> Your settings and results stay only in your browser. A stored result holds
+            the product details, including the “Deliver to” text and the page address, and each store’s prices. A
+            finished check is reused for 30 minutes. An older result is deleted only when exactly the same check runs
+            again; otherwise it stays until you remove the extension or clear its storage.
+          </li>
+          <li>
+            <strong>Settings.</strong> Choose the currency prices are shown in, and switch any store off.
+          </li>
+        </ul>
+
+        <h3 id="v0-1-0-what-it-never-does">What it never does</h3>
+        <ul>
+          <li><strong>No checkout.</strong> It never adds to cart, checks out or buys anything.</li>
+          <li><strong>No credentials.</strong> It never reads your passwords or your cookies.</li>
+          <li>
+            <strong>No changes to your addresses.</strong> A store’s delivery location is set to a country, never to an
+            address. Your saved addresses stay as they are.
+          </li>
+          <li>
+            <strong>No price tracking.</strong> It compares prices only when you press the button and never watches
+            them over time.
+          </li>
+          <li>
+            <strong>You buy on Amazon.</strong> Purchases always happen on Amazon’s own product
+            pages. <span class="nowrap">“Open on …”</span> takes you to the listing, and you decide.
+          </li>
+          <li><strong>No account or server.</strong> It has no account, no analytics and no server of its own.</li>
+        </ul>
+      </section>
+
+      <p class="release-policy">
+        The <a href="/privacy/">privacy policy</a> sets out what the extension reads, stores and sends.
+      </p>
+    </article>
+  </div>
+</Base>
+
+<style>
+  .release-head {
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .release-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+  }
+
+  .release-title h2 {
+    margin-top: 0;
+    font-size: var(--text-section);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.025em;
+  }
+
+  .release-label {
+    margin: 0;
+    padding: 2px 10px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 999px;
+    background: var(--color-tint);
+    color: var(--color-ink);
+    font-size: var(--text-sm);
+    font-weight: 650;
+  }
+
+  .release-status {
+    margin-top: 12px;
+    color: var(--color-muted);
+  }
+
+  .release-policy {
+    margin-top: 2.5em;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-hairline);
+    color: var(--color-muted);
+  }
+</style>
