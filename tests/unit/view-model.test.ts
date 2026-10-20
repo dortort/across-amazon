@@ -29,6 +29,7 @@ import {
   locationNote,
   issuesLabel,
   needsMatchCheck,
+  otherSellerNote,
   percentFormat,
   formatVariantTokens,
   inCheckOrder,
@@ -786,6 +787,36 @@ describe("issueNote", () => {
     );
   });
 
+  it("says why another seller's offers could not be read for a market it could not quote", () => {
+    const unread = failedResult("DE", "UNAVAILABLE", 0.82, [
+      "Matched by ASIN",
+      "Price not displayed for destination",
+      "Shipping not displayed for destination",
+      "Other offers could not be read: Amazon answered HTTP 503"
+    ]);
+
+    expect(issueNote(unread, "CH")).toBe(
+      "Amazon did not show a delivered price to Switzerland. Other offers could not be read: Amazon answered HTTP 503."
+    );
+  });
+
+  it("gives Amazon's reason before the reason the other offers could not be read", () => {
+    const both = failedResult("UK", "UNAVAILABLE", 0.82, [
+      "Amazon says: This item cannot be dispatched to your selected delivery location.",
+      "Other offers could not be read: timed out after 15 seconds"
+    ]);
+
+    expect(issueNote(both, "CH")).toBe(
+      "Amazon did not show a delivered price to Switzerland. Amazon says: “This item cannot be dispatched to your selected delivery location.” Other offers could not be read: timed out after 15 seconds."
+    );
+  });
+
+  it("keeps the other sellers' notes out of the sentence when they say nothing went wrong", () => {
+    const noSeller = failedResult("MX", "UNAVAILABLE", 0.82, ["Price not displayed for destination", "No other seller delivers to the destination"]);
+
+    expect(issueNote(noSeller, "CH")).toBe("Amazon did not show a delivered price to Switzerland.");
+  });
+
   it("keeps Amazon's reason out of the other statuses", () => {
     const mismatch = failedResult("MX", "DESTINATION_MISMATCH", 0.82, ["Amazon says: Currently unavailable."]);
 
@@ -828,6 +859,49 @@ describe("locationNote", () => {
     expect(locationNote(de)).toBeUndefined();
     expect(locationNote({ ...de, notes: undefined })).toBeUndefined();
     expect(locationNote(failedResult("JP", "DESTINATION_MISMATCH", 0.93, ["Delivery location not set: timed out after 20 seconds"]))).toBeUndefined();
+  });
+});
+
+describe("otherSellerNote", () => {
+  const quoted = (otherSeller: ComparisonResult["otherSeller"]): ComparisonResult => ({ ...de, otherSeller });
+
+  it("names the seller, Amazon as the dispatcher and how many offers that deliver new it was the cheapest of", () => {
+    expect(
+      otherSellerNote(
+        quoted({ seller: "Star Brick City", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 4, deliveringNewCount: 4 })
+      )
+    ).toBe("Sold by Star Brick City, dispatched by Amazon. Cheapest of the 4 offers Amazon lists that deliver new.");
+  });
+
+  it("counts only the offers that deliver new, not every offer of the panel", () => {
+    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 5, deliveringNewCount: 2 }))).toBe(
+      "Sold by BuyMyBricks, dispatched by Amazon. Cheapest of the 2 offers Amazon lists that deliver new."
+    );
+  });
+
+  it("calls any Amazon dispatcher Amazon and names a third-party dispatcher", () => {
+    expect(otherSellerNote(quoted({ seller: "Amazon Europa", dispatcher: "Amazon Europa", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 }))).toBe(
+      "Sold by Amazon Europa, dispatched by Amazon. Cheapest of the 2 offers Amazon lists that deliver new."
+    );
+    expect(otherSellerNote(quoted({ seller: "RamanDz", dispatcher: "RamanDz", fulfilledByAmazon: false, offerCount: 2, deliveringNewCount: 2 }))).toBe(
+      "Sold by RamanDz, dispatched by RamanDz. Cheapest of the 2 offers Amazon lists that deliver new."
+    );
+  });
+
+  it("says when the quoted offer is the only one that delivers new", () => {
+    expect(otherSellerNote(quoted({ seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 3, deliveringNewCount: 1 }))).toBe(
+      "Sold by BuyMyBricks, dispatched by Amazon. The only offer Amazon lists that delivers new."
+    );
+  });
+
+  it("leaves out what the offer did not name", () => {
+    expect(otherSellerNote(quoted({ fulfilledByAmazon: false, offerCount: 3, deliveringNewCount: 3 }))).toBe(
+      "Sold by another seller. Cheapest of the 3 offers Amazon lists that deliver new."
+    );
+  });
+
+  it("returns nothing for a quote from the page itself", () => {
+    expect(otherSellerNote(de)).toBeUndefined();
   });
 });
 

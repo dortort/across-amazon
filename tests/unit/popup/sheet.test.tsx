@@ -211,6 +211,48 @@ describe("detail sheet", () => {
     ]);
   });
 
+  it("says who sells and dispatches an offer quoted from another seller", async () => {
+    const quoted = {
+      ...ukFromAnotherSeller,
+      notes: [...ukFromAnotherSeller.notes!, "Delivery location set to Switzerland"],
+      otherSeller: { seller: "BuyMyBricks", dispatcher: "Amazon", fulfilledByAmazon: true, offerCount: 2, deliveringNewCount: 2 }
+    };
+    const app = await renderDone(resultPayload({ source: switzerland, results: [quoted], fxTable: fxTableWithFrancs }));
+
+    await app.user.click(rowFor(app.container, "United Kingdom"));
+
+    const dialog = screen.getByRole("dialog", { name: "🇬🇧 United Kingdom" });
+    expect(Array.from(dialog.querySelectorAll(".dB-hint"), (hint) => [hint.className, hint.textContent])).toEqual([
+      [
+        "dB-hint is-left dB-seller",
+        "Sold by BuyMyBricks, dispatched by Amazon. Cheapest of the 2 offers Amazon lists that deliver new."
+      ],
+      ["dB-hint is-left dB-location", "Delivery location set to Switzerland"]
+    ]);
+  });
+
+  it("says who sells the page you are on when its price came from another seller", async () => {
+    const quotedBaseline = {
+      ...baseline,
+      otherSeller: { seller: "Acme Outlet", dispatcher: "Acme Outlet", fulfilledByAmazon: false, offerCount: 1, deliveringNewCount: 1 }
+    };
+    const app = await renderDone(resultPayload({ baseline: quotedBaseline }));
+
+    await app.user.click(rowFor(app.container, "United States"));
+
+    expect(screen.getByRole("dialog", { name: "🇺🇸 United States" }).querySelector(".dB-seller")?.textContent).toBe(
+      "Sold by Acme Outlet, dispatched by Acme Outlet. The only offer Amazon lists that delivers new."
+    );
+  });
+
+  it("says nothing about the seller of a marketplace whose page quoted its own price", async () => {
+    const app = await renderDone();
+
+    await app.user.click(rowFor(app.container, "Germany"));
+
+    expect(screen.getByRole("dialog", { name: "🇩🇪 Germany" }).querySelector(".dB-seller")).toBeNull();
+  });
+
   it("titles the page you are on with the product title alone when it has no variant", async () => {
     const plain = { ...source, variationTokens: [] };
     const app = await renderDone(resultPayload({ source: plain }), { loadSource: { source: plain, baseline } });

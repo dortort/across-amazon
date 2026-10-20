@@ -10,6 +10,7 @@ import {
   importFeesValue,
   locationNote,
   needsMatchCheck,
+  otherSellerNote,
   trustSentence
 } from "../view-model";
 import type { RankedRow } from "../view-model";
@@ -70,6 +71,7 @@ function SheetContent({ row, source, fxTable, destination, onClose, onOpen }: Sh
   const breakdown = result.breakdown;
   const local = (value?: Money): string => (value ? formatLocal(value, result.marketplace) : "—");
   const location = row.isSource ? undefined : locationNote(result);
+  const seller = otherSellerNote(result);
 
   return (
     <>
@@ -92,6 +94,7 @@ function SheetContent({ row, source, fxTable, destination, onClose, onOpen }: Sh
         <span className="dot" />
         <span>{trustSentence(result, row.isSource)}</span>
       </div>
+      {seller ? <p className="dB-hint is-left dB-seller">{seller}</p> : null}
       {location ? <p className="dB-hint is-left dB-location">{location}</p> : null}
       {row.isSource ? (
         <button type="button" className="dB-cta secondary" id="b-close" onClick={onClose}>
