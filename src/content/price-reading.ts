@@ -132,6 +132,21 @@ export function hasFreeMarker(text: string | undefined): boolean {
   return Boolean(text) && FREE_MARKER.test(normalize(text ?? ""));
 }
 
+const UNDELIVERABLE_NOTICES = [
+  "cannot be shipped to your selected delivery location",
+  "cannot be dispatched to your selected delivery location",
+  "kann nicht an den ausgewählten Lieferort",
+  "ne peut pas être expédié",
+  "non può essere spedito",
+  "no se puede enviar",
+  "お届け先に発送できません"
+].map(normalize);
+
+export function isUndeliverableNotice(text: string): boolean {
+  const notice = normalize(text);
+  return UNDELIVERABLE_NOTICES.some((phrase) => notice.includes(phrase));
+}
+
 export interface ChargeReading {
   amount?: ParsedMoney;
   isFree: boolean;

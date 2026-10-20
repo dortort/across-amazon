@@ -1,4 +1,13 @@
-import { collapseText, normalize, parseCurrencyMarkedMoney, parseMoney, readChargeText, readDeliveryPrice, readPriceText } from "./price-reading";
+import {
+  collapseText,
+  isUndeliverableNotice,
+  normalize,
+  parseCurrencyMarkedMoney,
+  parseMoney,
+  readChargeText,
+  readDeliveryPrice,
+  readPriceText
+} from "./price-reading";
 import type { ParsedMoney } from "./price-reading";
 
 const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
@@ -27,6 +36,7 @@ export interface OtherOffer {
   seller?: string;
   dispatcher?: string;
   fulfilledByAmazon: boolean;
+  undeliverable: boolean;
 }
 
 export interface QuotableOffer extends OtherOffer {
@@ -36,7 +46,8 @@ export interface QuotableOffer extends OtherOffer {
 
 export interface OtherOffersPanel {
   offers: OtherOffer[];
-  offerCount: number;
+  total?: number;
+  listEnded: boolean;
 }
 
 export function buildOtherOffersUrl(documentRef: Document, origin: string, fallbackAsin?: string, page = 1): string | undefined {
@@ -97,13 +108,20 @@ function readOffer(offer: Element, index: number, marketCurrency: string): Other
     shipping: readShipping(offer, item, marketCurrency),
     seller: collapseText(offer.querySelector(SELLER)),
     dispatcher,
-    fulfilledByAmazon: dispatcher !== undefined && AMAZON_DISPATCHER.test(dispatcher)
+    fulfilledByAmazon: dispatcher !== undefined && AMAZON_DISPATCHER.test(dispatcher),
+    undeliverable: isUndeliverableNotice(offer.querySelector("#mir-layout-DELIVERY_BLOCK")?.textContent ?? "")
   };
 }
 
-function readOfferCount(list: Element, parsed: number): number {
+function readTotal(list: Element): number | undefined {
   const total = Number.parseInt(list.querySelector<HTMLInputElement>("#aod-total-offer-count")?.value ?? "", 10);
-  return Number.isNaN(total) ? parsed : Math.max(total, parsed);
+  return Number.isNaN(total) ? undefined : total;
+}
+
+function readListEnded(panel: ParentNode): boolean {
+  const moreOffers = panel.querySelector("#aod-show-more-offers");
+  const endOfResults = panel.querySelector("#aod-end-of-results");
+  return Boolean(moreOffers?.classList.contains("aod-hide")) || Boolean(endOfResults && !endOfResults.classList.contains("aod-hide"));
 }
 
 export function parseOtherOffers(panel: ParentNode, marketCurrency: string): OtherOffersPanel | undefined {
@@ -113,7 +131,7 @@ export function parseOtherOffers(panel: ParentNode, marketCurrency: string): Oth
   }
 
   const offers = Array.from(list.querySelectorAll("#aod-offer"), (offer, index) => readOffer(offer, index, marketCurrency));
-  return { offers, offerCount: readOfferCount(list, offers.length) };
+  return { offers, total: readTotal(list), listEnded: readListEnded(panel) };
 }
 
 function isQuotable(offer: OtherOffer): offer is QuotableOffer {
