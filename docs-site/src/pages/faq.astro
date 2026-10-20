@@ -129,7 +129,8 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
                 cannot be shipped there. The note names the destination, for example: “Amazon did not show a delivered
                 price to Switzerland.” When Amazon gives a reason, the note repeats it. When the page offered{" "}
                 <span class="nowrap">“See All Buying Options”</span>, the extension read that list first, so this status
-                means no seller there delivers the item new to your destination either, and the note says so.
+                means that no seller there delivers the item new to your destination either, or that the list could not
+                be read, and the note says which.
               </td>
             </tr>
             <tr>
@@ -160,13 +161,15 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
       <p>
         A store’s own listing can show no price for your destination while other sellers on the same page deliver
         there. Amazon then shows <span class="nowrap">“See All Buying Options”</span> instead of a price. The extension
-        reads that list, as pressing the button would, and quotes the cheapest new offer that shows both an item price
-        and a delivery price (or free delivery), converted at the day’s <a href="#exchange-rates">exchange rate</a>. The row’s breakdown
-        says who sells and dispatches the offer and how many offers on the list deliver new.
+        reads that list, up to three pages of it, as pressing the button would, and quotes the new offer with both an
+        item price and a delivery price (or free delivery) that is cheapest delivered, converted at the day’s{" "}
+        <a href="#exchange-rates">exchange rate</a>. The row’s breakdown says who sells and dispatches the offer and how
+        many offers it was chosen from.
       </p>
       <p>
         Such a quote shows no import fees: the list prices the item and the delivery only, so duties may still be due
-        on delivery. The offer is Amazon’s listing, not the extension’s. Open it
+        on delivery. When the quoted offer is on the page you are on, the result card says that its price leaves out
+        import fees. The offer is Amazon’s listing, not the extension’s. Open it
         with <span class="nowrap">“Open on …”</span> and check the seller before you buy.
       </p>
 
