@@ -1,0 +1,217 @@
+---
+import Logo from "./Logo.astro";
+import ThemeToggle from "./ThemeToggle.astro";
+import { navigation, siteName } from "../site.config";
+
+const currentPath = Astro.url.pathname;
+const isCurrent = (href: string) => currentPath === href || `${currentPath}/` === href;
+const links = navigation.map((item) => ({ ...item, current: isCurrent(item.href) }));
+---
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="/" aria-current={currentPath === "/" ? "page" : undefined}>
+      <Logo size={32} />
+      <span class="brand-name">{siteName}</span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <ul role="list">
+        {
+          links.map((link) => (
+            <li>
+              <a href={link.href} aria-current={link.current ? "page" : undefined}>
+                {link.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+    <div class="header-tools">
+      <ThemeToggle />
+      <details class="menu">
+        <summary class="menu-toggle">
+          <svg class="menu-icon menu-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+          <svg class="menu-icon menu-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+          <span>Menu</span>
+        </summary>
+        <nav class="menu-panel" aria-label="Main">
+          <ul role="list">
+            {
+              links.map((link) => (
+                <li>
+                  <a href={link.href} aria-current={link.current ? "page" : undefined}>
+                    {link.label}
+                  </a>
+                </li>
+              ))
+            }
+          </ul>
+        </nav>
+      </details>
+    </div>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: relative;
+    z-index: 5;
+    border-bottom: 1px solid var(--color-hairline);
+    background: var(--color-bg);
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-block: 12px;
+  }
+
+  .brand {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    color: var(--color-ink);
+    font-size: 1.0625rem;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .header-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .site-nav {
+    display: none;
+  }
+
+  .site-nav ul,
+  .menu-panel ul {
+    padding: 0;
+    list-style: none;
+  }
+
+  .site-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 12px;
+    color: var(--color-muted);
+    font-size: 0.9375rem;
+    font-weight: 550;
+    text-decoration: none;
+  }
+
+  .site-nav a:hover {
+    color: var(--color-ink);
+  }
+
+  .site-nav a[aria-current="page"] {
+    color: var(--color-ink);
+    text-decoration: underline 2px var(--color-highlight);
+    text-underline-offset: 10px;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding-inline: 12px 14px;
+    border: 1px solid var(--color-rule-strong);
+    border-radius: 999px;
+    color: var(--color-ink);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .menu-toggle:hover {
+    border-color: var(--color-ink);
+  }
+
+  .menu-toggle::-webkit-details-marker {
+    display: none;
+  }
+
+  .menu-icon {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+  }
+
+  .menu-icon-close,
+  .menu[open] .menu-icon-open {
+    display: none;
+  }
+
+  .menu[open] .menu-icon-close {
+    display: block;
+  }
+
+  .menu-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    padding: 8px var(--gutter) 16px;
+    border-bottom: 1px solid var(--color-hairline);
+    background: var(--color-bg);
+    box-shadow: var(--shadow-menu);
+  }
+
+  .menu-panel li + li {
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .menu-panel a {
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    color: var(--color-ink);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .menu-panel a[aria-current="page"] {
+    color: var(--color-link);
+  }
+
+  @media (min-width: 760px) {
+    .header-inner {
+      gap: 24px;
+      padding-block: 14px;
+    }
+
+    .site-nav {
+      display: block;
+      margin-left: auto;
+    }
+
+    .site-nav ul {
+      display: flex;
+    }
+
+    .menu {
+      display: none;
+    }
+  }
+</style>

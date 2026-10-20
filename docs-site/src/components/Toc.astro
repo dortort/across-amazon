@@ -1,0 +1,174 @@
+---
+interface TocItem {
+  href: string;
+  label: string;
+}
+
+interface Props {
+  items: readonly TocItem[];
+  label?: string;
+}
+
+const { items, label = "On this page" } = Astro.props;
+---
+
+<nav class="page-toc" aria-label={label}>
+  <details class="card toc-compact">
+    <summary class="toc-summary">
+      <span>{label}</span>
+      <svg class="toc-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </summary>
+    <ol class="toc-compact-list" role="list">
+      {
+        items.map((item) => (
+          <li>
+            <a href={item.href}>{item.label}</a>
+          </li>
+        ))
+      }
+    </ol>
+  </details>
+  <div class="toc-wide">
+    <p class="toc-title">{label}</p>
+    <ol class="toc-wide-list" role="list">
+      {
+        items.map((item) => (
+          <li>
+            <a href={item.href}>{item.label}</a>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</nav>
+
+<style>
+  .page-toc {
+    margin-bottom: clamp(28px, 5vw, 40px);
+  }
+
+  .toc-compact-list,
+  .toc-wide-list {
+    padding: 0;
+    list-style: none;
+  }
+
+  .toc-compact {
+    max-width: var(--measure);
+    padding: 0;
+  }
+
+  .toc-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 52px;
+    padding: 8px 20px;
+    border-radius: var(--radius-lg);
+    font-weight: 650;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .toc-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .toc-chevron {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .toc-compact[open] .toc-chevron {
+    rotate: 180deg;
+  }
+
+  .toc-compact-list {
+    padding: 0 20px 8px;
+  }
+
+  .toc-compact-list li {
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .toc-compact-list a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding-block: 8px;
+    color: var(--color-ink);
+    line-height: 1.35;
+    text-decoration: none;
+  }
+
+  .toc-compact-list a:hover {
+    text-decoration: underline;
+  }
+
+  .toc-wide {
+    display: none;
+  }
+
+  @media (min-width: 1080px) {
+    :global(.page-body:has(> .page-toc)) {
+      display: grid;
+      grid-template-columns: minmax(0, var(--measure)) minmax(0, 240px);
+      justify-content: space-between;
+      column-gap: 64px;
+    }
+
+    :global(.page-body:has(> .page-toc) > :not(.page-toc)) {
+      grid-column: 1;
+    }
+
+    .page-toc {
+      grid-column: 2;
+      grid-row: 1 / span 99;
+      align-self: start;
+      position: sticky;
+      top: 32px;
+      max-height: calc(100vh - 64px);
+      margin-bottom: 0;
+      padding: 6px 6px 6px 20px;
+      overflow-y: auto;
+      border-left: 1px solid var(--color-hairline);
+      font-size: var(--text-sm);
+      line-height: 1.45;
+    }
+
+    .toc-compact {
+      display: none;
+    }
+
+    .toc-wide {
+      display: block;
+    }
+
+    .toc-title {
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    .toc-wide-list a {
+      display: block;
+      padding-block: 6px;
+      color: var(--color-muted);
+      text-decoration: none;
+    }
+
+    .toc-wide-list a:hover {
+      color: var(--color-ink);
+      text-decoration: underline;
+    }
+  }
+</style>

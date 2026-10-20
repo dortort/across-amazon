@@ -1,0 +1,109 @@
+---
+import { navigation, repositoryUrl, siteName } from "../site.config";
+---
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-about">
+      <p class="footer-name">{siteName}</p>
+      <p class="footer-summary">A Chrome extension that compares delivered prices across ten Amazon stores.</p>
+    </div>
+    <nav class="footer-nav" aria-label="Footer">
+      <ul>
+        {
+          navigation.map((item) => (
+            <li>
+              <a href={item.href}>{item.label}</a>
+            </li>
+          ))
+        }
+        <li><a href={repositoryUrl}>GitHub</a></li>
+      </ul>
+    </nav>
+    <div class="footer-notes">
+      <p>Not affiliated with or endorsed by Amazon.</p>
+      <p>This website sets no cookies and runs no analytics.</p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--color-hairline);
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+
+  .footer-inner {
+    display: grid;
+    gap: 20px 48px;
+    padding-block: 40px 32px;
+  }
+
+  .footer-name {
+    color: var(--color-ink);
+    font-size: 1rem;
+    font-weight: 750;
+  }
+
+  .footer-summary {
+    margin-top: 4px;
+    max-width: 36ch;
+  }
+
+  .footer-nav {
+    margin-inline: -8px;
+  }
+
+  .footer-nav ul {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-width: 400px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .footer-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding-inline: 8px;
+    color: var(--color-ink);
+    text-decoration: none;
+  }
+
+  .footer-nav a:hover {
+    text-decoration: underline;
+  }
+
+  .footer-notes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  @media (min-width: 900px) {
+    .footer-inner {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+    }
+
+    .footer-nav {
+      margin-top: -10px;
+    }
+
+    .footer-nav ul {
+      display: flex;
+      flex-wrap: wrap;
+      max-width: none;
+    }
+
+    .footer-notes {
+      grid-column: 1 / -1;
+    }
+  }
+</style>
