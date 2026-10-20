@@ -128,6 +128,5 @@ export const mockupResults: ComparisonResult[] = [ca, mx, uk, de, fr, it_, es, j
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   enabledMarketplaces: [...MARKETPLACE_CODES],
-  comparisonCurrency: "SOURCE",
-  disclosureAcknowledged: false
+  comparisonCurrency: "SOURCE"
 };

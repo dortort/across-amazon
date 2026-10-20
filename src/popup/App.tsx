@@ -38,8 +38,7 @@ const BACKGROUND_UNREACHABLE = "Could not reach the background service";
 
 const FALLBACK_SETTINGS: ExtensionSettings = {
   enabledMarketplaces: [...MARKETPLACE_CODES],
-  comparisonCurrency: "SOURCE",
-  disclosureAcknowledged: false
+  comparisonCurrency: "SOURCE"
 };
 
 type RunPhase = "none" | "active" | "finished" | "cancelled";
