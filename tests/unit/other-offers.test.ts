@@ -262,6 +262,24 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
     expect(panel.offers[0].item).toEqual({ amount: 651.25, currency: "EUR" });
   });
 
+  it("never reads a priced offer in the pinned featured block above the list", () => {
+    const panel = parsePanel(DE_PANEL, "EUR", (document) => {
+      document
+        .querySelector("#aod-pinned-offer")
+        ?.insertAdjacentHTML(
+          "beforeend",
+          '<div id="aod-offer"><div id="aod-offer-heading"><span>New</span></div>' +
+            '<div id="aod-offer-price"><span class="a-price apex-pricetopay-value"><span class="a-offscreen">€599.00</span></span></div>' +
+            '<div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"><span data-csa-c-delivery-price="FREE">FREE delivery</span></div>' +
+            '<div id="aod-offer-soldBy"><div class="a-col-right"><a>Featured Seller</a></div></div></div>'
+        );
+    });
+
+    expect(panel.offers).toHaveLength(4);
+    expect(panel.offers.map((offer) => offer.seller)).not.toContain("Featured Seller");
+    expect(quotableOffers(panel.offers)[0]).toMatchObject({ seller: "Star Brick City", item: { amount: 651.25, currency: "EUR" } });
+  });
+
   it("finds no offer list in an answer that is not the panel", () => {
     const signIn = new JSDOM("<!doctype html><html><body><form name='signIn'><input id='ap_email'></form></body></html>");
 
