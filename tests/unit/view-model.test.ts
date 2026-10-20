@@ -889,8 +889,7 @@ describe("estimatedSeconds", () => {
 describe("targetMarkets", () => {
   const allEnabled: ExtensionSettings = {
     enabledMarketplaces: [...MARKETPLACE_CODES],
-    comparisonCurrency: "SOURCE",
-    disclosureAcknowledged: false
+    comparisonCurrency: "SOURCE"
   };
 
   it("checks every enabled marketplace except the one the user is on", () => {

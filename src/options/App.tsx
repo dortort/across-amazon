@@ -67,7 +67,7 @@ export function App(): ReactElement {
     <main className="options">
       <header>
         <h1>Across Amazon Settings</h1>
-        <p>Control marketplaces, currency normalization, and disclosure preferences.</p>
+        <p>Control marketplaces and currency normalization.</p>
       </header>
 
       <section>
@@ -114,19 +114,7 @@ export function App(): ReactElement {
 
       <section>
         <h2>Disclosure</h2>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={settings.disclosureAcknowledged}
-            onChange={(event) => {
-              setSettings({
-                ...settings,
-                disclosureAcknowledged: event.target.checked
-              });
-            }}
-          />
-          <span>I acknowledge this extension is not affiliated with Amazon.</span>
-        </label>
+        <p>Across Amazon is not affiliated with or endorsed by Amazon.</p>
       </section>
 
       <footer>

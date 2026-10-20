@@ -155,7 +155,7 @@ Everything lives in `chrome.storage.local`:
 
 | Key | Contents | Lifetime |
 | --- | --- | --- |
-| `settings:v1` | Enabled marketplaces, comparison currency (`SOURCE` or a currency code), disclosure flag | Until changed |
+| `settings:v1` | Enabled marketplaces, comparison currency (`SOURCE` or a currency code) | Until changed |
 | `cmp:<hash>` | Source, baseline, ranked results and FX table of a finished run | Reused for 30 minutes, deleted when read after that |
 | `fx:YYYY-MM-DD` | The FX table for a UTC day | Reused for that day |
 
@@ -180,7 +180,7 @@ Everything lives in `chrome.storage.local`:
 | `src/popup/App.tsx` | Popup state reducer, chrome messaging and run correlation. |
 | `src/popup/view-model.ts` | Pure ranking, verdict, deltas and user-facing copy. |
 | `src/popup/components/` | Views: top bar, idle, running, done (verdict card, ranked list, issues), detail sheet, settings, footer, toast. |
-| `src/options/` | Options page: marketplaces, comparison currency (including CAD, MXN and AUD), disclosure, explicit save. |
+| `src/options/` | Options page: marketplaces, comparison currency (including CAD, MXN and AUD), a non-affiliation statement, explicit save. |
 | `vite.config.ts` | Multi-entry build (popup, options, service worker, four content scripts) and the IIFE plugin. |
 | `manifest.json` | Copied into `dist/` by `pnpm build`. |
 

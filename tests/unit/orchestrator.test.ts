@@ -280,8 +280,7 @@ function createHarness(options: HarnessOptions): Harness {
   const storage: Record<string, unknown> = {
     "settings:v1": {
       enabledMarketplaces: options.enabledMarketplaces ?? ["US", "UK", "DE"],
-      comparisonCurrency: options.comparisonCurrency ?? "SOURCE",
-      disclosureAcknowledged: true
+      comparisonCurrency: options.comparisonCurrency ?? "SOURCE"
     }
   };
   const tabs = new Map<number, FakeTab>();

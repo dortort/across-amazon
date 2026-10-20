@@ -153,7 +153,6 @@ export interface LoadSourcePayload {
 export interface ExtensionSettings {
   enabledMarketplaces: Marketplace[];
   comparisonCurrency: string | "SOURCE";
-  disclosureAcknowledged: boolean;
 }
 
 export interface CachedComparisonRecord {

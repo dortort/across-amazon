@@ -6,8 +6,7 @@ const COMPARISON_CACHE_VERSION = 6;
 
 const DEFAULT_SETTINGS: ExtensionSettings = {
   enabledMarketplaces: [...MARKETPLACE_CODES],
-  comparisonCurrency: "SOURCE",
-  disclosureAcknowledged: false
+  comparisonCurrency: "SOURCE"
 };
 
 function isMarketplaceArray(value: unknown): value is Marketplace[] {
@@ -31,12 +30,9 @@ export async function loadSettings(): Promise<ExtensionSettings> {
       ? (rawSettings as ExtensionSettings).comparisonCurrency
       : DEFAULT_SETTINGS.comparisonCurrency;
 
-  const disclosureAcknowledged = Boolean((rawSettings as ExtensionSettings).disclosureAcknowledged);
-
   return {
     enabledMarketplaces,
-    comparisonCurrency,
-    disclosureAcknowledged
+    comparisonCurrency
   };
 }
 
