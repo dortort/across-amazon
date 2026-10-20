@@ -1,0 +1,88 @@
+---
+import { getEntry, render } from "astro:content";
+import Base from "../layouts/Base.astro";
+import PageIntro from "../components/PageIntro.astro";
+import Toc from "../components/Toc.astro";
+
+const policy = await getEntry("privacy", "privacy-policy");
+if (!policy) throw new Error("The privacy collection has no privacy-policy entry; check ../docs/privacy-policy.md.");
+
+const { Content, headings, remarkPluginFrontmatter } = await render(policy);
+const title: unknown = remarkPluginFrontmatter.title;
+if (typeof title !== "string" || title === "") {
+  throw new Error("docs/privacy-policy.md must start with a level 1 heading.");
+}
+
+const tocItems = [
+  ...headings
+    .filter((heading) => heading.depth === 2)
+    .map((heading) => ({ href: `#${heading.slug}`, label: heading.text })),
+  { href: "#about-this-website", label: "About this website" },
+];
+const githubPagesDataCollectionUrl =
+  "https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection";
+---
+
+<Base
+  title={title}
+  description="What the Across Amazon extension reads, stores and sends, and to whom, and what this website keeps about you."
+>
+  <PageIntro title={title} />
+  <div class="container page-body">
+    <Toc items={tocItems} />
+
+    <article class="prose policy">
+      <Content />
+    </article>
+
+    <section class="prose about-site" aria-labelledby="about-this-website">
+      <h2 id="about-this-website">About this website</h2>
+      <p>The policy above covers the extension. This section covers the website you are reading.</p>
+      <p>
+        This is a static website hosted on GitHub Pages. It sets no cookies, has no analytics and makes no requests to
+        third parties. Every image, style sheet and script comes from this site, and text uses your device’s own fonts.
+      </p>
+      <p>
+        If you switch between the light and dark theme, your choice is kept in your browser’s localStorage, on your
+        device only. The site stores nothing else.
+      </p>
+      <p>
+        GitHub hosts the site and logs and stores visitors’ IP addresses for security purposes, as GitHub describes in
+        its <a href={githubPagesDataCollectionUrl}>data collection statement for GitHub Pages</a>.
+      </p>
+      <p>For help with the extension, see the <a href="/support/">support page</a>.</p>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .policy > :global(p:first-child) {
+    color: var(--color-muted);
+  }
+
+  .policy > :global(p:first-child + p) {
+    margin-top: 1.5rem;
+    color: var(--color-muted);
+    font-size: var(--text-lede);
+    line-height: 1.55;
+  }
+
+  .about-site {
+    margin-top: clamp(56px, 8vw, 88px);
+    padding: clamp(24px, 4vw, 36px);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-lg);
+    background: var(--color-band);
+  }
+
+  .about-site h2 {
+    margin-top: 0;
+    font-size: var(--text-h2);
+    letter-spacing: -0.02em;
+  }
+
+  .about-site h2 + p {
+    margin-top: 0.625em;
+    color: var(--color-muted);
+  }
+</style>
