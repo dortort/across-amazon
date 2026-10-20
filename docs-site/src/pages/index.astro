@@ -1,0 +1,529 @@
+---
+import Base from "../layouts/Base.astro";
+import Shot from "../components/Shot.astro";
+import StoreButton from "../components/StoreButton.astro";
+import { stores } from "../data/stores";
+import { siteDescription } from "../site.config";
+import idleShot from "../assets/screenshots/idle.png";
+import runningShot from "../assets/screenshots/running.png";
+import verdictShot from "../assets/screenshots/done.png";
+import rankedShot from "../assets/screenshots/done-list.png";
+import breakdownShot from "../assets/screenshots/sheet.png";
+---
+
+<Base title="Across Amazon: find the Amazon that delivers cheapest to you" description={siteDescription}>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <h1 id="hero-title" class="hero-title">
+          Find the Amazon that delivers <span class="hero-highlight">cheapest</span> to you
+        </h1>
+        <p class="lede hero-lede">
+          Across Amazon checks the product you are viewing on up to nine other Amazon stores and ranks them by what
+          they quote delivered to you: item, shipping and import fees, converted to one currency.
+        </p>
+        <div class="hero-actions">
+          <StoreButton />
+          <a class="button button-secondary" href="/how-it-works/">How it works</a>
+        </div>
+        <p class="hero-affiliation">Not affiliated with or endorsed by Amazon.</p>
+      </div>
+      <div class="hero-visual">
+        <div class="orbit-stage">
+          <svg class="orbit" viewBox="0 0 640 400" aria-hidden="true" focusable="false">
+            <ellipse class="orbit-faint" cx="320" cy="200" rx="250" ry="150" transform="rotate(28 320 200)" />
+            <g transform="rotate(-18 320 200)">
+              <ellipse class="orbit-line" cx="320" cy="200" rx="300" ry="105" />
+              <circle class="orbit-dot" cx="566" cy="260" r="5" />
+              <circle class="orbit-dot" cx="74" cy="140" r="3.5" />
+            </g>
+          </svg>
+          <Shot
+            src={verdictShot}
+            alt="Verdict card reading Save $50.94: buy from Germany for $349.05 delivered, 13% less than the $399.99 you would pay here"
+            width={340}
+            priority
+          />
+        </div>
+        <p class="hero-visual-note">The verdict for a pair of headphones on amazon.com. Prices are illustrative.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section steps-section" aria-labelledby="steps-title">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="steps-title" class="section-title">How a check works</h2>
+        <p class="lede">Nothing happens until you press the button. Opening the popup only reads the page you are on.</p>
+      </div>
+      <ol class="steps" role="list">
+        <li class="step">
+          <h3 id="open-a-product-page">Open a product page</h3>
+          <p>
+            Go to a product page on any of the ten supported Amazon stores and click the Across Amazon icon in
+            Chrome’s toolbar. The popup shows the product and its price on that store.
+          </p>
+        </li>
+        <li class="step">
+          <h3 id="press-check-9-other-amazons">Press <span class="nowrap">“Check 9 other Amazons”</span></h3>
+          <p>
+            The extension looks for the same product on each other store, first by its ASIN and otherwise by
+            searching. Before it reads a store, it may set that store’s <a href="/how-it-works/#delivery-location">delivery location</a> to
+            the country in the “Deliver to” box of the page you started from, and leaves it that way.
+          </p>
+          <p>
+            Each store’s pages open briefly in background tabs that never take focus. The pages it opens are ordinary
+            visits: they appear in Chrome’s history and, if you are signed in to Amazon, may appear in your Amazon
+            browsing and search history.
+          </p>
+        </li>
+        <li class="step">
+          <h3 id="read-the-verdict-and-the-ranked-list">Read the verdict and the ranked list</h3>
+          <p>
+            A check takes about 3 seconds per store. The card names the store with the cheapest delivered total and
+            what you save against the page you are on. Below it, every store that quoted a price is ranked, cheapest
+            first.
+          </p>
+          <p>
+            When a store shows no import fees for your destination, the result says so, because duties may still be
+            due on delivery.
+          </p>
+        </li>
+      </ol>
+      <p class="steps-more"><a href="/how-it-works/">What happens during a check, in detail</a></p>
+    </div>
+  </section>
+
+  <section class="section section-band" aria-labelledby="screens-title">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="screens-title" class="section-title">What the popup shows</h2>
+        <p class="lede">
+          From the product page to one store’s full breakdown. The screenshots show the real popup with
+          illustrative prices, not real ones.
+        </p>
+      </div>
+      <ol class="screens" role="list">
+        <li>
+          <Shot
+            src={idleShot}
+            alt="Idle popup showing the Sony headphones at $399.99 on amazon.com and a Check 9 other Amazons button"
+            width={400}
+          >
+            <strong>Idle.</strong> The popup reads the page you are on and shows the product, its variant and its price
+            on this store.
+          </Shot>
+        </li>
+        <li>
+          <Shot
+            src={runningShot}
+            alt="Running popup with a progress dial at 4 of 9, Searching France, and chips for Canada, Mexico, United Kingdom, Germany and France"
+            width={400}
+          >
+            <strong>Running.</strong> The dial counts the stores checked so far. Each chip shows a store’s delivered
+            total, or “—” when it could not be compared.
+          </Shot>
+        </li>
+        <li>
+          <Shot
+            src={rankedShot}
+            alt="Ranked list of marketplaces from Germany at $349.05 to Australia at $438.72, with the United States marked as the page you are on"
+            width={400}
+          >
+            <strong>Ranked list.</strong> Every store that quoted a delivered price, cheapest first, with the difference
+            from the page you are on.
+          </Shot>
+        </li>
+        <li>
+          <Shot
+            src={breakdownShot}
+            alt="Germany breakdown sheet: item price 279,00 €, shipping 12,99 €, import fees deposit 31,20 €, delivered total 323,19 €, roughly $349.05 at today's rate"
+            width={400}
+          >
+            <strong>Breakdown.</strong> Click a row for the item price, shipping, import fees and delivered total, in
+            that store’s own currency.
+          </Shot>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="stores-title">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="stores-title" class="section-title">Ten Amazon stores</h2>
+        <p class="lede">
+          A check covers every store switched on in the settings except the one you are on, so by default the other
+          nine. Each store prices in its own currency, and totals are converted at the European Central Bank’s daily
+          reference rates.
+        </p>
+      </div>
+      <ul class="store-list" role="list">
+        {
+          stores.map((store) => (
+            <li class="store">
+              <span class="store-country">{store.country}</span>
+              <span class="store-domain">{store.domain}</span>
+              <span class="store-currency numeric">{store.currency}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="section section-band" aria-labelledby="never-title">
+    <div class="container never-grid">
+      <div class="never-head">
+        <h2 id="never-title" class="section-title">What it never does</h2>
+        <p class="lede">
+          It reads prices and shows you where to buy. What it changes: each other store’s delivery location,
+          explained under <a href="/how-it-works/#delivery-location">how it works</a>, and the pages it visits, which
+          appear in your browsing history. You buy on Amazon’s own product page, yourself.
+        </p>
+      </div>
+      <ul class="never-list" role="list">
+        <li class="never-item">
+          <h3 id="buys-nothing">Buys nothing</h3>
+          <p>
+            It never adds to cart, checks out or buys anything. <span class="nowrap">“Open on …”</span> takes you to the
+            listing, and you decide.
+          </p>
+        </li>
+        <li class="never-item">
+          <h3 id="no-account">No account</h3>
+          <p>
+            There is no Across Amazon account to create, and it never reads your passwords, your orders or your
+            cookies.
+          </p>
+        </li>
+        <li class="never-item">
+          <h3 id="no-analytics">No analytics</h3>
+          <p>No analytics, telemetry, advertising or tracking.</p>
+        </li>
+        <li class="never-item">
+          <h3 id="no-server">No server</h3>
+          <p>
+            It has no server of its own. Your settings and past results stay in your browser, and nothing is sent to
+            the developer. A finished check is reused for 30 minutes. An older result is deleted only when exactly the
+            same check runs again; otherwise it stays until you remove the extension or clear its storage.
+          </p>
+        </li>
+        <li class="never-item">
+          <h3 id="no-affiliate-links">No affiliate links</h3>
+          <p>Every <span class="nowrap">“Open on …”</span> link is a plain product page link.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero {
+    overflow-x: clip;
+    padding-block: clamp(40px, 7vw, 96px) clamp(32px, 4vw, 56px);
+  }
+
+  .steps-section {
+    padding-top: clamp(40px, 5vw, 72px);
+  }
+
+  .hero-grid {
+    display: grid;
+    gap: 56px;
+    align-items: center;
+  }
+
+  .hero-title {
+    font-size: var(--text-display);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+  }
+
+  .hero-highlight {
+    color: var(--color-highlight);
+  }
+
+  .hero-lede {
+    margin-top: 24px;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 36px;
+  }
+
+  .hero-affiliation {
+    margin-top: 16px;
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+
+  .hero-visual {
+    display: grid;
+    justify-items: center;
+    gap: 20px;
+    container-type: inline-size;
+  }
+
+  .orbit-stage {
+    position: relative;
+    width: 100%;
+    max-width: 340px;
+  }
+
+  .orbit-stage :global(.shot) {
+    position: relative;
+    max-width: none;
+  }
+
+  .orbit {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 190%;
+    max-width: none;
+    height: auto;
+    translate: -50% -50%;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .orbit-faint {
+    fill: none;
+    stroke: var(--color-orbit);
+    stroke-width: 1;
+  }
+
+  .orbit-line {
+    fill: none;
+    stroke: var(--color-orange);
+    stroke-width: 1.25;
+    opacity: 0.85;
+  }
+
+  .orbit-dot {
+    fill: var(--color-orange);
+    filter: var(--glow-orange);
+  }
+
+  @media (max-width: 1179px) {
+    .orbit {
+      width: min(150%, 100cqi + 128px);
+    }
+  }
+
+  @media (max-width: 559px) {
+    .orbit {
+      width: 125%;
+    }
+
+    .orbit-line,
+    .orbit-dot {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .orbit {
+      animation: orbit-in 1600ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    }
+
+    @keyframes orbit-in {
+      from {
+        opacity: 0;
+        transform: rotate(-12deg) scale(0.92);
+      }
+    }
+  }
+
+  .hero-visual-note {
+    max-width: 340px;
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+    text-align: center;
+  }
+
+  .section-head {
+    display: grid;
+    gap: 16px;
+    max-width: 720px;
+    margin-bottom: clamp(36px, 5vw, 56px);
+  }
+
+  .steps {
+    display: grid;
+    gap: 36px;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+  }
+
+  .step {
+    counter-increment: step;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-rule-strong);
+  }
+
+  .step::before {
+    content: counter(step);
+    display: block;
+    margin-bottom: 20px;
+    color: var(--color-highlight);
+    font-size: 2.75rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+
+  .step h3 {
+    font-size: var(--text-h3);
+  }
+
+  .step p {
+    margin-top: 10px;
+  }
+
+  @media (max-width: 819px) {
+    .step {
+      display: grid;
+      grid-template-columns: 2rem minmax(0, 1fr);
+      column-gap: 12px;
+      align-items: baseline;
+    }
+
+    .step::before {
+      margin-bottom: 0;
+      font-size: 2rem;
+    }
+
+    .step > * {
+      grid-column: 2;
+    }
+  }
+
+  .steps-more {
+    margin-top: 40px;
+    font-weight: 600;
+  }
+
+  .screens {
+    display: grid;
+    grid-template-columns: minmax(0, 400px);
+    justify-content: center;
+    gap: 56px 40px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .screens > li {
+    display: flex;
+    justify-content: center;
+  }
+
+  .store-list {
+    display: grid;
+    padding: 0;
+    list-style: none;
+  }
+
+  .store {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) 2.75rem;
+    gap: 12px;
+    align-items: baseline;
+    padding-block: 14px;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .store:first-child {
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .store-country {
+    font-weight: 650;
+  }
+
+  .store-domain,
+  .store-currency {
+    color: var(--color-muted);
+  }
+
+  .store-currency {
+    text-align: right;
+  }
+
+  .never-grid {
+    display: grid;
+    gap: 32px;
+  }
+
+  .never-head {
+    display: grid;
+    gap: 16px;
+    align-content: start;
+  }
+
+  .never-list {
+    padding: 0;
+    list-style: none;
+  }
+
+  .never-item {
+    padding-block: 20px;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .never-item:last-child {
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .never-item h3 {
+    font-size: 1.125rem;
+  }
+
+  .never-item p {
+    margin-top: 6px;
+    color: var(--color-muted);
+  }
+
+  @media (min-width: 760px) {
+    .screens {
+      grid-template-columns: repeat(2, minmax(0, 400px));
+    }
+
+    .store-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: repeat(5, auto);
+      grid-auto-flow: column;
+      column-gap: 56px;
+    }
+
+    .store:nth-child(6) {
+      border-top: 1px solid var(--color-hairline);
+    }
+  }
+
+  @media (min-width: 820px) {
+    .steps {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 40px;
+    }
+  }
+
+  @media (min-width: 900px) {
+    .hero-grid {
+      grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+      gap: 64px;
+    }
+
+    .never-grid {
+      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+      gap: 64px;
+    }
+  }
+</style>
