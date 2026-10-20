@@ -56,7 +56,8 @@ export default defineConfig({
         "background/service-worker": resolve(__dirname, "src/background/service-worker.ts"),
         "content/source-extractor": resolve(__dirname, "src/content/source-extractor.ts"),
         "content/search-extractor": resolve(__dirname, "src/content/search-extractor.ts"),
-        "content/product-extractor": resolve(__dirname, "src/content/product-extractor.ts")
+        "content/product-extractor": resolve(__dirname, "src/content/product-extractor.ts"),
+        "content/location-setter": resolve(__dirname, "src/content/location-setter.ts")
       },
       output: {
         entryFileNames: "[name].js",

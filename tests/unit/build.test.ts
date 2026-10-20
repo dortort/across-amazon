@@ -52,6 +52,15 @@ const CONTENT_SCRIPTS: ContentScriptCase[] = [
       canonicalUrl: "https://www.amazon.de/dp/B000000005",
       breakdown: { item: { amount: 37.2, currency: "EUR" }, importFees: { amount: 3.2, currency: "EUR" } }
     }
+  },
+  {
+    file: "content/location-setter.js",
+    fixture: "location/nav-switzerland.html",
+    url: "https://www.amazon.de/dp/B09LCMVB3F",
+    requestKey: "__ACROSS_AMAZON_LOCATION_REQUEST__",
+    request: { marketplace: "DE", countryCode: "CH" },
+    resultKey: "__ACROSS_AMAZON_LOCATION_RESULT__",
+    expected: { status: "ALREADY_SET", countryCode: "CH" }
   }
 ];
 
@@ -114,7 +123,7 @@ describe("production build of the content scripts", () => {
         }
 
         expect(() => script.runInContext(isolatedWorld), `injection ${injection}`).not.toThrow();
-        expect(structuredClone(scope[resultKey]), `injection ${injection}`).toMatchObject(expected as object);
+        expect(structuredClone(await scope[resultKey]), `injection ${injection}`).toMatchObject(expected as object);
         delete scope[resultKey];
       }
     }

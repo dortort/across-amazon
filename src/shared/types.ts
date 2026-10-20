@@ -107,6 +107,19 @@ export interface ProductExtractionRequest {
   sourceDeliverTo?: string;
 }
 
+export interface LocationRequest {
+  marketplace: Marketplace;
+  countryCode: string;
+}
+
+export type LocationStatus = "ALREADY_SET" | "SET" | "NO_WIDGET" | "NOT_OFFERED" | "FAILED";
+
+export interface LocationResult {
+  status: LocationStatus;
+  countryCode?: string;
+  reason?: string;
+}
+
 export type ComparisonPhase = "OPEN" | "SEARCH" | "MATCH" | "READ";
 
 export interface RunComparisonProgressPayload {
