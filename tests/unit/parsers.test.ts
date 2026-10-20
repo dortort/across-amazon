@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { extractProductData } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import { extractSourceContext } from "../../src/content/source-extractor";
+import { marketplaceIso } from "../../src/shared/markets";
 import type { Marketplace, SearchCandidate } from "../../src/shared/types";
+import { destinationFields } from "./destination-fields";
 
 const MARKETS: Marketplace[] = ["US", "CA", "MX", "UK", "DE", "FR", "IT", "ES", "JP", "AU"];
 
@@ -86,7 +88,7 @@ describe("content parsers", () => {
         dom.window.document,
         {
           marketplace: market,
-          sourceDestinationCountryCode: market
+          sourceDestinationCountryCode: marketplaceIso(market)
         },
         dom.window.location.href
       );
@@ -115,7 +117,7 @@ describe("content parsers", () => {
     const dom = loadFixture("product", market);
     const result = extractProductData(
       dom.window.document,
-      { marketplace: market, sourceDestinationCountryCode: market },
+      { marketplace: market, sourceDestinationCountryCode: marketplaceIso(market) },
       dom.window.location.href
     );
     const currency = CURRENCY_BY_MARKET[market];
@@ -630,6 +632,61 @@ describe("source brand and ASIN", () => {
 
     expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}${deliverTo}`)?.deliverTo).toBe("Paris 75001 Deliver to Francis");
     expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}`)).not.toHaveProperty("deliverTo");
+  });
+
+  describe("destination", () => {
+    const NAV_SWITZERLAND = new JSDOM(readFileSync(join(process.cwd(), "tests", "fixtures", "location", "nav-switzerland.html"), "utf8")).window
+      .document.body.innerHTML;
+
+    it("reads Switzerland from the page fields Amazon renders for its own scripts", () => {
+      expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}${NAV_SWITZERLAND}`)?.destinationCountryCode).toBe("CH");
+    });
+
+    it.each([
+      ["the vas state of a store that geo-detected Switzerland", { vas: "CH", input: "CH", nav: null }, "CH"],
+      ["the $Nav config of a store with no country input", { vas: "CH", nav: "CH" }, "CH"],
+      ["the $Nav config alone", { nav: "ch" }, "CH"],
+      ["the vas state of a domestic address", { vas: "MX", nav: null }, "MX"]
+    ] as const)("reads %s", (_label, fields, expected) => {
+      const deliverTo = '<span id="glow-ingress-line1">Entrega en Ciudad 01000</span><span id="glow-ingress-line2">Actualizar ubicación</span>';
+
+      expect(
+        sourceFrom(`${SONY_ASIN}${SONY_TITLE}${deliverTo}${destinationFields(fields)}`, "https://www.amazon.com.mx/dp/B09XS7JWHH")
+          ?.destinationCountryCode
+      ).toBe(expected);
+    });
+
+    it("prefers the page fields to a country the Deliver to box names", () => {
+      const deliverTo = '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Germany</span>';
+
+      expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}${deliverTo}${destinationFields({ input: "CH" })}`)?.destinationCountryCode).toBe("CH");
+    });
+
+    it("reads the United Kingdom as GB", () => {
+      const dom = loadFixture("source", "UK");
+      const extracted = extractSourceContext(dom.window.document, dom.window.location.href, dom.window.location.hostname);
+
+      expect(extracted.source?.destinationCountryCode).toBe("GB");
+    });
+
+    it.each([
+      ["US", "https://www.amazon.com/dp/B09XS7JWHH", "New York 10001"],
+      ["CA", "https://www.amazon.ca/dp/B09XS7JWHH", "Town A1A 1A1"],
+      ["GB", "https://www.amazon.co.uk/dp/B09XS7JWHH", "London SW1A 1AA"]
+    ])("reads a town and postcode in the marketplace's own format as %s", (expected, url, place) => {
+      const deliverTo = `<span id="glow-ingress-line1">Deliver to Francis</span><span id="glow-ingress-line2">${place}</span>`;
+
+      expect(sourceFrom(`${SONY_ASIN}${SONY_TITLE}${deliverTo}`, url)?.destinationCountryCode).toBe(expected);
+    });
+
+    it("leaves a country it cannot read unset instead of falling back to the marketplace's", () => {
+      const deliverTo = '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>';
+      const source = sourceFrom(`${SONY_ASIN}${SONY_TITLE}${deliverTo}`);
+
+      expect(source).toBeDefined();
+      expect(source).not.toHaveProperty("destinationCountryCode");
+      expect(source?.deliverTo).toBe("Switzerland Deliver to");
+    });
   });
 
   it.each(MARKETS)("reads the brand from the %s source page", (market) => {

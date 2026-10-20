@@ -50,7 +50,7 @@ export function buildComparisonCacheKey(input: {
   asin: string;
   variationTokens: string[];
   sourceMarketplace: Marketplace;
-  destinationCountryCode: string;
+  destinationCountryCode?: string;
   deliverTo?: string;
   targetMarkets: Marketplace[];
 }): string {
@@ -59,7 +59,7 @@ export function buildComparisonCacheKey(input: {
     input.asin,
     [...input.variationTokens].sort().join("|"),
     input.sourceMarketplace,
-    input.destinationCountryCode,
+    input.destinationCountryCode ?? "",
     (input.deliverTo ?? "").replace(/\s+/g, " ").trim().toLowerCase(),
     [...input.targetMarkets].sort().join("|")
   ].join("::");

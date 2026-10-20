@@ -11,7 +11,7 @@ export interface SourceContext {
   title: string;
   brand?: string;
   variationTokens: string[];
-  destinationCountryCode: string;
+  destinationCountryCode?: string;
   deliverTo?: string;
   sourceUrl: string;
   imageUrl?: string;
@@ -103,7 +103,7 @@ export interface SearchExtractionRequest {
 
 export interface ProductExtractionRequest {
   marketplace: Marketplace;
-  sourceDestinationCountryCode: string;
+  sourceDestinationCountryCode?: string;
   sourceDeliverTo?: string;
 }
 

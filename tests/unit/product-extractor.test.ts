@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { extractProductData } from "../../src/content/product-extractor";
 import { deliveredTotal } from "../../src/shared/money";
 import type { ListingAvailability, Marketplace, Money, PriceBreakdown, ProductExtractionResult } from "../../src/shared/types";
+import { destinationFields } from "./destination-fields";
 
 const PAGE_BY_MARKET: Partial<Record<Marketplace, { url: string; item: string }>> = {
   US: { url: "https://www.amazon.com/dp/B000000001", item: "$49.99" },
@@ -743,7 +744,7 @@ describe("product extractor delivery address", () => {
   ] as const)("reads a %s postcode on %s (%s) as an address at home", (market, host, place) => {
     const result = readDestination(market, host, deliverToBox(place));
 
-    expect(result.destinationCountryCode).toBe(market);
+    expect(result.destinationCountryCode).toBe(market === "UK" ? "GB" : market);
   });
 
   it.each([
@@ -775,7 +776,7 @@ describe("product extractor delivery address", () => {
     expect(read(undefined)).toMatchObject({ destinationCountryCode: "DE", destinationMatched: false });
   });
 
-  it("leaves a country it does not know unresolved, even beside a dated delivery message", () => {
+  it("leaves a country it does not know from the text alone unresolved, even beside a dated delivery message", () => {
     const result = deliveringTo(
       '<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Switzerland</span>' +
         '<div id="deliveryBlockMessage">FREE delivery Friday, October 23</div>'
@@ -783,6 +784,45 @@ describe("product extractor delivery address", () => {
 
     expect(result.destinationCountryCode).toBeUndefined();
     expect(result.destinationMatched).toBe(true);
+  });
+
+  describe("from the page fields Amazon renders for its own scripts", () => {
+    function readFields(sourceDestinationCountryCode: string | undefined, blocks: string): ProductExtractionResult {
+      const dom = new JSDOM(
+        `<!doctype html><html><body><div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">12,34 €</span></span></div>${blocks}</body></html>`,
+        { url: "https://www.amazon.de/dp/B09XS7JWHH" }
+      );
+      return extractProductData(dom.window.document, { marketplace: "DE", sourceDestinationCountryCode }, dom.window.location.href);
+    }
+
+    it("matches Switzerland on a page that the source also delivers to Switzerland", () => {
+      const result = readFields("CH", `${DELIVER_TO_SWITZERLAND}${destinationFields({ vas: "CH", input: "CH", nav: "CH" })}`);
+
+      expect(result).toMatchObject({ destinationCountryCode: "CH", destinationMatched: true });
+      expect(result.notes).not.toContain("Destination mismatch detected (CH)");
+    });
+
+    it("reports Switzerland on a page for a source that delivers to the United States as a mismatch", () => {
+      const result = readFields("US", `${DELIVER_TO_SWITZERLAND}${destinationFields({ input: "CH" })}`);
+
+      expect(result).toMatchObject({ destinationCountryCode: "CH", destinationMatched: false });
+      expect(result.notes).toContain("Destination mismatch detected (CH)");
+    });
+
+    it("prefers the page fields to a country the Deliver to box names", () => {
+      const result = readFields(
+        "CH",
+        `<span id="glow-ingress-line1">Deliver to</span><span id="glow-ingress-line2">Germany</span>${destinationFields({ vas: "CH", nav: null })}`
+      );
+
+      expect(result).toMatchObject({ destinationCountryCode: "CH", destinationMatched: true });
+    });
+
+    it("matches any page when the source destination is unknown", () => {
+      const result = readFields(undefined, `${DELIVER_TO_SWITZERLAND}${destinationFields({ input: "CH" })}`);
+
+      expect(result).toMatchObject({ destinationCountryCode: "CH", destinationMatched: true });
+    });
   });
 
   it.each([
@@ -818,7 +858,7 @@ describe("product extractor delivery address", () => {
     expect(result.destinationCountryCode).toBe("DE");
   });
 
-  it("leaves the live amazon.de page for an address in Switzerland unresolved", () => {
+  it("leaves the live amazon.de page for an address in Switzerland unresolved from its text alone", () => {
     const html = readFileSync(join(process.cwd(), "tests", "fixtures", "product-live", "DE-ships-to-switzerland.html"), "utf8");
     const dom = new JSDOM(html, { url: "https://www.amazon.de/dp/B09LCMVB3F" });
     const result = extractProductData(dom.window.document, { marketplace: "DE", sourceDestinationCountryCode: "US" }, dom.window.location.href);

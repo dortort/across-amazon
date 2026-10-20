@@ -9,7 +9,7 @@ const COUNTRY_ALIASES: CountryAlias[] = [
   { code: "US", aliases: ["united states", "usa", "us"] },
   { code: "CA", aliases: ["canada", "ca"] },
   { code: "MX", aliases: ["mexico", "mx"] },
-  { code: "UK", aliases: ["united kingdom", "great britain", "uk"] },
+  { code: "GB", aliases: ["united kingdom", "great britain", "uk"] },
   { code: "DE", aliases: ["germany", "deutschland", "de"] },
   { code: "FR", aliases: ["france", "fr"] },
   { code: "IT", aliases: ["italy", "italia", "it"] },
@@ -159,6 +159,47 @@ const DOMESTIC_POSTCODE: Record<ProductExtractionRequest["marketplace"], RegExp>
   AU: /(?:^|\D)(\d{4})(?:\D|$)/
 };
 
+const ISO_CODE = /^[A-Z]{2}$/;
+const NAV_COUNTRY = /\$Nav\.declare\(\s*['"]config\.customerCountryCode['"]\s*,\s*['"]([A-Za-z]{2})['"]\s*\)/;
+
+function asIso(value: unknown): string | undefined {
+  const code = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return ISO_CODE.test(code) ? code : undefined;
+}
+
+function readVasCountry(documentRef: Document): string | undefined {
+  for (const script of Array.from(documentRef.querySelectorAll('script[type="a-state"]'))) {
+    try {
+      const state = JSON.parse(script.getAttribute("data-a-state") ?? "{}") as { key?: unknown };
+      if (state.key === "vas-base-vm") {
+        return asIso((JSON.parse(script.textContent ?? "{}") as { countryCode?: unknown }).countryCode);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function readNavCountry(documentRef: Document): string | undefined {
+  for (const script of Array.from(documentRef.querySelectorAll("script:not([src])"))) {
+    const text = script.textContent ?? "";
+    const code = text.includes("customerCountryCode") ? asIso(NAV_COUNTRY.exec(text)?.[1]) : undefined;
+    if (code) {
+      return code;
+    }
+  }
+  return undefined;
+}
+
+function readDestinationIso(documentRef: Document): string | undefined {
+  return (
+    readVasCountry(documentRef) ??
+    asIso(documentRef.querySelector<HTMLInputElement>('input#countryCode[type="hidden"]')?.value) ??
+    readNavCountry(documentRef)
+  );
+}
+
 function readTexts(documentRef: Document, selectors: string[]): string {
   return selectors
     .map((selector) => documentRef.querySelector(selector)?.textContent)
@@ -174,6 +215,11 @@ function readDeliveryDestinations(documentRef: Document): string[] {
 }
 
 function resolveDestinationCountryCode(documentRef: Document, request: ProductExtractionRequest): string | undefined {
+  const machineReadable = readDestinationIso(documentRef);
+  if (machineReadable) {
+    return machineReadable;
+  }
+
   const deliverToText = readTexts(documentRef, DELIVER_TO_SELECTORS);
   const deliverTo = normalize(deliverToText);
   const message = normalize([readTexts(documentRef, DELIVERY_MESSAGE_SELECTORS), ...readDeliveryDestinations(documentRef)].join(" "));
@@ -193,7 +239,10 @@ function resolveDestinationCountryCode(documentRef: Document, request: ProductEx
 
   const postcode = DOMESTIC_POSTCODE[request.marketplace].exec(deliverTo)?.[1];
   const shownOnSource = postcode !== undefined && normalize(request.sourceDeliverTo ?? "").includes(postcode);
-  return postcode && !shownOnSource ? request.marketplace : undefined;
+  if (!postcode || shownOnSource) {
+    return undefined;
+  }
+  return request.marketplace === "UK" ? "GB" : request.marketplace;
 }
 
 interface PriceSource {
@@ -612,7 +661,8 @@ export function extractProductData(
   const currency = itemPrice?.currency ?? shippingAmount?.currency ?? importAmount?.currency ?? marketCurrency;
 
   const destinationDetected = resolveDestinationCountryCode(documentRef, request);
-  const destinationMatched = !destinationDetected || destinationDetected === request.sourceDestinationCountryCode;
+  const destinationMatched =
+    !destinationDetected || !request.sourceDestinationCountryCode || destinationDetected === request.sourceDestinationCountryCode;
 
   if (!destinationMatched) {
     notes.push(`Destination mismatch detected (${destinationDetected})`);

@@ -316,7 +316,7 @@ export function App(): ReactElement {
   const shownView = useRef(view);
 
   const currency = resolveDisplayCurrency(settings.comparisonCurrency, source);
-  const destination = source ? countryName(source.destinationCountryCode) : "your address";
+  const destination = source?.destinationCountryCode ? countryName(source.destinationCountryCode) : "your address";
   const sourceMarket = source?.marketplace ?? baseline?.marketplace;
   const targets = targetMarkets(settings, source);
   const rows = useMemo(() => rankedRows(baseline, results, currency, fxTable), [baseline, results, currency, fxTable]);

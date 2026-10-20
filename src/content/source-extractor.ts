@@ -22,7 +22,7 @@ const COUNTRY_ALIASES: CountryAlias[] = [
   { code: "US", aliases: ["united states", "usa", "u.s.", "us"] },
   { code: "CA", aliases: ["canada", "ca"] },
   { code: "MX", aliases: ["mexico", "mx"] },
-  { code: "UK", aliases: ["united kingdom", "great britain", "uk", "england"] },
+  { code: "GB", aliases: ["united kingdom", "great britain", "uk", "england"] },
   { code: "DE", aliases: ["germany", "deutschland", "de"] },
   { code: "FR", aliases: ["france", "fr"] },
   { code: "IT", aliases: ["italy", "italia", "it"] },
@@ -30,6 +30,64 @@ const COUNTRY_ALIASES: CountryAlias[] = [
   { code: "JP", aliases: ["japan", "jp", "日本"] },
   { code: "AU", aliases: ["australia", "au"] }
 ];
+
+const ISO_CODE = /^[A-Z]{2}$/;
+const NAV_COUNTRY = /\$Nav\.declare\(\s*['"]config\.customerCountryCode['"]\s*,\s*['"]([A-Za-z]{2})['"]\s*\)/;
+
+function asIso(value: unknown): string | undefined {
+  const code = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return ISO_CODE.test(code) ? code : undefined;
+}
+
+function readVasCountry(documentRef: Document): string | undefined {
+  for (const script of Array.from(documentRef.querySelectorAll('script[type="a-state"]'))) {
+    try {
+      const state = JSON.parse(script.getAttribute("data-a-state") ?? "{}") as { key?: unknown };
+      if (state.key === "vas-base-vm") {
+        return asIso((JSON.parse(script.textContent ?? "{}") as { countryCode?: unknown }).countryCode);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function readNavCountry(documentRef: Document): string | undefined {
+  for (const script of Array.from(documentRef.querySelectorAll("script:not([src])"))) {
+    const text = script.textContent ?? "";
+    const code = text.includes("customerCountryCode") ? asIso(NAV_COUNTRY.exec(text)?.[1]) : undefined;
+    if (code) {
+      return code;
+    }
+  }
+  return undefined;
+}
+
+function readDestinationIso(documentRef: Document): string | undefined {
+  return (
+    readVasCountry(documentRef) ??
+    asIso(documentRef.querySelector<HTMLInputElement>('input#countryCode[type="hidden"]')?.value) ??
+    readNavCountry(documentRef)
+  );
+}
+
+const FIVE_DIGITS = /(?:^|\D)(\d{5})(?:\D|$)/;
+
+const DOMESTIC_POSTCODE: Record<SourceContext["marketplace"], RegExp> = {
+  US: /(?:^|\D)(\d{5}(?:-\d{4})?)(?:\D|$)/,
+  CA: /(?:^|[^a-z0-9])([a-z]\d[a-z] ?\d[a-z]\d)(?:[^a-z0-9]|$)/,
+  MX: FIVE_DIGITS,
+  UK: /(?:^|[^a-z0-9])([a-z]{1,2}\d[a-z\d]? ?\d[a-z]{2})(?:[^a-z0-9]|$)/,
+  DE: FIVE_DIGITS,
+  FR: FIVE_DIGITS,
+  IT: FIVE_DIGITS,
+  ES: FIVE_DIGITS,
+  JP: /(?:^|\D)(\d{3}-\d{4})(?:\D|$)/,
+  AU: /(?:^|\D)(\d{4})(?:\D|$)/
+};
+
+const DELIVER_TO_SELECTORS = ["#glow-ingress-line2", "#glow-ingress-line1", "#contextualIngressPtLabel"];
 
 function normalize(value: string): string {
   return value
@@ -124,9 +182,18 @@ function resolveDestinationCountryCode(documentRef: Document): string | undefine
   return undefined;
 }
 
+function domesticIso(documentRef: Document, marketplace: SourceContext["marketplace"]): string | undefined {
+  const deliverTo = normalize(
+    DELIVER_TO_SELECTORS.map((selector) => documentRef.querySelector(selector)?.textContent ?? "").join(" ")
+  );
+  if (!DOMESTIC_POSTCODE[marketplace].test(deliverTo)) {
+    return undefined;
+  }
+  return marketplace === "UK" ? "GB" : marketplace;
+}
+
 function readDeliverTo(documentRef: Document): string | undefined {
-  const text = ["#glow-ingress-line2", "#glow-ingress-line1", "#contextualIngressPtLabel"]
-    .map((selector) => documentRef.querySelector(selector)?.textContent)
+  const text = DELIVER_TO_SELECTORS.map((selector) => documentRef.querySelector(selector)?.textContent)
     .filter(Boolean)
     .join(" ")
     .replace(/\s+/g, " ")
@@ -228,9 +295,14 @@ export function extractSourceContext(documentRef: Document, href: string, hostna
     title,
     brand: extractBrand(documentRef),
     variationTokens: extractVariationTokens(documentRef),
-    destinationCountryCode: resolveDestinationCountryCode(documentRef) ?? marketplace,
     sourceUrl: href
   };
+
+  const destinationCountryCode =
+    readDestinationIso(documentRef) ?? resolveDestinationCountryCode(documentRef) ?? domesticIso(documentRef, marketplace);
+  if (destinationCountryCode) {
+    source.destinationCountryCode = destinationCountryCode;
+  }
 
   const deliverTo = readDeliverTo(documentRef);
   if (deliverTo) {
