@@ -41,13 +41,19 @@ The exchange rate requests carry no information about you or the product. Like a
 
 ## Who receives your data
 
-The extension does not sell your data. The only recipients are the Amazon stores listed above, and they receive only what a comparison needs:
+The extension does not sell your data. The only recipients are the services listed under "Network requests", and each receives only what its request needs.
+
+The Amazon stores receive, with your own Amazon session:
 
 - **Your destination country**, in the store's own "Choose your location" request (see below).
 - **The product's ASIN**, in the addresses of the product pages it opens.
 - **The product's title, brand, model number and selected variant (such as colour or size)**, as the search terms in the addresses of the search pages it opens.
 
-Because these requests carry your Amazon session, Amazon can link them to your account if you are signed in. Nothing is sent to the developer or to any other party.
+Because these requests carry your Amazon session, Amazon can link them to your account if you are signed in. The pages it opens also load whatever Amazon's own pages load, as any visit does.
+
+Amazon's image servers receive the address of the product picture, which identifies the picture, not you. The European Central Bank and Frankfurter receive only a request for the day's exchange rates, which carries nothing about you or the product. Like any web request, each of these lets that server see your IP address.
+
+Nothing is sent to the developer or to anyone else.
 
 ## Changes it makes on Amazon and in your browser
 
@@ -58,7 +64,7 @@ The pages it opens are ordinary visits: they appear in Chrome's history and, if 
 ## What the extension does not do
 
 - It has no analytics, telemetry, advertising or tracking, and no server of its own.
-- It does not sell your data or send it to anyone other than the Amazon stores, as described above.
+- It does not sell your data, and it sends nothing to anyone other than the services described above.
 - It does not use your data for anything other than comparing prices for you.
 
 Across Amazon's use of data complies with the Chrome Web Store User Data Policy, including the Limited Use requirements.
