@@ -14,19 +14,11 @@ From `name` in `manifest.json`.
 
 ### Summary
 
-The dashboard takes the summary from `description` in `manifest.json` (132 characters at most). The current one is 74 characters:
-
-```text
-Compare delivered costs of equivalent products across Amazon marketplaces.
-```
-
-It is accurate but weak: "equivalent products" is vague, and it does not say what "delivered" covers or what the user gets. A proposed replacement, 118 characters:
+The dashboard takes the summary from `description` in `manifest.json` (132 characters at most) and reads it from the uploaded package, so it cannot be edited in the dashboard. The packaged text is 118 characters:
 
 ```text
 See which Amazon store delivers the product you are viewing for less: item, shipping and import fees, in one currency.
 ```
-
-Adopting it means changing `description` in `manifest.json` and packaging a new zip. The dashboard reads the summary from the uploaded package.
 
 ### Detailed description
 
@@ -180,7 +172,7 @@ From `.omc/artifacts/store-assets/final/`:
 - [ ] Paste https://across-amazon.dortort.dev/privacy/ in the privacy policy field of the privacy practices tab, and the website and support URLs in the store listing.
 - [ ] Run `pnpm package` and upload `release/across-amazon-<version>.zip` (the script refuses to package when `manifest.json` and `package.json` disagree on the version).
 - [ ] Fill in the store listing, privacy practices and test instructions from this page, and upload the store graphics.
-- [ ] Decide on the summary: keep the current `description` or adopt the proposed one before packaging.
+- [x] Decide on the summary: the 118-character text above is the packaged `description`.
 - [ ] Decide on the icon and store graphics: the orange curved arrow under the globe can read as Amazon's smile logo, which a reviewer may take as implied endorsement. Reshaping or recolouring the arrow before submitting lowers that risk; keep the "Not affiliated with or endorsed by Amazon" line either way.
 - [ ] Decide whether the privacy policy names the publisher, and with which name, before publishing it.
 - [ ] Check that every pointer above still matches the code that was packaged.
