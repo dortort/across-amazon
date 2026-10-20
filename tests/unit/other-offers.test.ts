@@ -214,15 +214,31 @@ describe("parseOtherOffers on live panels for a delivery address in Switzerland"
     expect(panel.offers[3].shipping).toEqual({ amount: 0, currency: "EUR" });
   });
 
-  it("reads the delivery amount of a message that also offers free delivery above a threshold", () => {
+  it.each([
+    ["€3.99 delivery · FREE delivery on orders over €29", { amount: 3.99, currency: "EUR" }],
+    ["FREE delivery on orders over €29", { amount: 0, currency: "EUR" }],
+    ["FREE delivery Monday", { amount: 0, currency: "EUR" }],
+    ["€55.26 delivery", { amount: 55.26, currency: "EUR" }]
+  ])("reads the delivery message %s by whichever comes first, an amount or the free marker", (text, shipping) => {
     const panel = parsePanel(DE_PANEL, "EUR", (document) => {
       const upsell = firstOffer(document).querySelector("#mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE");
       if (upsell) {
-        upsell.textContent = "€3.99 delivery · FREE delivery on orders over €29";
+        upsell.textContent = text;
       }
     });
 
-    expect(panel.offers[0].shipping).toEqual({ amount: 3.99, currency: "EUR" });
+    expect(panel.offers[0].shipping).toEqual(shipping);
+  });
+
+  it("keeps the delivery price attribute ahead of a free marker in the message text", () => {
+    const panel = parsePanel(DE_PANEL, "EUR", (document) => {
+      const message = document.querySelector("[data-csa-c-delivery-price]");
+      if (message) {
+        message.textContent = "FREE delivery Monday";
+      }
+    });
+
+    expect(panel.offers[3].shipping).toEqual({ amount: 19, currency: "EUR" });
   });
 
   it("reads the item price from its accessibility label when the visible price parts are missing", () => {

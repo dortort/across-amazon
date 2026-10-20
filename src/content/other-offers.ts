@@ -1,4 +1,4 @@
-import { collapseText, hasFreeMarker, normalize, parseCurrencyMarkedMoney, parseMoney, readDeliveryPrice, readPriceText } from "./price-reading";
+import { collapseText, normalize, parseCurrencyMarkedMoney, parseMoney, readChargeText, readDeliveryPrice, readPriceText } from "./price-reading";
 import type { ParsedMoney } from "./price-reading";
 
 const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
@@ -76,13 +76,9 @@ function readShipping(offer: Element, item: ParsedMoney | undefined, marketCurre
   }
 
   for (const message of Array.from(offer.querySelectorAll(DELIVERY_MESSAGES))) {
-    const text = message.textContent ?? "";
-    const amount = parseCurrencyMarkedMoney(text, marketCurrency);
-    if (amount) {
-      return amount;
-    }
-    if (hasFreeMarker(text)) {
-      return free;
+    const charge = readChargeText(message.textContent ?? "", marketCurrency);
+    if (charge) {
+      return charge.amount ?? free;
     }
   }
 
