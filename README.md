@@ -2,6 +2,8 @@
 
 Across Amazon is a Chrome MV3 extension that compares delivered product cost across Amazon marketplaces. On an Amazon product page, it checks the same product on the other marketplaces and ranks them by delivered total (item price + shipping + import fees, as shown on Amazon pages) against the page you are on.
 
+The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ, the support page and how the permissions and data are used.
+
 <p align="center">
   <img src="docs/screenshots/done.png" width="400" alt="Popup verdict: save $50.94 by buying the headphones from Germany for $349.05 delivered instead of $399.99 on amazon.com">
 </p>
@@ -72,6 +74,7 @@ See [Testing](docs/testing.md) for first-time Playwright setup and how the basel
 - `tests/e2e`: Playwright popup flows, design assertions and snapshots
 - `scripts`: Linux snapshot regeneration and docs screenshot capture
 - `docs`: user guide, architecture, testing and screenshots
+- `docs-site`: the documentation website, built with Astro and deployed to GitHub Pages
 
 ## Guardrails
 
