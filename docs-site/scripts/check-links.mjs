@@ -14,7 +14,7 @@ const USAGE = "Usage: node scripts/check-links.mjs <distDir> [--external] [--req
 const TAG_PATTERN = /<[a-zA-Z][\w:-]*(?:"[^"]*"|'[^']*'|[^"'>])*>/g;
 const TAG_NAME_PATTERN = /^<([a-zA-Z][\w:-]*)/;
 const ATTRIBUTE_PATTERN = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
-const COMMENT_OR_RAW_TEXT_PATTERN = /<!--[\s\S]*?-->|(<(script|style)(?=[\s/>])[^>]*>)[\s\S]*?(<\/\2\s*>)/gi;
+const RAW_TEXT_OPENING_PATTERN = /<(script|style)(?=[\s/>])[^>]*>/gi;
 const SRCSET_CANDIDATE_PATTERN = /[\s,]*(\S*[^\s,])(?:,+(?=\s|$)|\s+[^,]*)?/g;
 const NAMED_ENTITIES = new Map([
   ["amp", "&"],
@@ -111,10 +111,36 @@ function decodeHtmlEntities(value) {
   });
 }
 
+function findRawTextOpening(html, fromIndex) {
+  RAW_TEXT_OPENING_PATTERN.lastIndex = fromIndex;
+  return RAW_TEXT_OPENING_PATTERN.exec(html);
+}
+
 function removeCommentsAndRawText(html) {
-  return html.replace(COMMENT_OR_RAW_TEXT_PATTERN, (_match, rawTextOpening, _tagName, rawTextClosing) =>
-    rawTextOpening === undefined ? "" : `${rawTextOpening}${rawTextClosing}`
-  );
+  let output = "";
+  let index = 0;
+  while (index < html.length) {
+    const commentStart = html.indexOf("<!--", index);
+    const rawTextOpening = findRawTextOpening(html, index);
+    const rawTextStart = rawTextOpening === null ? -1 : rawTextOpening.index;
+    if (commentStart === -1 && rawTextStart === -1) {
+      output += html.slice(index);
+      break;
+    }
+    if (rawTextStart === -1 || (commentStart !== -1 && commentStart < rawTextStart)) {
+      output += html.slice(index, commentStart);
+      const commentEnd = html.indexOf("-->", commentStart + "<!--".length);
+      index = commentEnd === -1 ? html.length : commentEnd + "-->".length;
+      continue;
+    }
+    const bodyStart = rawTextStart + rawTextOpening[0].length;
+    const closing = new RegExp(`</${rawTextOpening[1]}\\s*>`, "i").exec(html.slice(bodyStart));
+    output += html.slice(index, bodyStart);
+    if (closing === null) break;
+    output += closing[0];
+    index = bodyStart + closing.index + closing[0].length;
+  }
+  return output;
 }
 
 function readTags(html) {
