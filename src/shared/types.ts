@@ -57,6 +57,7 @@ export interface ComparisonResult {
   breakdown?: PriceBreakdown;
   normalizedTotal?: Money;
   otherSeller?: OtherSeller;
+  otherOffers?: OfferQuote[];
   notes?: string[];
 }
 

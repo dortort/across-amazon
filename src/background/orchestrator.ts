@@ -11,7 +11,7 @@ import {
   variantConflicts
 } from "../shared/matching";
 import { deliveredTotalIn, getDefaultCurrencyForMarketplace } from "../shared/money";
-import { sortComparisonResults } from "../shared/comparison";
+import { sortComparisonResults, withCheapestOtherOffer } from "../shared/comparison";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
 import type {
   ComparisonPhase,
@@ -256,21 +256,22 @@ function resolveComparisonCurrency(settings: ExtensionSettings, source: SourceCo
 }
 
 function normalizeResult(result: ComparisonResult, currency: string, fxTable: FxTable): ComparisonResult {
-  if (result.status !== "OK" || !result.breakdown) {
-    return result;
+  const quoted = withCheapestOtherOffer(result, currency, fxTable);
+  if (quoted.status !== "OK" || !quoted.breakdown) {
+    return quoted;
   }
 
-  const normalizedTotal = deliveredTotalIn(result.breakdown, currency, fxTable);
+  const normalizedTotal = deliveredTotalIn(quoted.breakdown, currency, fxTable);
   if (!normalizedTotal) {
     return {
-      ...result,
+      ...quoted,
       status: "UNAVAILABLE",
-      notes: [...(result.notes ?? []), `Missing FX conversion path to ${currency}`]
+      notes: [...(quoted.notes ?? []), `Missing FX conversion path to ${currency}`]
     };
   }
 
   return {
-    ...result,
+    ...quoted,
     normalizedTotal
   };
 }
@@ -306,6 +307,7 @@ async function extractBaseline(
         ...(breakdown.totalDisplayed ? { totalDisplayed: breakdown.totalDisplayed } : {})
       },
       ...(extraction.otherSeller ? { otherSeller: extraction.otherSeller } : {}),
+      ...(extraction.otherOffers ? { otherOffers: extraction.otherOffers } : {}),
       notes: extraction.notes
     };
   } catch {
@@ -529,6 +531,7 @@ function buildProductResult(
     productUrl,
     breakdown: productData.breakdown,
     ...(productData.otherSeller ? { otherSeller: productData.otherSeller } : {}),
+    ...(productData.otherOffers ? { otherOffers: productData.otherOffers } : {}),
     notes: [...notes, ...productData.notes.filter((note) => note.toLowerCase().includes("shipping") === false)]
   };
 }
