@@ -399,10 +399,17 @@ export function loadingHint(page: Page): Locator {
   return page.getByText(LOADING_HINT, { exact: true });
 }
 
+export function brandMark(page: Page): Locator {
+  return page.locator(".dB-brand img.dB-mark");
+}
+
 export async function openPopup(page: Page, scn: Scenario = scenario()): Promise<void> {
   await installChromeMock(page, scn);
   await page.goto("/popup.html");
   await page.waitForFunction(() => window.__aa.listenerCount() > 0);
+  await expect
+    .poll(() => brandMark(page).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0))
+    .toBe(true);
   if (scn.holdLoadSource) {
     await expect.poll(() => sentTypes(page)).toContain(LOAD_SOURCE);
   } else {
