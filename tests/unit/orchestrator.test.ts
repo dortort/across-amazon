@@ -682,12 +682,15 @@ function offerOnlyOtherSellers(document: Document): void {
   for (const selector of OFFER_SELECTORS) {
     removeElement(document, selector);
   }
-  const asin = /\/dp\/([A-Z0-9]{10})/i.exec(document.URL)?.[1] ?? "";
   document.body.insertAdjacentHTML(
     "beforeend",
-    `<div id="olpLinkWidget_feature_div"><input type="hidden" id="all-offers-display-params" data-asin="${asin}" data-m="" data-qid="" data-smid="" data-sourcecustomerorglistid="" data-sourcecustomerorglistitemid="" data-sr=""></div>` +
+    '<div id="olpLinkWidget_feature_div"><input type="hidden" id="all-offers-display-params" data-m="" data-qid="" data-smid="" data-sourcecustomerorglistid="" data-sourcecustomerorglistitemid="" data-sr=""></div>' +
       '<span id="buybox-see-all-buying-choices"><span class="a-button-inner"><a class="a-button-text">See All Buying Options</a></span></span>'
   );
+  const asin = /\/dp\/([A-Z0-9]{10})/i.exec(document.URL)?.[1];
+  if (asin) {
+    document.querySelector("#all-offers-display-params")?.setAttribute("data-asin", asin);
+  }
 }
 
 function offersUrl(origin: string, asin: string): string {
