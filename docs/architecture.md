@@ -183,5 +183,6 @@ Everything lives in `chrome.storage.local`:
 | `src/options/` | Options page: marketplaces, comparison currency (including CAD, MXN and AUD), a non-affiliation statement, explicit save. |
 | `vite.config.ts` | Multi-entry build (popup, options, service worker, four content scripts) and the IIFE plugin. |
 | `manifest.json` | Copied into `dist/` by `pnpm build`. |
+| `public/icons/` | Extension icons at 16, 32, 48 and 128 pixels, copied into `dist/icons/` by the build. |
 
 See [Testing](testing.md) for how each layer is tested.
