@@ -128,9 +128,9 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
                 Amazon did not show the item price or the shipping for your destination, for example because the item
                 cannot be shipped there. The note names the destination, for example: “Amazon did not show a delivered
                 price to Switzerland.” When Amazon gives a reason, the note repeats it. When the page offered{" "}
-                <span class="nowrap">“See All Buying Options”</span>, the extension read that list first, so this status
-                means that no seller there delivers the item new to your destination either, or that the list could not
-                be read, and the note says which.
+                <span class="nowrap">“See All Buying Options”</span> and did not say the item is currently unavailable,
+                the extension read that list first, so this status then means that no seller there delivers the item
+                new to your destination either, or that the list could not be read, and the note says which.
               </td>
             </tr>
             <tr>
