@@ -79,7 +79,7 @@ pnpm test:e2e:linux-snapshots                                       # Linux base
 
 ### The CI container must match Playwright
 
-The `e2e` job in `.github/workflows/ci.yml` runs inside `mcr.microsoft.com/playwright:v1.58.2-noble`, and `@playwright/test` is pinned to exactly `1.58.2` in `package.json`, without a range. The image ships the browser builds for one Playwright release. If the package and the image drift apart, Playwright cannot find its browsers, or the Linux baselines stop matching what CI renders.
+The `e2e` job in `.github/workflows/ci.yml` runs inside `mcr.microsoft.com/playwright:v1.64.0-noble`, and `@playwright/test` is pinned to exactly `1.64.0` in `package.json`, without a range. The image ships the browser builds for one Playwright release. If the package and the image drift apart, Playwright cannot find its browsers, or the Linux baselines stop matching what CI renders.
 
 When you upgrade Playwright, in the same change:
 
