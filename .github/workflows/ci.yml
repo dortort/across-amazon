@@ -14,6 +14,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Fail if the root lockfile lists importers other than the root project
+        run: |
+          awk '/^importers:/ { s = 1; next } /^[^ ]/ { s = 0 }
+            s && /^  [^ ]/ && $1 != ".:" { sub(/:$/, "", $1); print "::error file=pnpm-lock.yaml,line=" NR "::Stray importer " $1 " in the root lockfile"; bad = 1 }
+            END { exit bad }' pnpm-lock.yaml
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v6.1.0
         with:
