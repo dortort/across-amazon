@@ -31,8 +31,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+      - name: Install dependencies from the lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
         run: pnpm lint
@@ -61,8 +61,8 @@ jobs:
         with:
           version: 10
 
-      - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+      - name: Install dependencies from the lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: E2E tests
         run: pnpm test:e2e
