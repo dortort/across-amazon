@@ -3,6 +3,7 @@ import rawConfig from "../site.config.json";
 export interface SiteConfig {
   chromeWebStoreUrl: string;
   supportIssuesUrl: string;
+  supportEmail: string;
   securityReportUrl: string;
   repositoryUrl: string;
 }
@@ -14,7 +15,7 @@ export interface NavigationItem {
 
 export const siteConfig: SiteConfig = rawConfig;
 
-export const { chromeWebStoreUrl, supportIssuesUrl, securityReportUrl, repositoryUrl } = siteConfig;
+export const { chromeWebStoreUrl, supportIssuesUrl, supportEmail, securityReportUrl, repositoryUrl } = siteConfig;
 
 const isHttpsUrl = (value: string): boolean => {
   if (!URL.canParse(value)) return false;
