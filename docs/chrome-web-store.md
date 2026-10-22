@@ -63,7 +63,7 @@ Homepage URL: https://across-amazon.dortort.dev/
 Support URL: https://across-amazon.dortort.dev/support/
 ```
 
-Both pages are part of the website in `docs-site/`. The support page routes bug reports to GitHub Issues and security reports to private vulnerability reporting, so no email address is published.
+Both pages are part of the website in `docs-site/`. The support page routes bug reports to GitHub Issues and security reports to private vulnerability reporting, and gives support@dortort.dev, the contact email the listing shows, for help by email instead of GitHub.
 
 ## Privacy practices tab
 

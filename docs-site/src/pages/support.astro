@@ -4,16 +4,18 @@ import PageIntro from "../components/PageIntro.astro";
 import StoreButton from "../components/StoreButton.astro";
 import Toc from "../components/Toc.astro";
 import { stores } from "../data/stores";
-import { isStoreLive, repositoryUrl, securityReportUrl, supportIssuesUrl } from "../site.config";
+import { isStoreLive, repositoryUrl, securityReportUrl, supportEmail, supportIssuesUrl } from "../site.config";
 
 const storeDomains = stores.map((store) => store.domain);
 const supportedStoreList = `${storeDomains.slice(0, -1).join(", ")} and ${storeDomains.at(-1)}`;
 const securityPolicyUrl = `${repositoryUrl}/security/policy`;
+const supportEmailUrl = `mailto:${supportEmail}`;
 
 const sections = {
   "before-you-ask": "Check these first",
   report: "Report a problem",
   "feature-requests": "Suggest an improvement",
+  email: "Email the developer",
   security: "Report a security problem",
   "store-listing": "Chrome Web Store",
 } as const;
@@ -27,7 +29,7 @@ const tocItems = Object.entries(sections).map(([id, heading]) => ({ href: `#${id
 >
   <PageIntro
     title="Support"
-    lede="Most questions have a short answer in the FAQ. For anything else, ask the developer on GitHub."
+    lede="Most questions have a short answer in the FAQ. For anything else, ask the developer on GitHub or by email."
   />
   <div class="container page-body">
     <Toc items={tocItems} />
@@ -145,6 +147,14 @@ const tocItems = Object.entries(sections).map(([id, heading]) => ({ href: `#${id
       <p>
         Ideas go to the same place. <a href={supportIssuesUrl}>Open an issue on GitHub</a>, and say what you wanted to
         do and where the extension fell short.
+      </p>
+
+      <h2 id="email">{sections.email}</h2>
+      <p>
+        Questions, problem reports and ideas can also go by email to <a href={supportEmailUrl}>{supportEmail}</a>, for
+        example if you have no GitHub account or would rather not post in public. The advice
+        on <a href="#what-to-include">what to include</a> and <a href="#what-never-to-include">what never to include</a> also
+        applies to email.
       </p>
 
       <h2 id="security">{sections.security}</h2>
