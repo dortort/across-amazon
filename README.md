@@ -2,6 +2,8 @@
 
 Across Amazon is a Chrome MV3 extension that compares delivered product cost across Amazon marketplaces. On an Amazon product page, it checks the same product on the other marketplaces and ranks them by delivered total (item price + shipping + import fees, as shown on Amazon pages) against the page you are on.
 
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc).
+
 The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ, the support page and how the permissions and data are used.
 
 <p align="center">
