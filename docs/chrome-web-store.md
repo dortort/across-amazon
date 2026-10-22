@@ -2,6 +2,8 @@
 
 Everything the Chrome Web Store developer dashboard asks for, drafted from the code. Paste each block into the field it names. Each claim comes from the code, with a pointer where it matters, so check the pointers again when the code changes.
 
+Version 0.1.0 was submitted on 2026-10-20 and published on 2026-10-22. The listing is at https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc.
+
 ## Store listing
 
 ### Name
@@ -165,14 +167,14 @@ From `.omc/artifacts/store-assets/final/`:
 
 ## Pre-submission checklist
 
-- [ ] Register the developer account and pay the one-time registration fee.
-- [ ] Turn on 2-Step Verification for the Google account that owns the developer account; the dashboard will not publish without it.
-- [ ] Make the Trader or Non-Trader declaration in the account settings, as required for the EU Digital Services Act.
-- [ ] Set and verify the contact email in the account settings.
-- [ ] Paste https://across-amazon.dortort.dev/privacy/ in the privacy policy field of the privacy practices tab, and the website and support URLs in the store listing.
-- [ ] Run `pnpm package` and upload `release/across-amazon-<version>.zip` (the script refuses to package when `manifest.json` and `package.json` disagree on the version).
-- [ ] Fill in the store listing, privacy practices and test instructions from this page, and upload the store graphics.
+- [x] Register the developer account and pay the one-time registration fee.
+- [x] Turn on 2-Step Verification for the Google account that owns the developer account; the dashboard will not publish without it.
+- [x] Make the Trader or Non-Trader declaration in the account settings, as required for the EU Digital Services Act.
+- [x] Set and verify the contact email in the account settings.
+- [x] Paste https://across-amazon.dortort.dev/privacy/ in the privacy policy field of the privacy practices tab, and the website and support URLs in the store listing.
+- [x] Run `pnpm package` and upload `release/across-amazon-<version>.zip` (the script refuses to package when `manifest.json` and `package.json` disagree on the version).
+- [x] Fill in the store listing, privacy practices and test instructions from this page, and upload the store graphics.
 - [x] Decide on the summary: the 118-character text above is the packaged `description`.
-- [ ] Decide on the icon and store graphics: the orange curved arrow under the globe can read as Amazon's smile logo, which a reviewer may take as implied endorsement. Reshaping or recolouring the arrow before submitting lowers that risk; keep the "Not affiliated with or endorsed by Amazon" line either way.
+- [x] Decide on the icon and store graphics: the orange curved arrow under the globe can read as Amazon's smile logo, which a reviewer may take as implied endorsement. The icon and graphics were submitted with the arrow as drawn, and the description carries the "Not affiliated with or endorsed by Amazon" line.
 - [ ] Decide whether the privacy policy names the publisher, and with which name, before publishing it.
 - [ ] Check that every pointer above still matches the code that was packaged.
