@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import PageIntro from "../components/PageIntro.astro";
 import { stores } from "../data/stores";
+import { chromeWebStoreUrl, isStoreLive } from "../site.config";
 
 const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).format(
   stores.map((store) => store.country),
@@ -19,7 +20,8 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
             <p class="release-label">First release</p>
           </div>
           <p class="release-status">
-            Prepared for the Chrome Web Store. The listing appears on the <a href="/">homepage</a> once it is published.
+            Published on the {isStoreLive ? <a href={chromeWebStoreUrl}>Chrome Web Store</a> : "Chrome Web Store"} on{" "}
+            <time datetime="2026-10-22">2026-10-22</time>.
           </p>
         </header>
 
