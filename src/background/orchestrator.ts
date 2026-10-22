@@ -104,7 +104,7 @@ function waitForTabComplete(tabId: number, timeoutMs = 15_000): Promise<void> {
       }
     };
 
-    const onUpdated = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo): void => {
+    const onUpdated = (updatedTabId: number, changeInfo: chrome.tabs.OnUpdatedInfo): void => {
       if (updatedTabId === tabId && changeInfo.status === "complete") {
         settle();
       }
