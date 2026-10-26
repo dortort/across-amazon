@@ -170,7 +170,7 @@ test.describe("a full comparison", () => {
     const running = dial(page);
     await expect(running.count).toHaveText("0/9");
     await expect(running.ring).toHaveAttribute("style", /--p:\s*0%/);
-    await expect(running.nowline).toHaveText("Opening tab Canada");
+    await expect(running.nowline).toHaveText("Checking Canada");
     await expect(running.nowline).toHaveAttribute("aria-live", "polite");
     await expect(running.nowsub).toHaveText("amazon.ca");
     await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
@@ -321,7 +321,7 @@ test.describe("a full comparison", () => {
     expect(await sentMessages(page, RUN_COMPARISON)).toEqual([RUN_REQUEST, RUN_REQUEST]);
     expect(new Set(await runIds(page)).size).toBe(2);
     await expect(running.count).toHaveText("0/9");
-    await expect(running.nowline).toHaveText("Opening tab Canada");
+    await expect(running.nowline).toHaveText("Checking Canada");
     await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
     await expect(page.getByRole("button", { name: "Stop checking" })).toBeVisible();
 
@@ -653,7 +653,7 @@ test.describe("stopping a run", () => {
 
     const running = dial(page);
     await expect(running.count).toHaveText("0/9");
-    await expect(running.nowline).toHaveText("Opening tab Canada");
+    await expect(running.nowline).toHaveText("Checking Canada");
     await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
     await expect(page.getByText("Something went wrong")).toHaveCount(0);
     await expect(page.getByText(CANCELLED)).toHaveCount(0);
@@ -682,7 +682,7 @@ test.describe("another tab's comparison", () => {
 
     const running = dial(page);
     await expect(running.count).toHaveText("0/9");
-    await expect(running.nowline).toHaveText("Opening tab Canada");
+    await expect(running.nowline).toHaveText("Checking Canada");
     await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
     await expect(page.getByText("ECB daily rates")).toBeVisible();
     await expect(page.getByRole("button", { name: "Check again" })).toHaveCount(0);

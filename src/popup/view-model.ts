@@ -7,6 +7,7 @@ import type {
   ComparisonStatus,
   ExtensionSettings,
   FxTable,
+  MarketProgress,
   Marketplace,
   Money,
   OtherSeller,
@@ -41,6 +42,11 @@ export interface DeltaText {
   cls: "flat" | "down" | "up";
 }
 
+export interface CheckChipEntry {
+  marketplace: Marketplace;
+  result?: ComparisonResult;
+}
+
 const MATCH_CHECK_THRESHOLD = 0.9;
 const SECONDS_PER_MARKET = 3;
 const MIN_ESTIMATED_SECONDS = 5;
@@ -56,7 +62,7 @@ const STATUS_TEXT: Record<ComparisonStatus, string> = {
 };
 
 const PHASE_LABEL: Record<ComparisonPhase, string> = {
-  OPEN: "Opening tab",
+  OPEN: "Checking",
   SEARCH: "Searching",
   MATCH: "Matching product",
   READ: "Reading cost stack"
@@ -156,12 +162,25 @@ export function issues(results: ComparisonResult[]): ComparisonResult[] {
     .sort((left, right) => canonicalIndex(left.marketplace) - canonicalIndex(right.marketplace));
 }
 
-export function inCheckOrder(results: ComparisonResult[], order: Marketplace[]): ComparisonResult[] {
-  const position = (marketplace: Marketplace): number => {
+function checkPosition(order: Marketplace[]): (marketplace: Marketplace) => number {
+  return (marketplace) => {
     const index = order.indexOf(marketplace);
     return index === -1 ? order.length + canonicalIndex(marketplace) : index;
   };
-  return [...results].sort((left, right) => position(left.marketplace) - position(right.marketplace));
+}
+
+export function checkChips(
+  results: ComparisonResult[],
+  inFlight: MarketProgress[],
+  order: Marketplace[]
+): CheckChipEntry[] {
+  const position = checkPosition(order);
+  const finished = new Set(results.map((result) => result.marketplace));
+  const entries: CheckChipEntry[] = [
+    ...results.map((result) => ({ marketplace: result.marketplace, result })),
+    ...inFlight.filter((entry) => !finished.has(entry.marketplace)).map(({ marketplace }) => ({ marketplace }))
+  ];
+  return entries.sort((left, right) => position(left.marketplace) - position(right.marketplace));
 }
 
 export function needsMatchCheck(result: ComparisonResult): boolean {
@@ -397,6 +416,14 @@ export function otherSellerNote(result: ComparisonResult): string | undefined {
 
 export function phaseLabel(phase?: ComparisonPhase): string {
   return phase ? PHASE_LABEL[phase] : PHASE_LABEL.OPEN;
+}
+
+export function startingMarkets(runTargets: Marketplace[]): MarketProgress[] {
+  return runTargets.slice(0, 1).map((marketplace) => ({ marketplace, phase: "OPEN" }));
+}
+
+export function shownMarket(inFlight: MarketProgress[], latest?: MarketProgress): MarketProgress | undefined {
+  return inFlight.find((entry) => entry.marketplace === latest?.marketplace) ?? inFlight[0];
 }
 
 export function trustSentence(result: ComparisonResult, isSource = false): string {

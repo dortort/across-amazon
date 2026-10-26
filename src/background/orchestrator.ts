@@ -754,11 +754,12 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
     for (const [index, targetMarket] of targetMarkets.entries()) {
       const enterPhase = (phase: ComparisonPhase): void => {
         assertNotCancelled(token);
+        const latest = { marketplace: targetMarket, phase };
         pushProgress({
           completed: index,
           total,
-          currentMarketplace: targetMarket,
-          phase,
+          inFlight: [latest],
+          latest,
           results: sortComparisonResults(results),
           fxTable: table,
           activeTabId,
@@ -777,7 +778,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
     }
 
     const sortedResults = sortComparisonResults(results);
-    pushProgress({ completed: total, total, results: sortedResults, fxTable: table, activeTabId, runId });
+    pushProgress({ completed: total, total, inFlight: [], results: sortedResults, fxTable: table, activeTabId, runId });
 
     const payload: RunComparisonResultPayload = {
       source,

@@ -198,11 +198,16 @@ export type PageJobResult =
 
 export type ComparisonPhase = "OPEN" | "SEARCH" | "MATCH" | "READ";
 
+export interface MarketProgress {
+  marketplace: Marketplace;
+  phase: ComparisonPhase;
+}
+
 export interface RunComparisonProgressPayload {
   completed: number;
   total: number;
-  currentMarketplace?: Marketplace;
-  phase?: ComparisonPhase;
+  inFlight: MarketProgress[];
+  latest?: MarketProgress;
   results?: ComparisonResult[];
   fxTable?: FxTable;
   activeTabId?: number;

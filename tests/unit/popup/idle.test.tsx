@@ -195,9 +195,11 @@ describe("idle view", () => {
     ]);
     expect(screen.getByText("0/9")).toHaveClass("dB-dial-num");
     expect(app.container.querySelector<HTMLElement>(".dB-dial")?.style.getPropertyValue("--p")).toBe("0%");
-    expect(app.container.querySelector(".dB-nowline")).toHaveTextContent("Opening tab Canada");
+    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Checking Canada");
     expect(app.container.querySelector(".dB-nowsub")).toHaveTextContent("amazon.ca");
-    expect(app.container.querySelector(".dB-chk.now")).toHaveTextContent("🇨🇦 CA …");
+    expect(Array.from(app.container.querySelectorAll(".dB-chk.now")).map((chip) => chip.textContent)).toEqual([
+      "🇨🇦 CA …"
+    ]);
     expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
   });
 

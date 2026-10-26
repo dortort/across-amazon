@@ -1,6 +1,7 @@
 import { act, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CANCEL_COMPARISON, RUN_COMPARISON } from "../../../src/shared/messages";
+import type { ComparisonPhase, Marketplace, RunComparisonProgressPayload } from "../../../src/shared/types";
 import {
   ACTIVE_TAB_ID,
   au,
@@ -20,6 +21,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function now(
+  ...entries: Array<[Marketplace, ComparisonPhase]>
+): Pick<RunComparisonProgressPayload, "inFlight" | "latest"> {
+  const inFlight = entries.map(([marketplace, phase]) => ({ marketplace, phase }));
+  return { inFlight, latest: inFlight[0] };
+}
+
 function runningState(container: HTMLElement) {
   return {
     dial: container.querySelector<HTMLElement>(".dB-dial")?.style.getPropertyValue("--p"),
@@ -32,24 +40,46 @@ function runningState(container: HTMLElement) {
 }
 
 describe("running view", () => {
-  it("follows each progress message: dial, count, phase, market, domain and chips", async () => {
+  it("shows the first target being checked before any progress arrives", async () => {
     const app = await renderRunning();
 
-    app.progress({ completed: 0, total: 9, currentMarketplace: "CA", phase: "SEARCH", results: [] });
     expect(runningState(app.container)).toEqual({
       dial: "0%",
       count: "0/9",
-      nowline: "Searching Canada",
+      nowline: "Checking Canada",
       market: "Canada",
       domain: "amazon.ca",
       chips: [["dB-chk now", "🇨🇦 CA …"]]
     });
+  });
 
-    app.progress({ completed: 4, total: 9, currentMarketplace: "FR", phase: "MATCH", results: [de, uk, ca, mx] });
+  it("follows each progress message: dial, count, phase, market, domain and chips", async () => {
+    const app = await renderRunning();
+
+    app.progress({ completed: 0, total: 9, ...now(["CA", "SEARCH"], ["MX", "OPEN"], ["UK", "OPEN"]), results: [] });
+    expect(runningState(app.container)).toEqual({
+      dial: "0%",
+      count: "0/9",
+      nowline: "Searching Canada +2",
+      market: "Canada",
+      domain: "amazon.ca",
+      chips: [
+        ["dB-chk now", "🇨🇦 CA …"],
+        ["dB-chk now", "🇲🇽 MX …"],
+        ["dB-chk now", "🇬🇧 UK …"]
+      ]
+    });
+
+    app.progress({
+      completed: 4,
+      total: 9,
+      ...now(["FR", "MATCH"], ["IT", "SEARCH"], ["ES", "OPEN"]),
+      results: [de, uk, ca, mx]
+    });
     expect(runningState(app.container)).toEqual({
       dial: "44%",
       count: "4/9",
-      nowline: "Matching product France",
+      nowline: "Matching product France +2",
       market: "France",
       domain: "amazon.fr",
       chips: [
@@ -57,17 +87,13 @@ describe("running view", () => {
         ["dB-chk bad", "🇲🇽 MX —"],
         ["dB-chk ok", "🇬🇧 UK $372.16"],
         ["dB-chk ok", "🇩🇪 DE $349.05"],
-        ["dB-chk now", "🇫🇷 FR …"]
+        ["dB-chk now", "🇫🇷 FR …"],
+        ["dB-chk now", "🇮🇹 IT …"],
+        ["dB-chk now", "🇪🇸 ES …"]
       ]
     });
 
-    app.progress({
-      completed: 8,
-      total: 9,
-      currentMarketplace: "AU",
-      phase: "READ",
-      results: [de, it_, uk, ca, mx, jp]
-    });
+    app.progress({ completed: 8, total: 9, ...now(["AU", "READ"]), results: [de, it_, uk, ca, mx, jp] });
     const state = runningState(app.container);
     expect(state.dial).toBe("89%");
     expect(state.count).toBe("8/9");
@@ -88,20 +114,40 @@ describe("running view", () => {
     const app = await renderRunning();
     const okChips = () => runningState(app.container).chips.filter(([className]) => className !== "dB-chk now");
 
-    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", phase: "OPEN", results: [ca] });
-    app.progress({ completed: 3, total: 9, currentMarketplace: "DE", phase: "OPEN", results: [uk, ca, mx] });
+    app.progress({ completed: 1, total: 9, ...now(["MX", "OPEN"]), results: [ca] });
+    app.progress({ completed: 3, total: 9, ...now(["DE", "OPEN"]), results: [uk, ca, mx] });
     const before = okChips();
-    app.progress({ completed: 4, total: 9, currentMarketplace: "FR", phase: "OPEN", results: [de, uk, ca, mx] });
+    app.progress({ completed: 4, total: 9, ...now(["FR", "OPEN"]), results: [de, uk, ca, mx] });
 
     expect(before.map(([, text]) => text)).toEqual(["🇨🇦 CA $391.44", "🇲🇽 MX —", "🇬🇧 UK $372.16"]);
     expect(okChips().slice(0, 3)).toEqual(before);
     expect(okChips()[3]).toEqual(["dB-chk ok", "🇩🇪 DE $349.05"]);
   });
 
+  it("places each running store's chip among the finished ones in check order", async () => {
+    const app = await renderRunning();
+
+    app.progress({
+      completed: 3,
+      total: 9,
+      ...now(["MX", "MATCH"], ["FR", "SEARCH"], ["IT", "OPEN"]),
+      results: [de, uk, ca]
+    });
+
+    expect(runningState(app.container).chips).toEqual([
+      ["dB-chk ok", "🇨🇦 CA $391.44"],
+      ["dB-chk now", "🇲🇽 MX …"],
+      ["dB-chk ok", "🇬🇧 UK $372.16"],
+      ["dB-chk ok", "🇩🇪 DE $349.05"],
+      ["dB-chk now", "🇫🇷 FR …"],
+      ["dB-chk now", "🇮🇹 IT …"]
+    ]);
+  });
+
   it("follows the order of the marketplaces the run checks", async () => {
     const app = await renderRunning({ settings: { enabledMarketplaces: ["US", "UK", "DE", "AU"] } });
 
-    app.progress({ completed: 3, total: 3, results: [de, au, uk] });
+    app.progress({ completed: 3, total: 3, inFlight: [], results: [de, au, uk] });
 
     expect(runningState(app.container).chips.map(([, text]) => text)).toEqual([
       "🇬🇧 UK $372.16",
@@ -116,30 +162,58 @@ describe("running view", () => {
     expect(app.container.querySelector(".dB-nowline")).toHaveAttribute("aria-live", "polite");
   });
 
-  it("shows the opening phase when a progress message carries no phase", async () => {
+  it("names the store that last moved on, else the first one still running", async () => {
     const app = await renderRunning();
 
-    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", results: [ca] });
+    app.progress({
+      completed: 0,
+      total: 9,
+      ...now(["CA", "SEARCH"], ["MX", "OPEN"], ["UK", "MATCH"]),
+      latest: { marketplace: "UK", phase: "MATCH" },
+      results: []
+    });
+    expect(runningState(app.container)).toMatchObject({
+      nowline: "Matching product United Kingdom +2",
+      market: "United Kingdom",
+      domain: "amazon.co.uk"
+    });
 
-    expect(runningState(app.container).nowline).toBe("Opening tab Mexico");
+    app.progress({ completed: 1, total: 9, inFlight: now(["MX", "OPEN"], ["UK", "MATCH"]).inFlight, results: [ca] });
+    expect(runningState(app.container)).toMatchObject({
+      count: "1/9",
+      nowline: "Checking Mexico +1",
+      market: "Mexico",
+      domain: "amazon.com.mx"
+    });
+  });
+
+  it("names the first store when a message names none", async () => {
+    const app = await renderRunning();
+
+    app.progress({ completed: 1, total: 9, inFlight: now(["MX", "SEARCH"], ["UK", "OPEN"]).inFlight, results: [ca] });
+
+    expect(runningState(app.container).nowline).toBe("Searching Mexico +1");
     expect(runningState(app.container).count).toBe("1/9");
   });
 
-  it("drops the current-market chip on the final progress message", async () => {
+  it("drops every running chip on the final progress message", async () => {
     const app = await renderRunning();
 
-    app.progress({ completed: 9, total: 9, results: [de, uk] });
+    app.progress({ completed: 7, total: 9, ...now(["JP", "READ"], ["AU", "SEARCH"]), results: [de, uk] });
+    app.progress({ completed: 9, total: 9, inFlight: [], results: [de, uk] });
 
     const state = runningState(app.container);
     expect(state.dial).toBe("100%");
     expect(state.count).toBe("9/9");
+    expect(state.nowline).toBe("");
+    expect(state.domain).toBe("");
     expect(state.chips.map(([className]) => className)).toEqual(["dB-chk ok", "dB-chk ok"]);
   });
 
   it("switches to the done view when the result arrives", async () => {
     const app = await renderRunning();
 
-    app.progress({ completed: 4, total: 9, currentMarketplace: "FR", phase: "OPEN", results: [de] });
+    app.progress({ completed: 4, total: 9, ...now(["FR", "OPEN"]), results: [de] });
     app.result(resultPayload());
 
     expect(screen.getByText("Save $50.94")).toBeInTheDocument();
@@ -149,7 +223,7 @@ describe("running view", () => {
   it("adopts a run already in flight when progress arrives while idle", async () => {
     const app = await renderLoaded();
 
-    app.progress({ completed: 2, total: 5, currentMarketplace: "DE", phase: "SEARCH", results: [uk, ca] });
+    app.progress({ completed: 2, total: 5, ...now(["DE", "SEARCH"]), results: [uk, ca] });
 
     expect(runningState(app.container).count).toBe("2/5");
     expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
@@ -159,7 +233,7 @@ describe("running view", () => {
 describe("stopping a run", () => {
   it("sends CANCEL_COMPARISON, returns to idle and confirms in a toast", async () => {
     const app = await renderRunning();
-    app.progress({ completed: 3, total: 9, currentMarketplace: "DE", phase: "READ", results: [ca, mx, uk] });
+    app.progress({ completed: 3, total: 9, ...now(["DE", "READ"]), results: [ca, mx, uk] });
 
     await app.user.click(screen.getByRole("button", { name: "Stop checking" }));
 
@@ -174,7 +248,7 @@ describe("stopping a run", () => {
     const app = await renderRunning();
 
     await app.user.click(screen.getByRole("button", { name: "Stop checking" }));
-    app.progress({ completed: 4, total: 9, currentMarketplace: "FR", phase: "OPEN", results: [de] });
+    app.progress({ completed: 4, total: 9, ...now(["FR", "OPEN"]), results: [de] });
     app.result(resultPayload({ results: [ca, mx, uk], error: "Comparison cancelled by user" }));
 
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeInTheDocument();
@@ -188,7 +262,7 @@ describe("stopping a run", () => {
     await app.user.click(screen.getByRole("button", { name: "Stop checking" }));
 
     await app.user.click(screen.getByRole("button", { name: "Check 9 other Amazons" }));
-    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", phase: "SEARCH", results: [ca] });
+    app.progress({ completed: 1, total: 9, ...now(["MX", "SEARCH"]), results: [ca] });
     expect(runningState(app.container).count).toBe("1/9");
 
     app.result(resultPayload());
@@ -209,14 +283,14 @@ describe("run correlation", () => {
     await app.user.click(screen.getByRole("button", { name: "Check 9 other Amazons" }));
     const currentRun = app.runId(1);
 
-    app.progress({ completed: 6, total: 9, currentMarketplace: "ES", runId: cancelledRun, results: [ca, mx] });
+    app.progress({ completed: 6, total: 9, ...now(["ES", "OPEN"]), runId: cancelledRun, results: [ca, mx] });
     app.result(resultPayload({ runId: cancelledRun, activeTabId: ACTIVE_TAB_ID }));
 
     expect(runningState(app.container).count).toBe("0/9");
     expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
     expect(screen.queryByText("Save $50.94")).not.toBeInTheDocument();
 
-    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", runId: currentRun, results: [ca] });
+    app.progress({ completed: 1, total: 9, ...now(["MX", "OPEN"]), runId: currentRun, results: [ca] });
     expect(runningState(app.container).count).toBe("1/9");
     app.result(resultPayload({ runId: currentRun, activeTabId: ACTIVE_TAB_ID }));
     expect(screen.getByText("Save $50.94")).toBeInTheDocument();
@@ -227,7 +301,7 @@ describe("run correlation", () => {
     const cancelledRun = app.runId(0);
     await app.user.click(screen.getByRole("button", { name: "Stop checking" }));
 
-    app.progress({ completed: 2, total: 9, currentMarketplace: "UK", runId: cancelledRun, results: [ca, mx] });
+    app.progress({ completed: 2, total: 9, ...now(["UK", "OPEN"]), runId: cancelledRun, results: [ca, mx] });
     app.result(resultPayload({ runId: cancelledRun }));
 
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeInTheDocument();
@@ -239,20 +313,20 @@ describe("run correlation", () => {
     const app = await renderRunning();
     const runId = app.runId(0);
 
-    app.progress({ completed: 5, total: 9, currentMarketplace: "IT", activeTabId: 7, runId, results: [ca] });
+    app.progress({ completed: 5, total: 9, ...now(["IT", "OPEN"]), activeTabId: 7, runId, results: [ca] });
     app.result(resultPayload({ activeTabId: 7, runId }));
 
     expect(runningState(app.container).count).toBe("0/9");
     expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
 
-    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", activeTabId: ACTIVE_TAB_ID, runId, results: [ca] });
+    app.progress({ completed: 1, total: 9, ...now(["MX", "OPEN"]), activeTabId: ACTIVE_TAB_ID, runId, results: [ca] });
     expect(runningState(app.container).count).toBe("1/9");
   });
 
   it("does not adopt another tab's run while idle", async () => {
     const app = await renderLoaded();
 
-    app.progress({ completed: 2, total: 5, currentMarketplace: "DE", activeTabId: 7, runId: "other-tab", results: [] });
+    app.progress({ completed: 2, total: 5, ...now(["DE", "OPEN"]), activeTabId: 7, runId: "other-tab", results: [] });
     app.result(resultPayload({ activeTabId: 7, runId: "other-tab" }));
 
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeInTheDocument();
@@ -266,15 +340,14 @@ describe("run correlation", () => {
     app.progress({
       completed: 2,
       total: 5,
-      currentMarketplace: "DE",
-      phase: "SEARCH",
+      ...now(["DE", "SEARCH"]),
       activeTabId: ACTIVE_TAB_ID,
       runId: "in-flight",
       results: [uk, ca]
     });
     expect(runningState(app.container).count).toBe("2/5");
 
-    app.progress({ completed: 4, total: 5, currentMarketplace: "AU", runId: "someone-else", results: [uk, ca, de] });
+    app.progress({ completed: 4, total: 5, ...now(["AU", "OPEN"]), runId: "someone-else", results: [uk, ca, de] });
     app.result(resultPayload({ runId: "someone-else", activeTabId: ACTIVE_TAB_ID }));
     expect(runningState(app.container).count).toBe("2/5");
 
@@ -288,7 +361,7 @@ describe("run correlation", () => {
     const runId = app.runId(0);
 
     app.result(resultPayload({ runId }));
-    app.progress({ completed: 9, total: 9, runId, results: [de] });
+    app.progress({ completed: 9, total: 9, inFlight: [], runId, results: [de] });
 
     expect(screen.getByText("Save $50.94")).toBeInTheDocument();
     expect(app.container.querySelector(".dB-run")).toBeNull();
@@ -301,7 +374,7 @@ describe("run correlation", () => {
       { ...ca, normalizedTotal: undefined },
       { ...de, normalizedTotal: undefined }
     ];
-    app.progress({ completed: 2, total: 9, currentMarketplace: "UK", phase: "OPEN", runId, results, fxTable });
+    app.progress({ completed: 2, total: 9, ...now(["FR", "OPEN"]), runId, results, fxTable });
     expect(runningState(app.container).chips.slice(0, 2).map(([, text]) => text)).toEqual([
       "🇨🇦 CA $391.44",
       "🇩🇪 DE $349.05"
@@ -315,7 +388,7 @@ describe("run correlation", () => {
     expect(runningState(app.container).chips.map(([, text]) => text)).toEqual([
       "🇨🇦 CA €362.44",
       "🇩🇪 DE €323.19",
-      "🇬🇧 UK …"
+      "🇫🇷 FR …"
     ]);
   });
 });
@@ -356,7 +429,7 @@ describe("run delivery", () => {
           fail = reject;
         })
     });
-    app.progress({ completed: 2, total: 9, currentMarketplace: "UK", phase: "SEARCH", results: [ca, de] });
+    app.progress({ completed: 2, total: 9, ...now(["UK", "SEARCH"]), results: [ca, de] });
 
     fail(new Error("The message port closed before a response was received."));
 
@@ -408,10 +481,10 @@ describe("run delivery", () => {
 describe("settings during a run", () => {
   it("stays in settings while progress and the result arrive, then returns to done", async () => {
     const app = await renderRunning();
-    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", phase: "OPEN", results: [ca] });
+    app.progress({ completed: 1, total: 9, ...now(["MX", "OPEN"]), results: [ca] });
 
     await app.user.click(screen.getByRole("button", { name: "Settings" }));
-    app.progress({ completed: 5, total: 9, currentMarketplace: "IT", phase: "MATCH", results: [ca, mx, uk, de] });
+    app.progress({ completed: 5, total: 9, ...now(["IT", "MATCH"]), results: [ca, mx, uk, de] });
 
     expect(screen.getByRole("heading", { name: "Show prices in" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop checking" })).not.toBeInTheDocument();
@@ -426,10 +499,10 @@ describe("settings during a run", () => {
 
   it("returns to the running view with the latest progress when closed mid-run", async () => {
     const app = await renderRunning();
-    app.progress({ completed: 1, total: 9, currentMarketplace: "MX", phase: "OPEN", results: [ca] });
+    app.progress({ completed: 1, total: 9, ...now(["MX", "OPEN"]), results: [ca] });
 
     await app.user.click(screen.getByRole("button", { name: "Settings" }));
-    app.progress({ completed: 5, total: 9, currentMarketplace: "IT", phase: "MATCH", results: [ca, mx, uk, de] });
+    app.progress({ completed: 5, total: 9, ...now(["IT", "MATCH"]), results: [ca, mx, uk, de] });
     await app.user.click(screen.getByRole("button", { name: "Close settings" }));
 
     expect(runningState(app.container)).toMatchObject({

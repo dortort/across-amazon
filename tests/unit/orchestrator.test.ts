@@ -17,6 +17,7 @@ import {
 import { buildComparisonCacheKey } from "../../src/shared/storage";
 import type {
   CachedComparisonRecord,
+  ComparisonPhase,
   ComparisonResult,
   FxTable,
   LoadSourcePayload,
@@ -644,7 +645,7 @@ function createHarness(options: HarnessOptions): Harness {
         messages.push(copy);
         if (copy.type === RUN_COMPARISON_PROGRESS) {
           const payload = copy.payload as RunComparisonProgressPayload;
-          events.push(`progress ${payload.phase ?? "DONE"}${payload.currentMarketplace ? ` ${payload.currentMarketplace}` : ""}`);
+          events.push(payload.latest ? `progress ${payload.latest.phase} ${payload.latest.marketplace}` : "progress DONE");
         }
         if (options.popupClosed) {
           throw new Error(POPUP_CLOSED_ERROR);
@@ -889,7 +890,7 @@ describe("background orchestrator", () => {
       expect(harness.openTempTabs()).toEqual([]);
 
       const jpOpen = progressPayloads(harness).find(
-        (progress) => progress.currentMarketplace === "JP" && progress.phase === "OPEN"
+        (progress) => progress.latest?.marketplace === "JP" && progress.latest.phase === "OPEN"
       );
       expect(jpOpen?.completed).toBe(5);
       expect(jpOpen?.results?.map((result) => result.marketplace)).toEqual(["ES", "IT", "UK", "DE", "FR"]);
@@ -958,24 +959,36 @@ describe("background orchestrator", () => {
       await runViaWorker(harness);
       const progress = progressPayloads(harness);
 
+      const phaseMessage = (
+        completed: number,
+        marketplace: Marketplace,
+        phase: ComparisonPhase,
+        results: Marketplace[]
+      ) => ({
+        completed,
+        total: 2,
+        inFlight: [{ marketplace, phase }],
+        latest: { marketplace, phase },
+        results
+      });
       expect(
-        progress.map(({ completed, total, currentMarketplace, phase, results }) => ({
+        progress.map(({ completed, total, inFlight, latest, results }) => ({
           completed,
           total,
-          currentMarketplace,
-          phase,
+          inFlight,
+          latest,
           results: results?.map((result) => result.marketplace)
         }))
       ).toEqual([
-        { completed: 0, total: 2, currentMarketplace: "UK", phase: "OPEN", results: [] },
-        { completed: 0, total: 2, currentMarketplace: "UK", phase: "SEARCH", results: [] },
-        { completed: 0, total: 2, currentMarketplace: "UK", phase: "MATCH", results: [] },
-        { completed: 0, total: 2, currentMarketplace: "UK", phase: "READ", results: [] },
-        { completed: 1, total: 2, currentMarketplace: "DE", phase: "OPEN", results: ["UK"] },
-        { completed: 1, total: 2, currentMarketplace: "DE", phase: "SEARCH", results: ["UK"] },
-        { completed: 1, total: 2, currentMarketplace: "DE", phase: "MATCH", results: ["UK"] },
-        { completed: 1, total: 2, currentMarketplace: "DE", phase: "READ", results: ["UK"] },
-        { completed: 2, total: 2, currentMarketplace: undefined, phase: undefined, results: ["UK", "DE"] }
+        phaseMessage(0, "UK", "OPEN", []),
+        phaseMessage(0, "UK", "SEARCH", []),
+        phaseMessage(0, "UK", "MATCH", []),
+        phaseMessage(0, "UK", "READ", []),
+        phaseMessage(1, "DE", "OPEN", ["UK"]),
+        phaseMessage(1, "DE", "SEARCH", ["UK"]),
+        phaseMessage(1, "DE", "MATCH", ["UK"]),
+        phaseMessage(1, "DE", "READ", ["UK"]),
+        { completed: 2, total: 2, inFlight: [], latest: undefined, results: ["UK", "DE"] }
       ]);
 
       for (const entry of progress) {
@@ -983,8 +996,8 @@ describe("background orchestrator", () => {
       }
 
       const final = progress[progress.length - 1];
-      expect(final).not.toHaveProperty("phase");
-      expect(final).not.toHaveProperty("currentMarketplace");
+      expect(final.inFlight).toEqual([]);
+      expect(final).not.toHaveProperty("latest");
       expect(progress[4].results?.[0].normalizedTotal).toEqual({ amount: 47.79, currency: "USD" });
       expect(final.results?.[1]).toEqual(EXPECTED_DE_RESULT);
     });
@@ -1058,7 +1071,7 @@ describe("background orchestrator", () => {
 
       await runViaWorker(harness);
 
-      expect(progressPayloads(harness).map((progress) => [progress.currentMarketplace, progress.phase])).toEqual([
+      expect(progressPayloads(harness).map(({ latest }) => [latest?.marketplace, latest?.phase])).toEqual([
         ["UK", "OPEN"],
         ["UK", "READ"],
         ["DE", "OPEN"],
@@ -1124,7 +1137,7 @@ describe("background orchestrator", () => {
         "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20AW-2400X%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue",
         "https://www.amazon.de/dp/B000000005"
       ]);
-      expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual([
+      expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual([
         "OPEN",
         "SEARCH",
         "MATCH",
@@ -1210,7 +1223,7 @@ describe("background orchestrator", () => {
       ]);
       expect(harness.events).not.toContain("open search/DE");
       expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
-      expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "READ", undefined]);
+      expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual(["OPEN", "READ", undefined]);
     });
 
     describe("dead listings", () => {
@@ -1242,7 +1255,7 @@ describe("background orchestrator", () => {
           TITLE_QUERY_URL,
           "https://www.amazon.de/dp/B000000005"
         ]);
-        expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "SEARCH", "MATCH", "READ", undefined]);
+        expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual(["OPEN", "SEARCH", "MATCH", "READ", undefined]);
         expect(harness.openTempTabs()).toEqual([]);
       });
 
@@ -1256,7 +1269,7 @@ describe("background orchestrator", () => {
         const payload = await runViaWorker(harness);
 
         expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-        expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "SEARCH", "MATCH", "READ", undefined]);
+        expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual(["OPEN", "SEARCH", "MATCH", "READ", undefined]);
       });
 
       it("skips the dead listing's own card in the search results", async () => {
@@ -1310,7 +1323,7 @@ describe("background orchestrator", () => {
           }
         ]);
         expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
-        expect(progressPayloads(harness).map((progress) => progress.phase)).toEqual(["OPEN", "READ", undefined]);
+        expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual(["OPEN", "READ", undefined]);
         expect(harness.openTempTabs()).toEqual([]);
       });
     });
@@ -2339,7 +2352,7 @@ describe("background orchestrator", () => {
       const second = await runViaWorker(harness, "run-2");
       await firstRun;
 
-      expect(progressBeforeCancel.map((progress) => [progress.phase, progress.currentMarketplace])).toEqual([["OPEN", "DE"]]);
+      expect(progressBeforeCancel.map(({ latest }) => [latest?.phase, latest?.marketplace])).toEqual([["OPEN", "DE"]]);
       expect(progressPayloads(harness, "run-1")).toEqual(progressBeforeCancel);
       expect(resultPayloads(harness, "run-1")).toEqual([
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-1" })
@@ -2390,7 +2403,7 @@ describe("background orchestrator", () => {
       expect(resultPayloads(harness, "run-2")).toEqual([
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-2" })
       ]);
-      expect(progressPayloads(harness, "run-2").map((progress) => progress.phase)).toEqual(["OPEN"]);
+      expect(progressPayloads(harness, "run-2").map((progress) => progress.latest?.phase)).toEqual(["OPEN"]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(Object.keys(harness.storage).some((key) => key.startsWith("cmp:"))).toBe(false);
     });
