@@ -6,7 +6,7 @@ import { setDeliveryLocation } from "../../src/content/location-setter";
 import { extractProductDataWithOffers } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import { extractSourceContext } from "../../src/content/source-extractor";
-import { MARKETPLACE_CODES, countryName, getMarketplaceByDomain } from "../../src/shared/markets";
+import { MARKETPLACE_CODES, getMarketplaceByDomain } from "../../src/shared/markets";
 import {
   CANCEL_COMPARISON,
   LOAD_SOURCE,
@@ -28,6 +28,19 @@ import type {
   SearchExtractionRequest,
   SourceContext
 } from "../../src/shared/types";
+import {
+  ADDRESS_CHANGE_PATH,
+  LOCATION_FORM_PATH,
+  OFFERS_PATH,
+  OFFER_SELECTORS,
+  PAGE_TOKEN,
+  POST_TOKEN,
+  applyLocation,
+  offerOnlyOtherSellers,
+  offersUrl,
+  removeElement,
+  removeLocationFields
+} from "./amazon-pages";
 
 const ACTIVE_TAB_ID = 1;
 const SOURCE_URL = "https://www.amazon.com/dp/B000000001";
@@ -39,11 +52,6 @@ const FRAME_REMOVED_ERROR = "Frame with ID 0 was removed.";
 const NO_HOST_ACCESS_ERROR =
   "Cannot access contents of the page. Extension manifest must request permission to access the respective host.";
 const ERROR_PAGE_ERROR = "Frame with ID 0 is showing error page";
-const LOCATION_FORM_PATH = "/portal-migration/hz/glow/get-rendered-address-selections";
-const ADDRESS_CHANGE_PATH = "/portal-migration/hz/glow/address-change";
-const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
-const PAGE_TOKEN = "TEST-PAGE-TOKEN";
-const POST_TOKEN = "TEST-POST-TOKEN";
 const NOT_ACCEPTED_NOTE = "Delivery location not set: Amazon did not accept the change";
 const ROBOT_CHECK_HTML = readFileSync(join(FIXTURE_ROOT, "robot-check.html"), "utf8");
 const SERVICE_UNAVAILABLE_HTML = readFileSync(join(FIXTURE_ROOT, "service-unavailable.html"), "utf8");
@@ -207,29 +215,6 @@ interface Harness {
   documentIdle: (tabId: number) => void;
   silentRemove: (tabId: number) => void;
   dispatch: (message: unknown) => Promise<unknown>;
-}
-
-function applyLocation(document: Document, countryCode: string): void {
-  const line = document.querySelector("#glow-ingress-line2");
-  if (line) {
-    line.textContent = `Deliver to ${countryName(countryCode)}`;
-  }
-  const modal = {
-    ajaxHeaders: { "anti-csrftoken-a2z": PAGE_TOKEN },
-    name: "glow-modal",
-    url: `${LOCATION_FORM_PATH}?deviceType=desktop&pageType=Detail&storeContext=industrial&actionSource=desktop-modal`
-  };
-  document.body.insertAdjacentHTML(
-    "beforeend",
-    `<span id="nav-global-location-data-modal-action" data-action="a-modal" data-a-modal='${JSON.stringify(modal)}'></span>` +
-      `<input type="hidden" id="countryCode" value="${countryCode}">`
-  );
-}
-
-function removeLocationFields(document: Document): void {
-  for (const selector of ["#nav-global-location-data-modal-action", "#countryCode"]) {
-    document.querySelector(selector)?.remove();
-  }
 }
 
 function tabClosing(): { closed: Promise<never>; close: () => void } {
@@ -789,17 +774,6 @@ function addColourTwister(document: Document, selected: string, options: Array<[
   );
 }
 
-function removeElement(document: Document, selector: string): void {
-  document.querySelector(selector)?.remove();
-}
-
-const OFFER_SELECTORS = [
-  "#corePriceDisplay_desktop_feature_div",
-  "#deliveryBlockMessage",
-  "#exports_desktop_feature_div",
-  "#subtotals-marketplace-table"
-];
-
 function replaceOfferWithLiveBlocks(document: Document, file: string, blocks: string[]): void {
   for (const selector of OFFER_SELECTORS) {
     removeElement(document, selector);
@@ -812,25 +786,6 @@ function replaceOfferWithLiveBlocks(document: Document, file: string, blocks: st
     }
     document.body.insertAdjacentHTML("beforeend", section.innerHTML);
   }
-}
-
-function offerOnlyOtherSellers(document: Document): void {
-  for (const selector of OFFER_SELECTORS) {
-    removeElement(document, selector);
-  }
-  document.body.insertAdjacentHTML(
-    "beforeend",
-    '<div id="olpLinkWidget_feature_div"><input type="hidden" id="all-offers-display-params" data-m="" data-qid="" data-smid="" data-sourcecustomerorglistid="" data-sourcecustomerorglistitemid="" data-sr=""></div>' +
-      '<span id="buybox-see-all-buying-choices"><span class="a-button-inner"><a class="a-button-text">See All Buying Options</a></span></span>'
-  );
-  const asin = /\/dp\/([A-Z0-9]{10})/i.exec(document.URL)?.[1];
-  if (asin) {
-    document.querySelector("#all-offers-display-params")?.setAttribute("data-asin", asin);
-  }
-}
-
-function offersUrl(origin: string, asin: string): string {
-  return `${origin}${OFFERS_PATH}?asin=${asin}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp&pageno=1&filters=%257B%2522all%2522%253Atrue%252C%2522new%2522%253Atrue%257D`;
 }
 
 function marketEvents(harness: Harness, market: Marketplace): string[] {
