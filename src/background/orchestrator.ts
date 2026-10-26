@@ -11,7 +11,7 @@ import {
   variantConflicts
 } from "../shared/matching";
 import { deliveredTotalIn, getDefaultCurrencyForMarketplace } from "../shared/money";
-import { sortComparisonResults, withCheapestOtherOffer } from "../shared/comparison";
+import { RUN_DEADLINE_MS, TIMED_OUT_NOTE, sortComparisonResults, withCheapestOtherOffer } from "../shared/comparison";
 import { ROBOT_CHECK_MARKERS, inspectPage, robotCheckNote } from "../shared/robot-check";
 import type { PageInspection } from "../shared/robot-check";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
@@ -892,12 +892,14 @@ export async function loadSource(activeTabId: number): Promise<LoadSourcePayload
 }
 
 export async function runComparison(activeTabId: number, runId?: string): Promise<RunComparisonResultPayload> {
+  const startedAt = Date.now();
   const token = startRun(activeTabId);
 
   let sourceContext: SourceContext | undefined;
   let baseline: ComparisonResult | undefined;
   let fxTable: FxTable | undefined;
   let targetMarkets: Marketplace[] = [];
+  let deadlineId: ReturnType<typeof setTimeout> | undefined;
   const results = new Map<Marketplace, ComparisonResult>();
   const ranked = (): ComparisonResult[] => sortComparisonResults(targetMarkets.flatMap((market) => results.get(market) ?? []));
 
@@ -984,11 +986,31 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       }
     };
 
+    let timedOut = false;
     const stopped = new Promise<void>((resolve) => {
       token.controller.signal.addEventListener("abort", () => resolve(), { once: true });
     });
-    await Promise.race([runPool(targetMarkets, MARKET_CONCURRENCY, checkMarket, () => token.cancelled), stopped]);
-    assertNotCancelled(token);
+    const deadline = new Promise<void>((resolve) => {
+      deadlineId = setTimeout(
+        () => {
+          timedOut = true;
+          resolve();
+        },
+        Math.max(0, RUN_DEADLINE_MS - (Date.now() - startedAt))
+      );
+    });
+    await Promise.race([runPool(targetMarkets, MARKET_CONCURRENCY, checkMarket, () => token.cancelled), stopped, deadline]);
+    clearTimeout(deadlineId);
+    if (timedOut) {
+      await cancelRun(token);
+      for (const market of targetMarkets) {
+        if (!results.has(market)) {
+          results.set(market, buildFailedResult(market, TIMED_OUT_NOTE));
+        }
+      }
+    } else {
+      assertNotCancelled(token);
+    }
 
     const sortedResults = ranked();
     pushProgress({ completed: total, total, inFlight: [], results: sortedResults, fxTable: table, activeTabId, runId });
@@ -1003,7 +1025,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       runId
     };
 
-    if (!sawRobotCheck) {
+    if (!sawRobotCheck && !timedOut) {
       await writeComparisonCache(cacheKey, {
         createdAt: payload.generatedAt,
         source,
@@ -1026,6 +1048,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       runId
     };
   } finally {
+    clearTimeout(deadlineId);
     await finishRun(activeTabId, token);
   }
 }

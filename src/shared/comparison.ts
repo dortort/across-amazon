@@ -1,6 +1,9 @@
 import { deliveredTotalIn } from "./money";
 import type { ComparisonResult, FxTable, Money, OfferQuote } from "./types";
 
+export const RUN_DEADLINE_MS = 240_000;
+export const TIMED_OUT_NOTE = `Timed out after ${RUN_DEADLINE_MS / 1000} seconds`;
+
 function statusRank(status: ComparisonResult["status"]): number {
   return status === "OK" ? 0 : 1;
 }
