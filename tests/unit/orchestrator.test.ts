@@ -46,6 +46,7 @@ const PAGE_TOKEN = "TEST-PAGE-TOKEN";
 const POST_TOKEN = "TEST-POST-TOKEN";
 const NOT_ACCEPTED_NOTE = "Delivery location not set: Amazon did not accept the change";
 const ROBOT_CHECK_HTML = readFileSync(join(FIXTURE_ROOT, "robot-check.html"), "utf8");
+const SERVICE_UNAVAILABLE_HTML = readFileSync(join(FIXTURE_ROOT, "service-unavailable.html"), "utf8");
 const CHECKPOINT_PATH = "/checkpoint/continue?token=TEST-CHECKPOINT-TOKEN";
 const CHECKPOINT_HTML =
   "<!doctype html><html><head><title>Amazon.com</title></head><body><p>Checking your browser</p></body></html>";
@@ -132,6 +133,7 @@ interface FakeTab {
   url: string;
   label: string;
   dom: JSDOM;
+  responseStatus: number;
   scope: WindowScope;
   status: "loading" | "complete";
   document: DocumentState;
@@ -149,6 +151,10 @@ interface Injection {
   func?: (...args: never[]) => unknown;
   args?: unknown[];
   injectImmediately?: boolean;
+}
+
+interface NavigationEntries {
+  getEntriesByType: (type: string) => Array<{ responseStatus: number }>;
 }
 
 interface InjectionFrame {
@@ -183,6 +189,7 @@ interface HarnessOptions {
   offersOn?: Partial<Record<Marketplace, string>>;
   holdOffers?: Promise<void>;
   robotCheckOn?: string[];
+  serviceUnavailableOn?: string[];
   checkpointOn?: Marketplace[];
 }
 
@@ -242,12 +249,13 @@ function documentLoading(): { idle: Promise<void>; reachIdle: () => void } {
   return { idle, reachIdle };
 }
 
-function newTab(id: number, url: string, label: string, dom: JSDOM): FakeTab {
+function newTab(id: number, url: string, label: string, dom: JSDOM, responseStatus = 200): FakeTab {
   return {
     id,
     url,
     label,
     dom,
+    responseStatus,
     scope: {},
     status: "complete",
     document: "idle",
@@ -400,7 +408,7 @@ function createHarness(options: HarnessOptions): Harness {
     return { group: "missing", dom: fixtureDom("missing", market, url) };
   }
 
-  function servePage(market: Marketplace, url: string): { label: string; dom: JSDOM } {
+  function servePage(market: Marketplace, url: string): { label: string; dom: JSDOM; status?: number } {
     const parsed = new URL(url);
     if (parsed.pathname === "/s" && options.checkpointOn?.includes(market)) {
       const checkpointUrl = new URL(CHECKPOINT_PATH, url).href;
@@ -415,7 +423,10 @@ function createHarness(options: HarnessOptions): Harness {
     if (options.robotCheckOn?.includes(label) || options.robotCheckOn?.includes(url)) {
       return { label: `robot-check/${market}`, dom: new JSDOM(ROBOT_CHECK_HTML, { url }) };
     }
-    return { label, dom };
+    if (options.serviceUnavailableOn?.includes(label) || options.serviceUnavailableOn?.includes(url)) {
+      return { label: `http-503/${market}`, dom: new JSDOM(SERVICE_UNAVAILABLE_HTML, { url }), status: 503 };
+    }
+    return { label, dom, status: group === "missing" ? 404 : 200 };
   }
 
   function openTempTab(url: string): FakeTab {
@@ -423,8 +434,8 @@ function createHarness(options: HarnessOptions): Harness {
     if (!market) {
       throw new Error(`No fixture for ${url}`);
     }
-    const { label, dom } = servePage(market, url);
-    const tab = newTab(nextTabId, url, label, dom);
+    const { label, dom, status } = servePage(market, url);
+    const tab = newTab(nextTabId, url, label, dom, status);
     nextTabId += 1;
     tabs.set(tab.id, tab);
     return tab;
@@ -509,11 +520,20 @@ function createHarness(options: HarnessOptions): Harness {
         "window",
         "document",
         "location",
+        "performance",
         "args",
         `return (${injection.func.toString()})(...args);`
-      ) as (scope: WindowScope, document: Document, location: Location, args: unknown[]) => unknown;
+      ) as (
+        scope: WindowScope,
+        document: Document,
+        location: Location,
+        performance: NavigationEntries,
+        args: unknown[]
+      ) => unknown;
       const { document, location } = tab.dom.window;
-      const result = isolatedWorld(tab.scope, document, location, structuredClone(injection.args ?? []));
+      const navigation = { responseStatus: tab.responseStatus };
+      const performance: NavigationEntries = { getEntriesByType: (type) => (type === "navigation" ? [navigation] : []) };
+      const result = isolatedWorld(tab.scope, document, location, performance, structuredClone(injection.args ?? []));
       const settled = result instanceof Promise ? await Promise.race([result, tab.closed]) : result;
       return [{ ...frame, result: structuredClone(settled) }];
     }
@@ -2897,6 +2917,31 @@ describe("background orchestrator", () => {
       expect(harness.events).not.toContain("inject content/search-extractor.js checkpoint/US");
     });
 
+    it("reads the error page Amazon serves with HTTP 503 as a robot check, not as a search without results", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], serviceUnavailableOn: ["search/DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([DE_ROBOT_CHECK]);
+      expect(openedOn(harness, "DE")).toEqual(["missing/DE", "http-503/DE"]);
+      expect(harness.events).not.toContain("inject content/search-extractor.js http-503/DE");
+      expect(hasCachedComparison(harness)).toBe(false);
+    });
+
+    it("does not search a store that answers the source ASIN with the HTTP 503 error page", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], serviceUnavailableOn: ["missing/DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([DE_ROBOT_CHECK]);
+      expect(marketEvents(harness, "DE")).toEqual([
+        "progress OPEN DE",
+        "open http-503/DE",
+        "ready http-503/DE",
+        "close http-503/DE"
+      ]);
+    });
+
     it("reports a store as a robot check, not the search match, when the page of the source's variant is one", async () => {
       const blueVariantUrl = "https://www.amazon.de/dp/B0000000B5";
       const harness = await bootServiceWorker({
@@ -2954,6 +2999,29 @@ describe("background orchestrator", () => {
       expect(harness.openTempTabs()).toEqual([]);
     });
 
+    it("checks and reads every other store after three robot checks, two of them the HTTP 503 error page", async () => {
+      const markets: Marketplace[] = ["US", "UK", "DE", "FR", "IT"];
+      const clean = await runViaWorker(await bootServiceWorker({ enabledMarketplaces: markets }));
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: markets,
+        robotCheckOn: ["missing/UK"],
+        serviceUnavailableOn: ["search/DE", "missing/FR"]
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        ...clean.results.filter((result) => result.marketplace === "IT"),
+        DE_ROBOT_CHECK,
+        { marketplace: "FR", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.fr"] },
+        { marketplace: "UK", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.co.uk"] }
+      ]);
+      expect(openedOn(harness, "DE")).toEqual(["missing/DE", "http-503/DE"]);
+      expect(openedOn(harness, "FR")).toEqual(["http-503/FR"]);
+      expect(openedOn(harness, "IT")).toEqual(["missing/IT", "search/IT", "product/IT"]);
+      expect(hasCachedComparison(harness)).toBe(false);
+    });
+
     it("keeps checking and caches the run when two stores fail without a robot check", async () => {
       const closedTabIds: number[] = [];
       const harness = await bootServiceWorker({
@@ -3003,11 +3071,20 @@ describe("background orchestrator", () => {
       ]);
     });
 
-    it("searches every store that answers with Amazon's not-found page and its automated access notice", async () => {
-      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE", "FR", "IT"] });
+    it("searches every store that answers with Amazon's not-found page, its HTTP 404 and its automated access notice", async () => {
+      const notFoundStatuses: number[] = [];
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "UK", "DE", "FR", "IT"],
+        onTabCreated: (tab) => {
+          if (tab.label.startsWith("missing/")) {
+            notFoundStatuses.push(tab.responseStatus);
+          }
+        }
+      });
 
       const payload = await runViaWorker(harness);
 
+      expect(notFoundStatuses).toEqual([404, 404, 404, 404]);
       expect(readFileSync(join(FIXTURE_ROOT, "product", "not-found.html"), "utf8")).toContain("api-services-support@amazon.com");
       expect(payload.results.map((result) => result.status)).not.toContain("PARSE_FAILED");
       for (const market of ["UK", "DE", "FR", "IT"] as const) {
