@@ -41,6 +41,10 @@ const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
 const PAGE_TOKEN = "TEST-PAGE-TOKEN";
 const POST_TOKEN = "TEST-POST-TOKEN";
 const NOT_ACCEPTED_NOTE = "Delivery location not set: Amazon did not accept the change";
+const ROBOT_CHECK_HTML = readFileSync(join(FIXTURE_ROOT, "robot-check.html"), "utf8");
+const CHECKPOINT_PATH = "/checkpoint/continue?token=TEST-CHECKPOINT-TOKEN";
+const CHECKPOINT_HTML =
+  "<!doctype html><html><head><title>Amazon.com</title></head><body><p>Checking your browser</p></body></html>";
 
 const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
@@ -161,6 +165,8 @@ interface HarnessOptions {
   holdLocation?: Promise<void>;
   offersOn?: Partial<Record<Marketplace, string>>;
   holdOffers?: Promise<void>;
+  robotCheckOn?: string[];
+  checkpointOn?: Marketplace[];
 }
 
 interface Harness {
@@ -342,21 +348,34 @@ function createHarness(options: HarnessOptions): Harness {
     return { group: "missing", dom: fixtureDom("missing", market, url) };
   }
 
-  function openTempTab(url: string): FakeTab {
+  function servePage(market: Marketplace, url: string): { label: string; dom: JSDOM } {
     const parsed = new URL(url);
-    const market = getMarketplaceByDomain(parsed.hostname);
-    if (!market) {
-      throw new Error(`No fixture for ${url}`);
+    if (parsed.pathname === "/s" && options.checkpointOn?.includes(market)) {
+      const checkpointUrl = new URL(CHECKPOINT_PATH, url).href;
+      return { label: `checkpoint/${market}`, dom: new JSDOM(CHECKPOINT_HTML, { url: checkpointUrl }) };
     }
     const requestedAsin = /\/dp\/([A-Z0-9]{10})/i.exec(parsed.pathname)?.[1]?.toUpperCase();
     const { group, dom } =
       parsed.pathname === "/s"
         ? { group: "search" as const, dom: fixtureDom("search", market, url) }
         : loadProductPage(market, url, requestedAsin);
+    const label = `${group}/${market}`;
+    if (options.robotCheckOn?.includes(label) || options.robotCheckOn?.includes(url)) {
+      return { label: `robot-check/${market}`, dom: new JSDOM(ROBOT_CHECK_HTML, { url }) };
+    }
+    return { label, dom };
+  }
+
+  function openTempTab(url: string): FakeTab {
+    const market = getMarketplaceByDomain(new URL(url).hostname);
+    if (!market) {
+      throw new Error(`No fixture for ${url}`);
+    }
+    const { label, dom } = servePage(market, url);
     const tab: FakeTab = {
       id: nextTabId,
       url,
-      label: `${group}/${market}`,
+      label,
       dom,
       scope: {},
       status: "complete",
@@ -391,11 +410,15 @@ function createHarness(options: HarnessOptions): Harness {
     }
 
     if (injection.func) {
-      const isolatedWorld = new Function("window", "args", `return (${injection.func.toString()})(...args);`) as (
-        scope: WindowScope,
-        args: unknown[]
-      ) => unknown;
-      const result = isolatedWorld(tab.scope, structuredClone(injection.args ?? []));
+      const isolatedWorld = new Function(
+        "window",
+        "document",
+        "location",
+        "args",
+        `return (${injection.func.toString()})(...args);`
+      ) as (scope: WindowScope, document: Document, location: Location, args: unknown[]) => unknown;
+      const { document, location } = tab.dom.window;
+      const result = isolatedWorld(tab.scope, document, location, structuredClone(injection.args ?? []));
       const settled = result instanceof Promise ? await Promise.race([result, tab.closed]) : result;
       return [{ ...frame, result: structuredClone(settled) }];
     }
@@ -2131,7 +2154,8 @@ describe("background orchestrator", () => {
       ["the key of version 3, before model-number matching and the delivery address", 3],
       ["the key of version 4, before dead listings fell back to a search", 4],
       ["the key of version 5, before target stores were set to the destination", 5],
-      ["the key of version 6, before other sellers' offers were read", 6]
+      ["the key of version 6, before other sellers' offers were read", 6],
+      ["the key of version 7, before robot checks were recognised", 7]
     ])("ignores a comparison cached under %s", async (_key, version) => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
       const staleKey = earlierCacheKeyFor(["DE"], version);
@@ -2393,6 +2417,235 @@ describe("background orchestrator", () => {
       expect(payload.results[1].notes).toEqual([`Tab ${closedTabId} was closed before it finished loading`]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(harness.tabListenerCount()).toBe(0);
+    });
+  });
+
+  describe("robot check", () => {
+    const DE_ROBOT_CHECK: ComparisonResult = {
+      marketplace: "DE",
+      status: "PARSE_FAILED",
+      confidence: 0,
+      notes: ["Amazon showed a robot check on amazon.de"]
+    };
+
+    function openedOn(harness: Harness, market: Marketplace): string[] {
+      return marketEvents(harness, market)
+        .filter((event) => event.startsWith("open "))
+        .map((event) => event.slice("open ".length));
+    }
+
+    function hasCachedComparison(harness: Harness): boolean {
+      return Object.keys(harness.storage).some((key) => key.startsWith("cmp:"));
+    }
+
+    it("reports a store whose page for the source ASIN is a robot check as PARSE_FAILED without searching it", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], robotCheckOn: ["missing/DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+        ["UK", "OK"],
+        ["DE", "PARSE_FAILED"]
+      ]);
+      expect(payload.results[1]).toEqual(DE_ROBOT_CHECK);
+      expect(marketEvents(harness, "DE")).toEqual([
+        "progress OPEN DE",
+        "open robot-check/DE",
+        "ready robot-check/DE",
+        "close robot-check/DE"
+      ]);
+      expect(openedOn(harness, "UK")).toEqual(["missing/UK", "search/UK", "product/UK"]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reports a store whose search page is a robot check as PARSE_FAILED without reading another of its pages", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], robotCheckOn: ["search/DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([DE_ROBOT_CHECK]);
+      expect(marketEvents(harness, "DE")).toEqual([
+        "progress OPEN DE",
+        "open missing/DE",
+        "ready missing/DE",
+        "inject content/location-setter.js missing/DE",
+        "inject content/product-extractor.js missing/DE",
+        "close missing/DE",
+        "open robot-check/DE",
+        "ready robot-check/DE",
+        "close robot-check/DE"
+      ]);
+    });
+
+    it("reads amazon.com's checkpoint page as a robot check, not as a search without results", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["DE", "US"],
+        activeUrl: "https://www.amazon.de/dp/B000000005",
+        checkpointOn: ["US"]
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        { marketplace: "US", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.com"] }
+      ]);
+      expect(openedOn(harness, "US")).toEqual(["missing/US", "checkpoint/US"]);
+      expect(harness.events).not.toContain("inject content/search-extractor.js checkpoint/US");
+    });
+
+    it("reports a store as a robot check, not the search match, when the page of the source's variant is one", async () => {
+      const blueVariantUrl = "https://www.amazon.de/dp/B0000000B5";
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        variantAsinsOn: { DE: ["B0000000B5"] },
+        robotCheckOn: [blueVariantUrl],
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "DE") {
+            addColourTwister(document, "Red", [
+              ["B000000005", "Red"],
+              ["B0000000B5", "Blue"]
+            ]);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([DE_ROBOT_CHECK]);
+      expect(openedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE", "robot-check/DE"]);
+    });
+
+    it("leaves a run with a robot check out of the cache, so the next run checks again", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], robotCheckOn: ["missing/DE"] });
+
+      await runViaWorker(harness);
+      expect(hasCachedComparison(harness)).toBe(false);
+
+      harness.tabsCreate.mockClear();
+      await runViaWorker(harness, "run-2");
+
+      expect(harness.tabsCreate).toHaveBeenCalled();
+      expect(hasCachedComparison(harness)).toBe(false);
+    });
+
+    it("checks and reads every other store after robot checks on two of them", async () => {
+      const markets: Marketplace[] = ["US", "UK", "DE", "FR", "IT"];
+      const clean = await runViaWorker(await bootServiceWorker({ enabledMarketplaces: markets }));
+      const harness = await bootServiceWorker({ enabledMarketplaces: markets, robotCheckOn: ["missing/UK", "missing/DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([
+        ...clean.results.filter((result) => result.marketplace === "FR" || result.marketplace === "IT"),
+        DE_ROBOT_CHECK,
+        { marketplace: "UK", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.co.uk"] }
+      ]);
+      expect(openedOn(harness, "UK")).toEqual(["robot-check/UK"]);
+      expect(openedOn(harness, "DE")).toEqual(["robot-check/DE"]);
+      for (const market of ["FR", "IT"] as const) {
+        expect(openedOn(harness, market)).toEqual([`missing/${market}`, `search/${market}`, `product/${market}`]);
+      }
+      expect(hasCachedComparison(harness)).toBe(false);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("keeps checking and caches the run when two stores fail without a robot check", async () => {
+      const closedTabIds: number[] = [];
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "UK", "DE", "FR"],
+        onTabCreated: (tab, self) => {
+          if (tab.label === "search/UK" || tab.label === "search/DE") {
+            closedTabIds.push(tab.id);
+            tab.status = "loading";
+            setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+        ["FR", "OK"],
+        ["DE", "PARSE_FAILED"],
+        ["UK", "PARSE_FAILED"]
+      ]);
+      expect(payload.results.slice(1).map((result) => result.notes)).toEqual([
+        [`Tab ${closedTabIds[1]} was closed before it finished loading`],
+        [`Tab ${closedTabIds[0]} was closed before it finished loading`]
+      ]);
+      expect(openedOn(harness, "FR")).toEqual(["missing/FR", "search/FR", "product/FR"]);
+      expect(hasCachedComparison(harness)).toBe(true);
+    });
+
+    it("keeps checking after one robot check", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "UK", "DE", "FR"],
+        robotCheckOn: ["missing/UK"],
+        prepare: (group, market, document) => {
+          if (group === "search" && market === "FR") {
+            removeElement(document, "[data-asin='B000000006']");
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+        ["DE", "OK"],
+        ["FR", "NO_CONFIDENT_MATCH"],
+        ["UK", "PARSE_FAILED"]
+      ]);
+    });
+
+    it("searches every store that answers with Amazon's not-found page and its automated access notice", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE", "FR", "IT"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(readFileSync(join(FIXTURE_ROOT, "product", "not-found.html"), "utf8")).toContain("api-services-support@amazon.com");
+      expect(payload.results.map((result) => result.status)).not.toContain("PARSE_FAILED");
+      for (const market of ["UK", "DE", "FR", "IT"] as const) {
+        expect(openedOn(harness, market).slice(0, 2)).toEqual([`missing/${market}`, `search/${market}`]);
+      }
+      expect(hasCachedComparison(harness)).toBe(true);
+    });
+
+    it("stops when Stop arrives after a robot check and returns it among the partial results", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        robotCheckOn: ["missing/DE"],
+        onTabCreated: (tab, self) => {
+          if (tab.label === "missing/UK") {
+            void self.dispatch({ type: CANCEL_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } });
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBe(CANCELLED_ERROR);
+      expect(payload.results).toEqual([DE_ROBOT_CHECK]);
+      expect(harness.events.slice(harness.events.indexOf("open missing/UK"))).toEqual([
+        "open missing/UK",
+        "close missing/UK"
+      ]);
+      expect(hasCachedComparison(harness)).toBe(false);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("never inspects the page you are on for a robot check", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+
+      await loadSourceViaWorker(harness);
+      await runViaWorker(harness);
+
+      const sourceInjections = harness.executeScript.mock.calls
+        .map(([injection]) => injection as Injection)
+        .filter((injection) => injection.target.tabId === ACTIVE_TAB_ID);
+      expect(sourceInjections.some((injection) => injection.func?.toString().includes("robotCheck"))).toBe(false);
     });
   });
 

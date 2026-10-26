@@ -1,4 +1,4 @@
-import { buildProductUrl, buildSearchUrl, countryName } from "../shared/markets";
+import { buildProductUrl, buildSearchUrl, countryName, marketDisplayDomain } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../shared/matching";
 import { deliveredTotalIn, getDefaultCurrencyForMarketplace } from "../shared/money";
 import { sortComparisonResults, withCheapestOtherOffer } from "../shared/comparison";
+import { ROBOT_CHECK_MARKERS, inspectPage, robotCheckNote } from "../shared/robot-check";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
 import type {
   ComparisonPhase,
@@ -43,6 +44,8 @@ const LOCATION_TIMEOUT_MS = 20_000;
 const PRODUCT_REQUEST_KEY = "__ACROSS_AMAZON_PRODUCT_REQUEST__";
 const PRODUCT_RESULT_KEY = "__ACROSS_AMAZON_PRODUCT_RESULT__";
 const PRODUCT_TIMEOUT_MS = 25_000;
+
+class RobotCheckError extends Error {}
 
 interface RunToken {
   cancelled: boolean;
@@ -324,10 +327,27 @@ async function extractBaseline(
   }
 }
 
-async function readTempTab<T>(url: string, token: RunToken, read: (tabId: number) => Promise<T>): Promise<T> {
+async function assertNoRobotCheck(tabId: number, targetMarket: Marketplace): Promise<void> {
+  const [frame] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: inspectPage,
+    args: [ROBOT_CHECK_MARKERS]
+  });
+  if (frame?.result?.robotCheck) {
+    throw new RobotCheckError(robotCheckNote(marketDisplayDomain(targetMarket)));
+  }
+}
+
+async function readTempTab<T>(
+  url: string,
+  targetMarket: Marketplace,
+  token: RunToken,
+  read: (tabId: number) => Promise<T>
+): Promise<T> {
   const tabId = await openInactiveTab(url, token);
   try {
     await waitForTabComplete(tabId);
+    await assertNoRobotCheck(tabId, targetMarket);
     return await read(tabId);
   } finally {
     await closeTempTab(tabId, token);
@@ -390,11 +410,11 @@ async function readTargetTab<T>(
   token: RunToken,
   read: (tabId: number) => Promise<T>
 ): Promise<T> {
-  const first = await readTempTab(url, token, async (tabId) => {
+  const first = await readTempTab(url, targetMarket, token, async (tabId) => {
     const location = await ensureDeliveryLocation(tabId, source, targetMarket, token);
     return location?.status === "SET" ? { reopen: true as const } : { reopen: false as const, value: await read(tabId) };
   });
-  return first.reopen ? readTempTab(url, token, read) : first.value;
+  return first.reopen ? readTempTab(url, targetMarket, token, read) : first.value;
 }
 
 function readProductPage(
@@ -421,8 +441,11 @@ async function lookUpSourceAsin(source: SourceContext, targetMarket: Marketplace
   let productData: ProductExtractionResult | undefined;
   try {
     productData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, source.asin), token);
-  } catch {
+  } catch (error) {
     assertNotCancelled(token);
+    if (error instanceof RobotCheckError) {
+      throw error;
+    }
     return { status: "MISSED" };
   }
 
@@ -462,6 +485,9 @@ async function resolveSourceVariant(
     variantData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, option.asin), token);
   } catch (error) {
     assertNotCancelled(token);
+    if (error instanceof RobotCheckError) {
+      throw error;
+    }
     return {
       productData,
       notes: [
@@ -694,6 +720,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
 
     const queries = buildSearchQueries(source);
     const total = targetMarkets.length;
+    let sawRobotCheck = false;
 
     for (const [index, targetMarket] of targetMarkets.entries()) {
       const enterPhase = (phase: ComparisonPhase): void => {
@@ -710,9 +737,12 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
         });
       };
 
-      const result = await compareMarket(source, targetMarket, queries, token, enterPhase).catch((error: unknown) =>
-        buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"))
-      );
+      const result = await compareMarket(source, targetMarket, queries, token, enterPhase).catch((error: unknown) => {
+        if (error instanceof RobotCheckError) {
+          sawRobotCheck = true;
+        }
+        return buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"));
+      });
       assertNotCancelled(token);
       results.push(normalizeResult(result, comparisonCurrency, table));
     }
@@ -730,13 +760,15 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       runId
     };
 
-    await writeComparisonCache(cacheKey, {
-      createdAt: payload.generatedAt,
-      source,
-      baseline,
-      results: sortedResults,
-      fxTable: table
-    });
+    if (!sawRobotCheck) {
+      await writeComparisonCache(cacheKey, {
+        createdAt: payload.generatedAt,
+        source,
+        baseline,
+        results: sortedResults,
+        fxTable: table
+      });
+    }
 
     return payload;
   } catch (error) {
