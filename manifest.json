@@ -23,7 +23,7 @@
     "service_worker": "background/service-worker.js",
     "type": "module"
   },
-  "permissions": ["scripting", "storage"],
+  "permissions": ["offscreen", "scripting", "storage"],
   "host_permissions": [
     "https://www.amazon.com/*",
     "https://www.amazon.ca/*",
