@@ -1,6 +1,8 @@
 import type {
   ExtensionSettings,
   LoadSourcePayload,
+  PageJob,
+  PageJobResult,
   RunComparisonProgressPayload,
   RunComparisonResultPayload
 } from "./types";
@@ -12,6 +14,9 @@ export const CANCEL_COMPARISON = "CANCEL_COMPARISON" as const;
 export const LOAD_SOURCE = "LOAD_SOURCE" as const;
 export const LOAD_SETTINGS = "LOAD_SETTINGS" as const;
 export const SAVE_SETTINGS = "SAVE_SETTINGS" as const;
+export const OFFSCREEN_TARGET = "offscreen" as const;
+export const OFFSCREEN_PAGE_JOB = "OFFSCREEN_PAGE_JOB" as const;
+export const OFFSCREEN_CANCEL_RUN = "OFFSCREEN_CANCEL_RUN" as const;
 
 export interface RunComparisonRequest {
   type: typeof RUN_COMPARISON;
@@ -56,6 +61,20 @@ export interface SaveSettingsRequest {
   payload: ExtensionSettings;
 }
 
+export interface OffscreenPageJobRequest {
+  target: typeof OFFSCREEN_TARGET;
+  type: typeof OFFSCREEN_PAGE_JOB;
+  payload: PageJob;
+}
+
+export interface OffscreenCancelRunRequest {
+  target: typeof OFFSCREEN_TARGET;
+  type: typeof OFFSCREEN_CANCEL_RUN;
+  payload: {
+    runKey: string;
+  };
+}
+
 export type ExtensionMessage =
   | RunComparisonRequest
   | RunComparisonProgress
@@ -98,4 +117,48 @@ export function isLoadSettingsRequest(value: unknown): value is LoadSettingsRequ
 
 export function isSaveSettingsRequest(value: unknown): value is SaveSettingsRequest {
   return Boolean(value && typeof value === "object" && (value as { type?: string }).type === SAVE_SETTINGS);
+}
+
+interface PageJobFields {
+  runKey?: unknown;
+  url?: unknown;
+  page?: { kind?: unknown };
+}
+
+export function isOffscreenPageJobRequest(value: unknown): value is OffscreenPageJobRequest {
+  const payload = (value as { payload?: PageJobFields } | null)?.payload;
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { target?: string }).target === OFFSCREEN_TARGET &&
+      (value as { type?: string }).type === OFFSCREEN_PAGE_JOB &&
+      typeof payload?.runKey === "string" &&
+      typeof payload.url === "string" &&
+      (payload.page?.kind === "product" || payload.page?.kind === "search")
+  );
+}
+
+export function isOffscreenCancelRunRequest(value: unknown): value is OffscreenCancelRunRequest {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { target?: string }).target === OFFSCREEN_TARGET &&
+      (value as { type?: string }).type === OFFSCREEN_CANCEL_RUN &&
+      typeof (value as { payload?: { runKey?: unknown } }).payload?.runKey === "string"
+  );
+}
+
+const PAGE_JOB_OUTCOMES: ReadonlySet<string> = new Set<PageJobResult["outcome"]>([
+  "read",
+  "fallback",
+  "location-set",
+  "not-found",
+  "robot-check",
+  "cancelled"
+]);
+
+export function isPageJobResult(value: unknown): value is PageJobResult {
+  return Boolean(
+    value && typeof value === "object" && PAGE_JOB_OUTCOMES.has(String((value as { outcome?: unknown }).outcome))
+  );
 }

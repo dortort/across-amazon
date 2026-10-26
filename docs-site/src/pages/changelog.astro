@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import PageIntro from "../components/PageIntro.astro";
 import { stores } from "../data/stores";
+import { chromeWebStoreUrl, isStoreLive } from "../site.config";
 
 const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).format(
   stores.map((store) => store.country),
@@ -12,6 +13,65 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
   <PageIntro title="Changelog" lede="One entry per version. Version numbers follow the extension’s manifest." />
   <div class="container page-body">
     <article class="prose">
+      <section class="release" aria-labelledby="v0-2-0">
+        <header class="release-head">
+          <div class="release-title">
+            <h2 id="v0-2-0">0.2.0</h2>
+            <p class="release-label">Faster checks without tabs</p>
+          </div>
+          <p class="release-status">
+            Submitted to the Chrome Web Store on <time datetime="2026-10-26">2026-10-26</time>. Until it is published,
+            the store offers 0.1.0.
+          </p>
+        </header>
+
+        <h3 id="v0-2-0-what-changed">What changed</h3>
+        <ul>
+          <li>
+            <strong>No tab per page.</strong> Each store’s pages are downloaded with your Amazon session and read in a
+            hidden page of the extension, which runs none of Amazon’s scripts and loads none of its images or ads.
+            Downloaded pages do not appear in Chrome’s history, and Amazon can tell these downloads apart from your own
+            visits. A background tab opens only for a page that cannot be read that way, for example a robot check, a
+            download that fails or takes longer than 15 seconds, a page the extension does not recognise or that leads
+            to another Amazon store, a page that shows another delivery destination than the one the store is set to, a
+            store that refuses to change its delivery location from the extension, or an offers list it cannot load. A
+            page in a tab is read as soon as its content has arrived, without waiting for Amazon’s images and ads to
+            finish loading.
+          </li>
+          <li>
+            <strong>Three stores at a time.</strong> A check of nine stores takes about 15 seconds; in tests, 0.1.0
+            took one and a half to four minutes for the same check. Stores with equal totals keep the order of the
+            settings.
+          </li>
+          <li>
+            <strong>New permission: offscreen.</strong> It lets the extension open one hidden page of its own during a
+            check, which downloads and reads the other stores’ pages. Chrome shows no warning for it.
+          </li>
+          <li>
+            <strong>No false “not found” on a slow page.</strong> A page that took more than 15 seconds to finish
+            loading, as the first page of a check sometimes did, was taken for a store that does not list the product,
+            which cost a search and another page. Now a download that takes longer than 15 seconds is read in a
+            background tab instead, which has 20 seconds and reads the page as soon as its content is there.
+          </li>
+          <li>
+            <strong>Robot checks reported as such.</strong> When Amazon shows a robot check instead of a page, the store
+            is listed as <span class="nowrap">“Could not read the page”</span> with a note that names it, instead of
+            being read as an unavailable listing or a search without results. A robot check on a download is tried once
+            in a background tab. When the tab shows it too, the check opens no other page on that store and is not
+            stored, so <span class="nowrap">“Check again”</span> checks every store again.
+          </li>
+          <li>
+            <strong>Stop.</strong> <span class="nowrap">“Stop checking”</span> also stops the downloads in progress and
+            closes any tab it opened.
+          </li>
+          <li>
+            <strong>A time limit.</strong> A check stops after 4 minutes. A store not finished by then is listed as{" "}
+            <span class="nowrap">“Could not read the page”</span> with “The check ran out of time before this store was
+            read.” Such a check is not stored, so <span class="nowrap">“Check again”</span> checks every store again.
+          </li>
+        </ul>
+      </section>
+
       <section class="release" aria-labelledby="v0-1-0">
         <header class="release-head">
           <div class="release-title">
@@ -19,7 +79,8 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
             <p class="release-label">First release</p>
           </div>
           <p class="release-status">
-            Prepared for the Chrome Web Store. The listing appears on the <a href="/">homepage</a> once it is published.
+            Published on the {isStoreLive ? <a href={chromeWebStoreUrl}>Chrome Web Store</a> : "Chrome Web Store"} on{" "}
+            <time datetime="2026-10-22">2026-10-22</time>.
           </p>
         </header>
 
@@ -42,9 +103,9 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
           </li>
           <li>
             <strong>Background tabs.</strong> Stores are read one at a time, in background tabs that never take focus.
-            Each tab closes as soon as it has been read. A check takes about 3 seconds per store. The pages it opens
-            are ordinary visits: they appear in Chrome’s history and, if you are signed in to Amazon, may appear in
-            your Amazon browsing and search history.
+            Each tab closes as soon as it has been read. In tests, a check of nine stores took one and a half to four
+            minutes. The pages it opens are ordinary visits: they appear in Chrome’s history and, if you are signed in
+            to Amazon, may appear in your Amazon browsing and search history.
           </li>
           <li>
             <strong>One destination.</strong> So that every price is quoted for the same place, the extension may set
@@ -106,6 +167,10 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
 </Base>
 
 <style>
+  .release + .release {
+    margin-top: 3em;
+  }
+
   .release-head {
     padding-bottom: 20px;
     border-bottom: 1px solid var(--color-hairline);

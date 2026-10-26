@@ -1,4 +1,4 @@
-import { buildProductUrl, buildSearchUrl, countryName } from "../shared/markets";
+import { MARKET_CONCURRENCY, buildProductUrl, buildSearchUrl, countryName, marketDisplayDomain } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
 import {
@@ -11,7 +11,9 @@ import {
   variantConflicts
 } from "../shared/matching";
 import { deliveredTotalIn, getDefaultCurrencyForMarketplace } from "../shared/money";
-import { sortComparisonResults, withCheapestOtherOffer } from "../shared/comparison";
+import { RUN_DEADLINE_MS, TIMED_OUT_NOTE, sortComparisonResults, withCheapestOtherOffer } from "../shared/comparison";
+import { ROBOT_CHECK_MARKERS, inspectPage, robotCheckNote } from "../shared/robot-check";
+import type { PageInspection } from "../shared/robot-check";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
 import type {
   ComparisonPhase,
@@ -21,9 +23,13 @@ import type {
   LoadSourcePayload,
   LocationRequest,
   LocationResult,
+  MarketProgress,
   Marketplace,
   MatchScore,
   OfferQuote,
+  PageJobFallback,
+  PageJobPage,
+  PageJobRead,
   ProductExtractionRequest,
   ProductExtractionResult,
   RunComparisonProgressPayload,
@@ -34,6 +40,7 @@ import type {
   SourceExtractionResult
 } from "../shared/types";
 import { getDailyFxTable } from "./fx-service";
+import { canUseOffscreen, cancelOffscreenRun, closeOffscreenDocument, runPageJob } from "./offscreen-client";
 
 const COMPARISON_TTL_MS = 30 * 60 * 1000;
 const CANCELLED_ERROR = "Comparison cancelled by user";
@@ -43,9 +50,21 @@ const LOCATION_TIMEOUT_MS = 20_000;
 const PRODUCT_REQUEST_KEY = "__ACROSS_AMAZON_PRODUCT_REQUEST__";
 const PRODUCT_RESULT_KEY = "__ACROSS_AMAZON_PRODUCT_RESULT__";
 const PRODUCT_TIMEOUT_MS = 25_000;
+const PAGE_LOAD_TIMEOUT_MS = 20_000;
+const FIRST_RETRY_DELAY_MS = 100;
+const MAX_RETRY_DELAY_MS = 1_000;
+const NO_TAB_ERROR = "No tab with id";
+const NO_HOST_ACCESS_ERROR = "Cannot access contents of the page";
+const FRAME_REMOVED_ERROR = "Frame with ID 0 was removed";
+const MAX_PAGE_JOBS = 2;
+
+class RobotCheckError extends Error {}
 
 interface RunToken {
+  key: string;
   cancelled: boolean;
+  controller: AbortController;
+  usedOffscreen: boolean;
   tempTabIds: Set<number>;
   locations: Map<Marketplace, LocationResult>;
 }
@@ -60,7 +79,10 @@ async function closeTempTabs(token: RunToken): Promise<void> {
 
 function cancelRun(token: RunToken): Promise<void> {
   token.cancelled = true;
-  return closeTempTabs(token);
+  token.controller.abort();
+  return Promise.all([token.usedOffscreen ? cancelOffscreenRun(token.key) : undefined, closeTempTabs(token)]).then(
+    () => undefined
+  );
 }
 
 function startRun(activeTabId: number): RunToken {
@@ -70,7 +92,10 @@ function startRun(activeTabId: number): RunToken {
   }
 
   const token: RunToken = {
+    key: crypto.randomUUID(),
     cancelled: false,
+    controller: new AbortController(),
+    usedOffscreen: false,
     tempTabIds: new Set(),
     locations: new Map()
   };
@@ -83,6 +108,9 @@ async function finishRun(activeTabId: number, token: RunToken): Promise<void> {
   if (RUN_TOKENS.get(activeTabId) === token) {
     RUN_TOKENS.delete(activeTabId);
   }
+  if (RUN_TOKENS.size === 0) {
+    await closeOffscreenDocument();
+  }
 }
 
 function assertNotCancelled(token: RunToken): void {
@@ -91,47 +119,78 @@ function assertNotCancelled(token: RunToken): void {
   }
 }
 
-function waitForTabComplete(tabId: number, timeoutMs = 15_000): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const settle = (error?: Error): void => {
-      clearTimeout(timeoutId);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.tabs.onRemoved.removeListener(onRemoved);
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
+function isStorePage(pageUrl: string, storeHost: string): boolean {
+  const page = new URL(pageUrl);
+  return (page.protocol === "https:" || page.protocol === "http:") && page.hostname === storeHost;
+}
+
+function waitForStorePage(tabId: number, url: string): Promise<PageInspection> {
+  const storeHost = new URL(url).hostname;
+  return new Promise<PageInspection>((resolve, reject) => {
+    let settled = false;
+    let retryDelayMs = FIRST_RETRY_DELAY_MS;
+    let retryId: ReturnType<typeof setTimeout> | undefined;
+
+    const settle = (outcome: () => void): void => {
+      if (settled) {
+        return;
       }
+      settled = true;
+      clearTimeout(timeoutId);
+      clearTimeout(retryId);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      outcome();
     };
 
-    const onUpdated = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo): void => {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
-        settle();
-      }
-    };
+    const fail = (error: Error): void => settle(() => reject(error));
+    const failClosed = (): void => fail(new Error(`Tab ${tabId} was closed before it finished loading`));
 
     const onRemoved = (removedTabId: number): void => {
       if (removedTabId === tabId) {
-        settle(new Error(`Tab ${tabId} was closed before it finished loading`));
+        failClosed();
       }
     };
 
-    const timeoutId = setTimeout(() => {
-      settle(new Error(`Timed out waiting for tab ${tabId} to complete`));
-    }, timeoutMs);
-
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.onRemoved.addListener(onRemoved);
-    chrome.tabs.get(tabId).then(
-      (tab) => {
-        if (tab.status === "complete") {
-          settle();
-        }
-      },
-      (error: unknown) => {
-        settle(new Error(errorMessage(error, `Unable to read tab ${tabId}`)));
+    const retry = (): void => {
+      if (settled) {
+        return;
       }
-    );
+      retryId = setTimeout(inspect, retryDelayMs);
+      retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
+    };
+
+    const inspect = (): void => {
+      chrome.scripting.executeScript({ target: { tabId }, func: inspectPage, args: [ROBOT_CHECK_MARKERS] }).then(
+        ([frame]) => {
+          const page = frame?.result;
+          if (page && isStorePage(page.url, storeHost)) {
+            settle(() => resolve(page));
+          } else {
+            retry();
+          }
+        },
+        (error: unknown) => {
+          const message = errorMessage(error, String(error));
+          const injectionError = error instanceof Error ? error : new Error(message);
+          if (message.startsWith(NO_TAB_ERROR)) {
+            failClosed();
+          } else if (message.startsWith(FRAME_REMOVED_ERROR)) {
+            retry();
+          } else if (message.startsWith(NO_HOST_ACCESS_ERROR)) {
+            chrome.tabs.get(tabId).then((tab) => (tab.status === "complete" ? fail(injectionError) : retry()), failClosed);
+          } else {
+            fail(injectionError);
+          }
+        }
+      );
+    };
+
+    const timeoutId = setTimeout(() => {
+      fail(new Error(`Timed out waiting for tab ${tabId} to load`));
+    }, PAGE_LOAD_TIMEOUT_MS);
+
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    inspect();
   });
 }
 
@@ -202,11 +261,19 @@ async function extractSourceContext(activeTabId: number): Promise<SourceContext>
   return extracted.source;
 }
 
-async function extractSearchCandidates(tabId: number, request: SearchExtractionRequest): Promise<SearchCandidate[]> {
+async function readSearchCandidates(tabId: number, request: SearchExtractionRequest): Promise<SearchCandidate[]> {
   await writeWindowValue(tabId, "__ACROSS_AMAZON_SEARCH_REQUEST__", request);
   await runScriptFile(tabId, "content/search-extractor.js");
   const result = await readWindowValue<SearchCandidate[]>(tabId, "__ACROSS_AMAZON_SEARCH_CANDIDATES__");
   return result ?? [];
+}
+
+function extractSearchCandidates(tabId: number, request: SearchExtractionRequest): Promise<SearchCandidate[]> {
+  return withTimeout(
+    readSearchCandidates(tabId, request),
+    PRODUCT_TIMEOUT_MS,
+    "Timed out reading the search page after 25 seconds"
+  );
 }
 
 async function extractProductData(tabId: number, request: ProductExtractionRequest): Promise<ProductExtractionResult | undefined> {
@@ -324,10 +391,18 @@ async function extractBaseline(
   }
 }
 
-async function readTempTab<T>(url: string, token: RunToken, read: (tabId: number) => Promise<T>): Promise<T> {
+async function readTempTab<T>(
+  url: string,
+  targetMarket: Marketplace,
+  token: RunToken,
+  read: (tabId: number) => Promise<T>
+): Promise<T> {
   const tabId = await openInactiveTab(url, token);
   try {
-    await waitForTabComplete(tabId);
+    const page = await waitForStorePage(tabId, url);
+    if (page.robotCheck) {
+      throw new RobotCheckError(robotCheckNote(marketDisplayDomain(targetMarket)));
+    }
     return await read(tabId);
   } finally {
     await closeTempTab(tabId, token);
@@ -350,18 +425,34 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
+function locationRequestFor(source: SourceContext, targetMarket: Marketplace, token: RunToken): LocationRequest | undefined {
+  const countryCode = source.destinationCountryCode;
+  return countryCode && !token.locations.has(targetMarket) ? { marketplace: targetMarket, countryCode } : undefined;
+}
+
+function expectedDestinationFor(source: SourceContext, targetMarket: Marketplace, token: RunToken): string | undefined {
+  const status = token.locations.get(targetMarket)?.status;
+  return status === "SET" || status === "ALREADY_SET" ? source.destinationCountryCode : undefined;
+}
+
+function recordLocation(token: RunToken, targetMarket: Marketplace, location?: LocationResult): void {
+  if (location && location.status !== "NO_WIDGET") {
+    token.locations.set(targetMarket, location);
+  }
+}
+
 async function ensureDeliveryLocation(
   tabId: number,
   source: SourceContext,
   targetMarket: Marketplace,
   token: RunToken
 ): Promise<LocationResult | undefined> {
-  const countryCode = source.destinationCountryCode;
-  if (!countryCode || token.locations.has(targetMarket)) {
+  const request = locationRequestFor(source, targetMarket, token);
+  if (!request) {
     return undefined;
   }
 
-  await writeWindowValue<LocationRequest>(tabId, LOCATION_REQUEST_KEY, { marketplace: targetMarket, countryCode });
+  await writeWindowValue<LocationRequest>(tabId, LOCATION_REQUEST_KEY, request);
   await runScriptFile(tabId, "content/location-setter.js");
 
   let result: LocationResult;
@@ -377,9 +468,7 @@ async function ensureDeliveryLocation(
   }
 
   assertNotCancelled(token);
-  if (result.status !== "NO_WIDGET") {
-    token.locations.set(targetMarket, result);
-  }
+  recordLocation(token, targetMarket, result);
   return result;
 }
 
@@ -390,11 +479,132 @@ async function readTargetTab<T>(
   token: RunToken,
   read: (tabId: number) => Promise<T>
 ): Promise<T> {
-  const first = await readTempTab(url, token, async (tabId) => {
+  const first = await readTempTab(url, targetMarket, token, async (tabId) => {
     const location = await ensureDeliveryLocation(tabId, source, targetMarket, token);
     return location?.status === "SET" ? { reopen: true as const } : { reopen: false as const, value: await read(tabId) };
   });
-  return first.reopen ? readTempTab(url, token, read) : first.value;
+  return first.reopen ? readTempTab(url, targetMarket, token, read) : first.value;
+}
+
+interface PageSpec<T> {
+  inTab: (tabId: number) => Promise<T>;
+  job: PageJobPage;
+  fromJob: (read: PageJobRead) => T;
+}
+
+function once(callback?: () => void): () => void {
+  let called = false;
+  return () => {
+    if (!called) {
+      called = true;
+      callback?.();
+    }
+  };
+}
+
+function requestedFailure(result: PageJobRead | PageJobFallback): LocationResult | undefined {
+  return result.location?.status === "FAILED" && result.locationRequested === true ? result.location : undefined;
+}
+
+async function redoLocationInTab(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  url: string,
+  token: RunToken,
+  failed: LocationResult
+): Promise<LocationResult | undefined> {
+  try {
+    await readTempTab(url, targetMarket, token, (tabId) => ensureDeliveryLocation(tabId, source, targetMarket, token));
+  } catch (error) {
+    assertNotCancelled(token);
+    if (error instanceof RobotCheckError) {
+      throw error;
+    }
+  }
+  if (!token.locations.has(targetMarket)) {
+    token.locations.set(targetMarket, failed);
+  }
+  return token.locations.get(targetMarket);
+}
+
+async function readFallbackTab<T>(
+  token: RunToken,
+  targetMarket: Marketplace,
+  result: PageJobFallback,
+  inTab: () => Promise<T>
+): Promise<T> {
+  const failed = requestedFailure(result);
+  if (!failed) {
+    recordLocation(token, targetMarket, result.location);
+  }
+  try {
+    return await inTab();
+  } finally {
+    if (failed && !token.cancelled && !token.locations.has(targetMarket)) {
+      token.locations.set(targetMarket, failed);
+    }
+  }
+}
+
+async function readPage<T>(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  url: string,
+  token: RunToken,
+  spec: PageSpec<T>,
+  onRead?: () => void
+): Promise<T> {
+  const read = once(onRead);
+  const inTab = (): Promise<T> =>
+    readTargetTab(source, targetMarket, url, token, (tabId) => {
+      read();
+      return spec.inTab(tabId);
+    });
+  if (!canUseOffscreen()) {
+    return inTab();
+  }
+
+  read();
+  for (let attempt = 0; attempt < MAX_PAGE_JOBS; attempt += 1) {
+    token.usedOffscreen = true;
+    const result = await runPageJob(
+      {
+        runKey: token.key,
+        url,
+        page: spec.job,
+        location: locationRequestFor(source, targetMarket, token),
+        expectDestination: expectedDestinationFor(source, targetMarket, token)
+      },
+      token.controller.signal
+    );
+    assertNotCancelled(token);
+    switch (result.outcome) {
+      case "cancelled":
+        throw new Error(CANCELLED_ERROR);
+      case "not-found":
+        return spec.fromJob({ outcome: "read", finalUrl: result.finalUrl });
+      case "robot-check":
+        return inTab();
+      case "fallback":
+        return readFallbackTab(token, targetMarket, result, inTab);
+      case "location-set":
+        recordLocation(token, targetMarket, result.location);
+        break;
+      case "read": {
+        const failed = requestedFailure(result);
+        if (!failed) {
+          recordLocation(token, targetMarket, result.location);
+          return spec.fromJob(result);
+        }
+        const redone = await redoLocationInTab(source, targetMarket, url, token, failed);
+        if (redone?.status !== "SET" && redone?.status !== "ALREADY_SET") {
+          return spec.fromJob(result);
+        }
+        break;
+      }
+    }
+  }
+  return inTab();
 }
 
 function readProductPage(
@@ -402,17 +612,26 @@ function readProductPage(
   targetMarket: Marketplace,
   url: string,
   token: RunToken,
-  onLoaded?: () => void
+  onRead?: () => void
 ): Promise<ProductExtractionResult | undefined> {
-  return readTargetTab(source, targetMarket, url, token, (tabId) => {
-    onLoaded?.();
-    return extractProductData(tabId, {
-      marketplace: targetMarket,
-      sourceDestinationCountryCode: source.destinationCountryCode,
-      sourceDeliverTo: source.deliverTo,
-      readOtherOffers: true
-    });
-  });
+  const request: ProductExtractionRequest = {
+    marketplace: targetMarket,
+    sourceDestinationCountryCode: source.destinationCountryCode,
+    sourceDeliverTo: source.deliverTo,
+    readOtherOffers: true
+  };
+  return readPage(
+    source,
+    targetMarket,
+    url,
+    token,
+    {
+      inTab: (tabId) => extractProductData(tabId, request),
+      job: { kind: "product", request },
+      fromJob: (read) => read.product
+    },
+    onRead
+  );
 }
 
 type AsinLookup = { status: "MATCHED"; productData: ProductExtractionResult } | { status: "DEAD" | "MISSED" };
@@ -421,8 +640,11 @@ async function lookUpSourceAsin(source: SourceContext, targetMarket: Marketplace
   let productData: ProductExtractionResult | undefined;
   try {
     productData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, source.asin), token);
-  } catch {
+  } catch (error) {
     assertNotCancelled(token);
+    if (error instanceof RobotCheckError) {
+      throw error;
+    }
     return { status: "MISSED" };
   }
 
@@ -462,6 +684,9 @@ async function resolveSourceVariant(
     variantData = await readProductPage(source, targetMarket, buildProductUrl(targetMarket, option.asin), token);
   } catch (error) {
     assertNotCancelled(token);
+    if (error instanceof RobotCheckError) {
+      throw error;
+    }
     return {
       productData,
       notes: [
@@ -553,14 +778,20 @@ async function searchForMatch(
   token: RunToken,
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<{ candidate: SearchCandidate; score: MatchScore } | undefined> {
+  const request: SearchExtractionRequest = { marketplace: targetMarket, limit: 8 };
   for (const query of queries) {
-    const candidates = await readTargetTab(source, targetMarket, buildSearchUrl(targetMarket, query), token, (tabId) => {
-      enterPhase("SEARCH");
-      return extractSearchCandidates(tabId, {
-        marketplace: targetMarket,
-        limit: 8
-      });
-    });
+    const candidates = await readPage(
+      source,
+      targetMarket,
+      buildSearchUrl(targetMarket, query),
+      token,
+      {
+        inTab: (tabId) => extractSearchCandidates(tabId, request),
+        job: { kind: "search", request },
+        fromJob: (read) => read.candidates ?? []
+      },
+      () => enterPhase("SEARCH")
+    );
 
     enterPhase("MATCH");
     const best = pickBestCandidate(
@@ -631,6 +862,18 @@ async function compareMarket(
   );
 }
 
+async function runPool<T>(items: T[], size: number, work: (item: T) => Promise<void>, stop: () => boolean): Promise<void> {
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < items.length && !stop()) {
+      const item = items[next];
+      next += 1;
+      await work(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, lane));
+}
+
 export async function cancelComparison(activeTabId: number): Promise<void> {
   const token = RUN_TOKENS.get(activeTabId);
   if (token) {
@@ -649,19 +892,23 @@ export async function loadSource(activeTabId: number): Promise<LoadSourcePayload
 }
 
 export async function runComparison(activeTabId: number, runId?: string): Promise<RunComparisonResultPayload> {
+  const startedAt = Date.now();
   const token = startRun(activeTabId);
 
   let sourceContext: SourceContext | undefined;
   let baseline: ComparisonResult | undefined;
   let fxTable: FxTable | undefined;
-  const results: ComparisonResult[] = [];
+  let targetMarkets: Marketplace[] = [];
+  let deadlineId: ReturnType<typeof setTimeout> | undefined;
+  const results = new Map<Marketplace, ComparisonResult>();
+  const ranked = (): ComparisonResult[] => sortComparisonResults(targetMarkets.flatMap((market) => results.get(market) ?? []));
 
   try {
     const source = await extractSourceContext(activeTabId);
     sourceContext = source;
     const settings = await loadSettings();
 
-    const targetMarkets = settings.enabledMarketplaces.filter((market) => market !== source.marketplace);
+    targetMarkets = settings.enabledMarketplaces.filter((market) => market !== source.marketplace);
     const cacheKey = buildComparisonCacheKey({
       asin: source.asin,
       variationTokens: source.variationTokens,
@@ -684,9 +931,12 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       };
     }
 
-    const extracted = await extractBaseline(activeTabId, source, true);
+    const baselineRead = extractBaseline(activeTabId, source, true);
+    const fxRead = getDailyFxTable();
+    fxRead.catch(() => undefined);
+    const extracted = await baselineRead;
     baseline = extracted?.baseline;
-    const table = await getDailyFxTable();
+    const table = await fxRead;
     fxTable = table;
 
     const comparisonCurrency = resolveComparisonCurrency(settings, source);
@@ -694,31 +944,76 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
 
     const queries = buildSearchQueries(source);
     const total = targetMarkets.length;
+    const inFlight = new Map<Marketplace, ComparisonPhase>();
+    let sawRobotCheck = false;
 
-    for (const [index, targetMarket] of targetMarkets.entries()) {
+    const report = (latest?: MarketProgress): void => {
+      pushProgress({
+        completed: results.size,
+        total,
+        inFlight: targetMarkets.flatMap((marketplace) => {
+          const phase = inFlight.get(marketplace);
+          return phase ? [{ marketplace, phase }] : [];
+        }),
+        ...(latest ? { latest } : {}),
+        results: ranked(),
+        fxTable: table,
+        activeTabId,
+        runId
+      });
+    };
+
+    const checkMarket = async (targetMarket: Marketplace): Promise<void> => {
       const enterPhase = (phase: ComparisonPhase): void => {
         assertNotCancelled(token);
-        pushProgress({
-          completed: index,
-          total,
-          currentMarketplace: targetMarket,
-          phase,
-          results: sortComparisonResults(results),
-          fxTable: table,
-          activeTabId,
-          runId
-        });
+        inFlight.set(targetMarket, phase);
+        report({ marketplace: targetMarket, phase });
       };
 
-      const result = await compareMarket(source, targetMarket, queries, token, enterPhase).catch((error: unknown) =>
-        buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"))
+      const result = await compareMarket(source, targetMarket, queries, token, enterPhase).catch((error: unknown) => {
+        if (error instanceof RobotCheckError) {
+          sawRobotCheck = true;
+        }
+        return buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"));
+      });
+      if (token.cancelled) {
+        return;
+      }
+      inFlight.delete(targetMarket);
+      results.set(targetMarket, normalizeResult(result, comparisonCurrency, table));
+      if (results.size < total) {
+        report();
+      }
+    };
+
+    let timedOut = false;
+    const stopped = new Promise<void>((resolve) => {
+      token.controller.signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+    const deadline = new Promise<void>((resolve) => {
+      deadlineId = setTimeout(
+        () => {
+          timedOut = true;
+          resolve();
+        },
+        Math.max(0, RUN_DEADLINE_MS - (Date.now() - startedAt))
       );
+    });
+    await Promise.race([runPool(targetMarkets, MARKET_CONCURRENCY, checkMarket, () => token.cancelled), stopped, deadline]);
+    clearTimeout(deadlineId);
+    if (timedOut) {
+      await cancelRun(token);
+      for (const market of targetMarkets) {
+        if (!results.has(market)) {
+          results.set(market, buildFailedResult(market, TIMED_OUT_NOTE));
+        }
+      }
+    } else {
       assertNotCancelled(token);
-      results.push(normalizeResult(result, comparisonCurrency, table));
     }
 
-    const sortedResults = sortComparisonResults(results);
-    pushProgress({ completed: total, total, results: sortedResults, fxTable: table, activeTabId, runId });
+    const sortedResults = ranked();
+    pushProgress({ completed: total, total, inFlight: [], results: sortedResults, fxTable: table, activeTabId, runId });
 
     const payload: RunComparisonResultPayload = {
       source,
@@ -730,20 +1025,22 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       runId
     };
 
-    await writeComparisonCache(cacheKey, {
-      createdAt: payload.generatedAt,
-      source,
-      baseline,
-      results: sortedResults,
-      fxTable: table
-    });
+    if (!sawRobotCheck && !timedOut) {
+      await writeComparisonCache(cacheKey, {
+        createdAt: payload.generatedAt,
+        source,
+        baseline,
+        results: sortedResults,
+        fxTable: table
+      });
+    }
 
     return payload;
   } catch (error) {
     return {
       source: sourceContext,
       baseline,
-      results: sortComparisonResults(results),
+      results: ranked(),
       generatedAt: new Date().toISOString(),
       fxTable,
       error: errorMessage(error, "Unknown comparison error"),
@@ -751,6 +1048,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       runId
     };
   } finally {
+    clearTimeout(deadlineId);
     await finishRun(activeTabId, token);
   }
 }

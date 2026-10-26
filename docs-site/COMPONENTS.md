@@ -179,6 +179,7 @@ From `src/site.config.ts`:
 | Export | Meaning |
 | --- | --- |
 | `supportIssuesUrl` | GitHub Issues, for support requests. |
+| `supportEmail` | The support email address, for support requests by email. Link it with `mailto:`. |
 | `securityReportUrl` | GitHub private vulnerability reporting, for security reports. |
 | `repositoryUrl` | The GitHub repository. |
 | `chromeWebStoreUrl`, `isStoreLive` | The store listing URL and whether it is set. Prefer `StoreButton`. |
@@ -225,5 +226,5 @@ Colours come from tokens such as `var(--color-ink)`, `var(--color-muted)`, `var(
 - No code comments, no third-party requests, fonts or scripts, no inline styles that hard-code colours.
 - Internal links end with a slash: `/faq/`, not `/faq`.
 - The example destination country is always Switzerland (CH, CHF).
-- No personal names or email addresses. The developer is "the developer". Support goes to GitHub Issues, security reports to private vulnerability reporting.
+- No personal names, and no email address except `supportEmail` from the config. The developer is "the developer". Support goes to GitHub Issues or `supportEmail`, security reports to private vulnerability reporting.
 - Copy is plain, second person and short, with British/International spelling. No exclamation marks and no em dashes.

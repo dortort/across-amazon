@@ -40,7 +40,7 @@ describe("settings toggle", () => {
       screen.getByText("Converted daily from European Central Bank rates. Amazon charges you in the local currency.")
     ).toHaveClass("dB-hint", "is-left");
     expect(
-      screen.getByText("Fewer marketplaces means a faster check. Each one opens briefly in a background tab.")
+      screen.getByText("Fewer marketplaces means a faster check. Three are checked at a time.")
     ).toHaveClass("dB-hint", "is-left");
     expect(screen.queryByRole("button", { name: /^Check/ })).not.toBeInTheDocument();
 
@@ -247,7 +247,7 @@ describe("marketplace setting", () => {
 
     await app.user.click(screen.getByRole("button", { name: "Close settings" }));
     expect(screen.getByRole("button", { name: "Check 8 other Amazons" })).toBeInTheDocument();
-    expect(screen.getByText(/^Takes about 24 seconds\./)).toBeInTheDocument();
+    expect(screen.getByText(/^Takes about 15 seconds\./)).toBeInTheDocument();
   });
 
   it("re-enables a marketplace in its canonical position", async () => {
@@ -273,6 +273,6 @@ describe("marketplace setting", () => {
     await app.user.click(screen.getByRole("button", { name: "Check 6 other Amazons" }));
 
     expect(app.container.querySelector(".dB-dial-num")?.textContent).toBe("0/6");
-    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Opening tab Germany");
+    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Checking Germany +2");
   });
 });

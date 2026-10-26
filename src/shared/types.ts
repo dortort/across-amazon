@@ -145,13 +145,69 @@ export interface LocationResult {
   reason?: string;
 }
 
+export type PageKind = "product" | "search";
+
+export type PageJobPage =
+  | { kind: "product"; request: ProductExtractionRequest }
+  | { kind: "search"; request: SearchExtractionRequest };
+
+export interface PageJob {
+  runKey: string;
+  url: string;
+  page: PageJobPage;
+  location?: LocationRequest;
+  expectDestination?: string;
+}
+
+export type PageFallbackReason =
+  | "network"
+  | "timeout"
+  | "http-status"
+  | "off-host"
+  | "charset"
+  | "shape"
+  | "destination"
+  | "offers"
+  | "error"
+  | "no-answer";
+
+export interface PageJobRead {
+  outcome: "read";
+  finalUrl: string;
+  product?: ProductExtractionResult;
+  candidates?: SearchCandidate[];
+  location?: LocationResult;
+  locationRequested?: boolean;
+}
+
+export interface PageJobFallback {
+  outcome: "fallback";
+  reason: PageFallbackReason;
+  detail?: string;
+  location?: LocationResult;
+  locationRequested?: boolean;
+}
+
+export type PageJobResult =
+  | PageJobRead
+  | PageJobFallback
+  | { outcome: "location-set"; finalUrl: string; location: LocationResult }
+  | { outcome: "not-found"; finalUrl: string; status: number }
+  | { outcome: "robot-check"; finalUrl: string; status: number }
+  | { outcome: "cancelled" };
+
 export type ComparisonPhase = "OPEN" | "SEARCH" | "MATCH" | "READ";
+
+export interface MarketProgress {
+  marketplace: Marketplace;
+  phase: ComparisonPhase;
+}
 
 export interface RunComparisonProgressPayload {
   completed: number;
   total: number;
-  currentMarketplace?: Marketplace;
-  phase?: ComparisonPhase;
+  inFlight: MarketProgress[];
+  latest?: MarketProgress;
   results?: ComparisonResult[];
   fxTable?: FxTable;
   activeTabId?: number;

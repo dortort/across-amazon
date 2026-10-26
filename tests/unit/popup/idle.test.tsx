@@ -31,7 +31,7 @@ describe("idle view", () => {
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeEnabled();
     expect(
       screen.getByText(
-        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
+        "Takes about 15 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
       )
     ).toHaveClass("dB-hint");
     expect(screen.getByRole("button", { name: "Settings" })).toHaveTextContent("⚙");
@@ -93,7 +93,7 @@ describe("idle view", () => {
 
     expect(
       screen.getByText(
-        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to your address."
+        "Takes about 15 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to your address."
       )
     ).toHaveClass("dB-hint");
     expect(screen.queryByText(/delivery location/)).not.toBeInTheDocument();
@@ -185,7 +185,7 @@ describe("idle view", () => {
     expect(screen.getByText(/^Takes about 5 seconds\./)).toBeInTheDocument();
   });
 
-  it("starts a run with the active tab and shows the first target before any progress", async () => {
+  it("starts a run with the active tab and shows the first three targets before any progress", async () => {
     const app = await renderLoaded();
 
     await app.user.click(screen.getByRole("button", { name: "Check 9 other Amazons" }));
@@ -195,9 +195,13 @@ describe("idle view", () => {
     ]);
     expect(screen.getByText("0/9")).toHaveClass("dB-dial-num");
     expect(app.container.querySelector<HTMLElement>(".dB-dial")?.style.getPropertyValue("--p")).toBe("0%");
-    expect(app.container.querySelector(".dB-nowline")).toHaveTextContent("Opening tab Canada");
+    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Checking Canada +2");
     expect(app.container.querySelector(".dB-nowsub")).toHaveTextContent("amazon.ca");
-    expect(app.container.querySelector(".dB-chk.now")).toHaveTextContent("🇨🇦 CA …");
+    expect(Array.from(app.container.querySelectorAll(".dB-chk.now")).map((chip) => chip.textContent)).toEqual([
+      "🇨🇦 CA …",
+      "🇲🇽 MX …",
+      "🇬🇧 UK …"
+    ]);
     expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
   });
 

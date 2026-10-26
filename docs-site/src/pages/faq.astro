@@ -18,7 +18,7 @@ const questions = {
   buy: "Does it buy anything or touch my cart?",
   affiliation: "Is it affiliated with Amazon, and does it earn commissions?",
   stores: "Which Amazon stores does it work on?",
-  "background-tabs": "Why do tabs open during a check?",
+  "background-tabs": "Does a check open tabs?",
   "robot-check": "What happens when a store shows a robot check?",
   "stay-here": "What does “Stay here” mean?",
 } as const;
@@ -135,7 +135,14 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
             </tr>
             <tr>
               <th scope="row">Could not read the page</th>
-              <td>The product page could not be read, or the tab failed to load in time.</td>
+              <td>
+                The page could not be read, neither downloaded in the background nor in a background tab, for example
+                because the tab did not load within 20 seconds. When Amazon showed a robot check instead of a page,
+                the note names the store, for example: “Amazon showed a robot check on amazon.co.uk instead of the
+                page.” See <a href="#robot-check">what happens on a robot check</a>. A check stops after 4 minutes; a
+                store not finished by then is listed here with “The check ran out of time before this store was
+                read.”
+              </td>
             </tr>
             <tr>
               <th scope="row">Could not set delivery location</th>
@@ -205,8 +212,8 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
       </ol>
       <p>
         Removing the extension does not change back any Amazon store’s delivery location. Change it in that store’s
-        “Deliver to” box. It also does not remove the visits it made from Chrome’s history or from your Amazon history.
-        Clear those in Chrome and on Amazon.
+        “Deliver to” box. It also does not remove the pages it opened in background tabs from Chrome’s history, or the
+        pages it read from your Amazon history. Clear those in Chrome and on Amazon.
       </p>
       <p>The full wording is in the privacy policy, under <a href="/privacy/#deleting-your-data">Deleting your data</a>.</p>
 
@@ -239,8 +246,9 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
       </p>
       <p>
         If you press <span class="nowrap">“Check again”</span> within those 30 minutes, for the same product, variant,
-        destination, “Deliver to” text and set of stores, you get the stored result back at once, and no tabs open.
-        After 30 minutes a fresh check runs.
+        destination, “Deliver to” text and set of stores, you get the stored result back at once, and nothing is
+        downloaded again. After 30 minutes a fresh check runs. A check in which Amazon showed a robot check, or that
+        ran out of time, is not stored.
       </p>
       <p>
         A stored result includes the “Deliver to” text and the address of the product page. To remove it sooner,
@@ -292,7 +300,7 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
       <p>
         A check covers every store switched on in the settings except the one you are on, so by default the other nine.
         Turn stores on or off under <span class="nowrap">“Marketplaces to check”</span> in the popup’s settings, or on
-        the extension’s options page. Fewer stores make the check faster.
+        the extension’s options page. Fewer stores make the check faster; three are checked at a time.
       </p>
       <p>
         On any other site, or on an Amazon page that is not a product page, such as search results or the cart, the
@@ -301,27 +309,45 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
 
       <h2 id="background-tabs">{questions["background-tabs"]}</h2>
       <p>
-        The extension reads each store’s prices from that store’s own pages, as Amazon shows them. So it opens those
-        pages one store at a time, in background tabs that never take focus, and closes each tab as soon as it has been
-        read. A check takes about 3 seconds per store.
+        From version 0.2.0, usually not. The extension reads each store’s prices from that store’s own pages, as Amazon
+        shows them. It downloads those pages with your Amazon session and reads them in a hidden page of the extension,
+        three stores at a time. That page runs none of Amazon’s scripts and loads none of its images or ads. A check of
+        nine stores takes about 15 seconds.
       </p>
       <p>
-        The pages it opens are ordinary visits: they appear in Chrome’s history and, if you are signed in to Amazon, may
-        appear in your Amazon browsing and search history. They are made by your browser with your own Amazon session and
-        may also influence Amazon’s recommendations.
+        A tab opens only for a page that cannot be read that way, for example a robot check, a download that fails or
+        takes longer than 15 seconds, a page the extension does not recognise or that leads to another Amazon store, a
+        page that shows another delivery destination than the one the store is set to, a store that refuses to change
+        its delivery location from the extension, or an offers list it cannot load. The tab opens in the background,
+        never takes focus and closes as soon as the page has been read. Versions before 0.2.0 open every page in a
+        background tab, one store at a time.
       </p>
       <p>
-        <span class="nowrap">“Stop checking”</span> cancels the run and closes any background tabs it opened. Closing
-        the popup does not stop a check: it finishes in the background. Reopen the popup on the same tab to follow its
-        progress.
+        A page opened in a background tab is an ordinary visit and appears in Chrome’s history; a page downloaded in the
+        background does not. Either way, the requests are made by your browser with your own Amazon session: if you are
+        signed in to Amazon, the pages it reads may appear in your Amazon browsing and search history and may influence
+        Amazon’s recommendations. From version 0.2.0, Amazon can tell the requests made in the background apart from
+        your own visits, and the <span class="nowrap">“Choose your location”</span> change sent in the background names
+        the extension.
+      </p>
+      <p>
+        <span class="nowrap">“Stop checking”</span> cancels the run, stops the downloads in progress and closes any tab
+        it opened. Closing the popup does not stop a check: it finishes in the background. Reopen the popup on the same
+        tab to follow its progress.
       </p>
 
       <h2 id="robot-check">{questions["robot-check"]}</h2>
       <p>
-        A store that shows a robot check may report “No confident match” or “Could not read the page”. It is then listed
-        with the <a href="#stores-that-dont-ship">stores that could not be compared</a> and is not ranked. If
-        you <a href="/support/#report">report a problem</a>, say whether that store shows a robot check when you open
-        it yourself.
+        The store is listed as <span class="nowrap">“Could not read the page”</span> with
+        the <a href="#stores-that-dont-ship">stores that could not be compared</a>, and the note names it, for example:
+        “Amazon showed a robot check on amazon.co.uk instead of the page.” It is not ranked, and the check opens no other
+        page on that store. The other stores are still checked. From version 0.2.0, a page whose download shows a robot
+        check is first tried once in a background tab, and the store is listed this way when the tab shows it too.
+      </p>
+      <p>
+        A check in which Amazon showed a robot check is not stored, so <span class="nowrap">“Check again”</span> checks
+        every store again. If you <a href="/support/#report">report a problem</a>, say whether that store shows a robot
+        check when you open it yourself.
       </p>
 
       <h2 id="stay-here">{questions["stay-here"]}</h2>

@@ -372,13 +372,27 @@ describe("issues accordion", () => {
   });
 
   it("never shows the backend's internal notes", async () => {
-    const timedOut = { ...es, notes: ["Timed out waiting for tab 123 to complete"] };
+    const timedOut = { ...es, notes: ["Timed out waiting for tab 123 to load"] };
     const app = await renderDone(resultPayload({ results: [de, timedOut] }));
 
     await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
 
     expect(app.container.querySelector(".dB-issue p")?.textContent).toBe("The product page could not be read.");
     expect(screen.queryByText(/Timed out/)).not.toBeInTheDocument();
+  });
+
+  it("names the store that showed a robot check", async () => {
+    const robotCheck = { ...es, notes: ["Amazon showed a robot check on amazon.es"] };
+    const app = await renderDone(resultPayload({ results: [de, robotCheck] }));
+
+    await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
+
+    expect(
+      Array.from(app.container.querySelectorAll(".dB-issue")).map((issue) => [
+        issue.querySelector("strong")?.textContent,
+        issue.querySelector("p")?.textContent
+      ])
+    ).toEqual([["Spain — Could not read the page", "Amazon showed a robot check on amazon.es instead of the page."]]);
   });
 
   it("names the destination country from the source in the shipping note", async () => {
@@ -444,6 +458,6 @@ describe("check again", () => {
       { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } }
     ]);
     expect(app.container.querySelector(".dB-dial-num")?.textContent).toBe("0/9");
-    expect(app.container.querySelectorAll(".dB-chk")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".dB-chk")).toHaveLength(3);
   });
 });

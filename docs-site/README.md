@@ -23,8 +23,9 @@ Run these from this `docs-site/` folder. The site needs Node 22.22 or newer and 
 
 `site.config.json` holds the values that change outside the code:
 
-- `chromeWebStoreUrl` is empty until the store listing is published. While it is empty, every "Add to Chrome" button renders as an inactive "Coming soon to the Chrome Web Store". Set it to the listing URL once the extension is live.
+- `chromeWebStoreUrl` is the Chrome Web Store listing. Every store link on the site, including the "Add to Chrome" buttons, points to it. If it is empty or not an https URL, every "Add to Chrome" button renders as an inactive "Coming soon to the Chrome Web Store" instead, and the support page says the listing is not published yet.
 - `supportIssuesUrl` is where the support page sends people for help (GitHub Issues).
+- `supportEmail` is the address the support page gives, as a `mailto:` link, for help by email instead of GitHub.
 - `securityReportUrl` is where security reports go (GitHub private vulnerability reporting).
 - `repositoryUrl` is the source repository linked from the footer.
 

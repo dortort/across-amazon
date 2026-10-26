@@ -1,6 +1,7 @@
 {
-  "chromeWebStoreUrl": "",
+  "chromeWebStoreUrl": "https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc",
   "supportIssuesUrl": "https://github.com/dortort/across-amazon/issues",
+  "supportEmail": "support@dortort.dev",
   "securityReportUrl": "https://github.com/dortort/across-amazon/security/advisories/new",
   "repositoryUrl": "https://github.com/dortort/across-amazon"
 }

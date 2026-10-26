@@ -2,6 +2,8 @@
 
 Across Amazon is a Chrome MV3 extension that compares delivered product cost across Amazon marketplaces. On an Amazon product page, it checks the same product on the other marketplaces and ranks them by delivered total (item price + shipping + import fees, as shown on Amazon pages) against the page you are on.
 
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc).
+
 The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ, the support page and how the permissions and data are used.
 
 <p align="center">
@@ -10,7 +12,7 @@ The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ
 
 | Idle | Running | Breakdown |
 | :---: | :---: | :---: |
-| <img src="docs/screenshots/idle.png" width="260" alt="Idle popup with the product and a Check 9 other Amazons button"> | <img src="docs/screenshots/running.png" width="260" alt="Progress dial at 4 of 9 with a chip per checked marketplace"> | <img src="docs/screenshots/sheet.png" width="260" alt="Germany breakdown: item, shipping, import fees and delivered total"> |
+| <img src="docs/screenshots/idle.png" width="260" alt="Idle popup with the product and a Check 9 other Amazons button"> | <img src="docs/screenshots/running.png" width="260" alt="Progress dial at 3 of 9 with a chip per checked marketplace and one per marketplace in progress"> | <img src="docs/screenshots/sheet.png" width="260" alt="Germany breakdown: item, shipping, import fees and delivered total"> |
 
 <sub>Screenshots show the real popup with illustrative fixture data, not real prices.</sub>
 
@@ -28,7 +30,7 @@ The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ
 - Top-10 marketplace support: US, CA, MX, UK, DE, FR, IT, ES, JP, AU
 - Finds the same product on each marketplace by its ASIN, falling back to a search by brand and model number, then by title
 - Conservative product matching with confidence filtering, and a check that a listing found by search is your colour, pack and size
-- Sequential cross-market extraction via temporary inactive tabs
+- Reads each marketplace's pages in an offscreen document, three marketplaces at a time, with a background tab only as a fallback
 - Sets each marketplace's delivery location to your destination before reading its price, and leaves it set
 - Quotes another seller's offer from "See All Buying Options" when a marketplace's page shows no price for your destination
 - Says when a delivered total leaves out import fees because the marketplace showed none for your destination
@@ -71,8 +73,9 @@ Run `pnpm package`. It runs the production build and zips the contents of `dist`
 
 ## Project structure
 
-- `src/background`: service worker, orchestration, FX service
+- `src/background`: service worker, orchestration, the offscreen document client, FX service
 - `src/content`: source/search/product extractors and the delivery location setter
+- `src/offscreen`: offscreen document that downloads and reads the other marketplaces' pages
 - `src/shared`: message/types, matching, money, storage
 - `src/popup`: extension popup UI (`view-model.ts` holds the pure ranking and copy logic, `components/` the views)
 - `src/options`: options/settings page
