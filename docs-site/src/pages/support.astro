@@ -88,8 +88,9 @@ const tocItems = Object.entries(sections).map(([id, heading]) => ({ href: `#${id
           </p>
           <p>
             Within 30 minutes of a check, <span class="nowrap">“Check again”</span> returns the same result from
-            the local cache and opens no tabs. After that, a fresh check runs. A check in which Amazon showed a robot
-            check is not stored, so <span class="nowrap">“Check again”</span> checks every store again.
+            the local cache and reads no store again. After that, a fresh check runs. A check in which Amazon showed a
+            robot check, or that ran out of time, is not stored, so <span class="nowrap">“Check again”</span> checks
+            every store again.
           </p>
           <p><a href="/faq/#cache">Why <span class="nowrap">“Check again”</span> can be instant</a></p>
         </li>
