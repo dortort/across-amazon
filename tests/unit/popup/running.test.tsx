@@ -244,7 +244,7 @@ describe("stopping a run", () => {
     expect(app.cancelRequests()).toEqual([{ type: CANCEL_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } }]);
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeEnabled();
     expect(screen.getByRole("heading", { level: 3 })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Stopped. No background tabs left open.");
+    expect(screen.getByRole("status")).toHaveTextContent(/^Stopped\.$/);
     expect(screen.getByRole("status")).toHaveClass("is-on");
   });
 

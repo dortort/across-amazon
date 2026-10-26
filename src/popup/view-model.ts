@@ -49,7 +49,7 @@ export interface CheckChipEntry {
 }
 
 const MATCH_CHECK_THRESHOLD = 0.9;
-const SECONDS_PER_MARKET = 3;
+const SECONDS_PER_ROUND = 3;
 const MIN_ESTIMATED_SECONDS = 5;
 const MINUS_SIGN = "−";
 const SOURCE_TRUST_SENTENCE = "This is the page you are on. Prices are what Amazon showed when we checked.";
@@ -441,7 +441,7 @@ export function trustSentence(result: ComparisonResult, isSource = false): strin
 }
 
 export function estimatedSeconds(targetCount: number): number {
-  return Math.max(MIN_ESTIMATED_SECONDS, SECONDS_PER_MARKET * targetCount);
+  return Math.max(MIN_ESTIMATED_SECONDS, Math.ceil(targetCount / MARKET_CONCURRENCY) * SECONDS_PER_ROUND);
 }
 
 export function targetMarkets(settings: ExtensionSettings, source?: SourceContext): Marketplace[] {

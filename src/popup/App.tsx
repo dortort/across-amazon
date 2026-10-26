@@ -404,7 +404,7 @@ export function App(): ReactElement {
       void sendMessage({ type: CANCEL_COMPARISON, payload: { activeTabId } });
     }
     dispatch({ type: "run-cancelled" });
-    showToast("Stopped. No background tabs left open.");
+    showToast("Stopped.");
   };
 
   const open = (result: ComparisonResult): void => {
