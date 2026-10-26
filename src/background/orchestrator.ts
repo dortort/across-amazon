@@ -1,4 +1,4 @@
-import { buildProductUrl, buildSearchUrl, countryName, marketDisplayDomain } from "../shared/markets";
+import { MARKET_CONCURRENCY, buildProductUrl, buildSearchUrl, countryName, marketDisplayDomain } from "../shared/markets";
 import { RUN_COMPARISON_PROGRESS } from "../shared/messages";
 import type { RunComparisonProgress } from "../shared/messages";
 import {
@@ -23,6 +23,7 @@ import type {
   LoadSourcePayload,
   LocationRequest,
   LocationResult,
+  MarketProgress,
   Marketplace,
   MatchScore,
   OfferQuote,
@@ -861,6 +862,18 @@ async function compareMarket(
   );
 }
 
+async function runPool<T>(items: T[], size: number, work: (item: T) => Promise<void>, stop: () => boolean): Promise<void> {
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < items.length && !stop()) {
+      const item = items[next];
+      next += 1;
+      await work(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, lane));
+}
+
 export async function cancelComparison(activeTabId: number): Promise<void> {
   const token = RUN_TOKENS.get(activeTabId);
   if (token) {
@@ -884,14 +897,16 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
   let sourceContext: SourceContext | undefined;
   let baseline: ComparisonResult | undefined;
   let fxTable: FxTable | undefined;
-  const results: ComparisonResult[] = [];
+  let targetMarkets: Marketplace[] = [];
+  const results = new Map<Marketplace, ComparisonResult>();
+  const ranked = (): ComparisonResult[] => sortComparisonResults(targetMarkets.flatMap((market) => results.get(market) ?? []));
 
   try {
     const source = await extractSourceContext(activeTabId);
     sourceContext = source;
     const settings = await loadSettings();
 
-    const targetMarkets = settings.enabledMarketplaces.filter((market) => market !== source.marketplace);
+    targetMarkets = settings.enabledMarketplaces.filter((market) => market !== source.marketplace);
     const cacheKey = buildComparisonCacheKey({
       asin: source.asin,
       variationTokens: source.variationTokens,
@@ -927,22 +942,30 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
 
     const queries = buildSearchQueries(source);
     const total = targetMarkets.length;
+    const inFlight = new Map<Marketplace, ComparisonPhase>();
     let sawRobotCheck = false;
 
-    for (const [index, targetMarket] of targetMarkets.entries()) {
+    const report = (latest?: MarketProgress): void => {
+      pushProgress({
+        completed: results.size,
+        total,
+        inFlight: targetMarkets.flatMap((marketplace) => {
+          const phase = inFlight.get(marketplace);
+          return phase ? [{ marketplace, phase }] : [];
+        }),
+        ...(latest ? { latest } : {}),
+        results: ranked(),
+        fxTable: table,
+        activeTabId,
+        runId
+      });
+    };
+
+    const checkMarket = async (targetMarket: Marketplace): Promise<void> => {
       const enterPhase = (phase: ComparisonPhase): void => {
         assertNotCancelled(token);
-        const latest = { marketplace: targetMarket, phase };
-        pushProgress({
-          completed: index,
-          total,
-          inFlight: [latest],
-          latest,
-          results: sortComparisonResults(results),
-          fxTable: table,
-          activeTabId,
-          runId
-        });
+        inFlight.set(targetMarket, phase);
+        report({ marketplace: targetMarket, phase });
       };
 
       const result = await compareMarket(source, targetMarket, queries, token, enterPhase).catch((error: unknown) => {
@@ -951,11 +974,23 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
         }
         return buildFailedResult(targetMarket, errorMessage(error, "Unknown extraction error"));
       });
-      assertNotCancelled(token);
-      results.push(normalizeResult(result, comparisonCurrency, table));
-    }
+      if (token.cancelled) {
+        return;
+      }
+      inFlight.delete(targetMarket);
+      results.set(targetMarket, normalizeResult(result, comparisonCurrency, table));
+      if (results.size < total) {
+        report();
+      }
+    };
 
-    const sortedResults = sortComparisonResults(results);
+    const stopped = new Promise<void>((resolve) => {
+      token.controller.signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+    await Promise.race([runPool(targetMarkets, MARKET_CONCURRENCY, checkMarket, () => token.cancelled), stopped]);
+    assertNotCancelled(token);
+
+    const sortedResults = ranked();
     pushProgress({ completed: total, total, inFlight: [], results: sortedResults, fxTable: table, activeTabId, runId });
 
     const payload: RunComparisonResultPayload = {
@@ -983,7 +1018,7 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
     return {
       source: sourceContext,
       baseline,
-      results: sortComparisonResults(results),
+      results: ranked(),
       generatedAt: new Date().toISOString(),
       fxTable,
       error: errorMessage(error, "Unknown comparison error"),
