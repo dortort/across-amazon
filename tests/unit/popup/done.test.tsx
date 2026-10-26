@@ -458,6 +458,6 @@ describe("check again", () => {
       { type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId: expect.any(String) } }
     ]);
     expect(app.container.querySelector(".dB-dial-num")?.textContent).toBe("0/9");
-    expect(app.container.querySelectorAll(".dB-chk")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".dB-chk")).toHaveLength(3);
   });
 });

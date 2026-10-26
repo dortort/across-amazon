@@ -23,6 +23,7 @@ import {
   es,
   failRun,
   finalStep,
+  finishedStep,
   fr,
   fxTable,
   jp,
@@ -170,44 +171,46 @@ test.describe("a full comparison", () => {
     const running = dial(page);
     await expect(running.count).toHaveText("0/9");
     await expect(running.ring).toHaveAttribute("style", /--p:\s*0%/);
-    await expect(running.nowline).toHaveText("Checking Canada");
+    await expect(running.nowline).toHaveText("Checking Canada +2");
     await expect(running.nowline).toHaveAttribute("aria-live", "polite");
     await expect(running.nowsub).toHaveText("amazon.ca");
-    await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
-    await expect(running.chips).toHaveClass(["dB-chk now"]);
+    await expect(running.chips).toHaveText(["🇨🇦 CA …", "🇲🇽 MX …", "🇬🇧 UK …"]);
+    await expect(running.chips).toHaveClass(["dB-chk now", "dB-chk now", "dB-chk now"]);
     await expect(page.getByText("ECB daily rates")).toBeVisible();
 
     await emitProgress(page, progressStep(scn, "CA", "SEARCH"));
-    await expect(running.nowline).toHaveText("Searching Canada");
+    await expect(running.nowline).toHaveText("Searching Canada +2");
     await expect(running.count).toHaveText("0/9");
     await expect(page.getByText("Rates 2026-07-30")).toBeVisible();
     await expect(page.getByText("ECB daily rates")).toHaveCount(0);
 
     await emitProgress(page, progressStep(scn, "FR", "MATCH"));
-    await expect(running.count).toHaveText("4/9");
-    await expect(running.ring).toHaveAttribute("style", /--p:\s*44%/);
-    await expect(running.nowline).toHaveText("Matching product France");
+    await expect(running.count).toHaveText("3/9");
+    await expect(running.ring).toHaveAttribute("style", /--p:\s*33%/);
+    await expect(running.nowline).toHaveText("Matching product France +2");
     await expect(page.locator(".dB-nowline b")).toHaveText("France");
     await expect(running.nowsub).toHaveText("amazon.fr");
     await expect(running.chips).toHaveText([
       "🇨🇦 CA $391.44",
       "🇲🇽 MX —",
       "🇬🇧 UK $372.16",
-      "🇩🇪 DE $349.05",
-      "🇫🇷 FR …"
+      "🇩🇪 DE …",
+      "🇫🇷 FR …",
+      "🇮🇹 IT …"
     ]);
     await expect(running.chips).toHaveClass([
       "dB-chk ok",
       "dB-chk bad",
       "dB-chk ok",
-      "dB-chk ok",
+      "dB-chk now",
+      "dB-chk now",
       "dB-chk now"
     ]);
 
     await emitProgress(page, progressStep(scn, "AU", "READ"));
-    await expect(running.count).toHaveText("8/9");
-    await expect(running.ring).toHaveAttribute("style", /--p:\s*89%/);
-    await expect(running.nowline).toHaveText("Reading cost stack Australia");
+    await expect(running.count).toHaveText("6/9");
+    await expect(running.ring).toHaveAttribute("style", /--p:\s*67%/);
+    await expect(running.nowline).toHaveText("Reading cost stack Australia +2");
     await expect(running.nowsub).toHaveText("amazon.com.au");
     await expect(running.chips).toHaveCount(9);
     await expect(running.chips.last()).toHaveText("🇦🇺 AU …");
@@ -321,8 +324,8 @@ test.describe("a full comparison", () => {
     expect(await sentMessages(page, RUN_COMPARISON)).toEqual([RUN_REQUEST, RUN_REQUEST]);
     expect(new Set(await runIds(page)).size).toBe(2);
     await expect(running.count).toHaveText("0/9");
-    await expect(running.nowline).toHaveText("Checking Canada");
-    await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
+    await expect(running.nowline).toHaveText("Checking Canada +2");
+    await expect(running.chips).toHaveText(["🇨🇦 CA …", "🇲🇽 MX …", "🇬🇧 UK …"]);
     await expect(page.getByRole("button", { name: "Stop checking" })).toBeVisible();
 
     await emitResult(page, resultPayload(scn));
@@ -342,7 +345,7 @@ test.describe("a full comparison", () => {
       ...progressSteps(scn).map(() => "RUN_COMPARISON_PROGRESS"),
       "RUN_COMPARISON_RESULT"
     ]);
-    expect(progressSteps(scn)).toHaveLength(9 * 4 + 1);
+    expect(progressSteps(scn)).toHaveLength(9 * 4 + 8 + 1);
 
     const [runId] = await runIds(page);
     const payloads = (await emittedMessages(page)).map((message) => message.payload);
@@ -574,7 +577,7 @@ test.describe("when the background service cannot be reached", () => {
       const scn = scenario();
       await openPopup(page, scn);
       await startRun(page);
-      await emitProgress(page, progressStep(scn, "UK", "OPEN"));
+      await emitProgress(page, finishedStep(scn, "MX"));
       await expect(dial(page).count).toHaveText("2/9");
 
       await failRun(page, failure);
@@ -653,13 +656,13 @@ test.describe("stopping a run", () => {
 
     const running = dial(page);
     await expect(running.count).toHaveText("0/9");
-    await expect(running.nowline).toHaveText("Checking Canada");
-    await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
+    await expect(running.nowline).toHaveText("Checking Canada +2");
+    await expect(running.chips).toHaveText(["🇨🇦 CA …", "🇲🇽 MX …", "🇬🇧 UK …"]);
     await expect(page.getByText("Something went wrong")).toHaveCount(0);
     await expect(page.getByText(CANCELLED)).toHaveCount(0);
 
     await emitProgress(page, progressStep(scn, "CA", "SEARCH"));
-    await expect(running.nowline).toHaveText("Searching Canada");
+    await expect(running.nowline).toHaveText("Searching Canada +2");
 
     await emitResult(page, resultPayload(scn));
     await expect(verdictCard(page).getByText("Save $50.94")).toBeVisible();
@@ -682,13 +685,13 @@ test.describe("another tab's comparison", () => {
 
     const running = dial(page);
     await expect(running.count).toHaveText("0/9");
-    await expect(running.nowline).toHaveText("Checking Canada");
-    await expect(running.chips).toHaveText(["🇨🇦 CA …"]);
+    await expect(running.nowline).toHaveText("Checking Canada +2");
+    await expect(running.chips).toHaveText(["🇨🇦 CA …", "🇲🇽 MX …", "🇬🇧 UK …"]);
     await expect(page.getByText("ECB daily rates")).toBeVisible();
     await expect(page.getByRole("button", { name: "Check again" })).toHaveCount(0);
 
     await emitProgress(page, progressStep(scn, "CA", "SEARCH"));
-    await expect(running.nowline).toHaveText("Searching Canada");
+    await expect(running.nowline).toHaveText("Searching Canada +2");
     await expect(page.getByText("Rates 2026-07-30")).toBeVisible();
   });
 });
@@ -826,8 +829,8 @@ test.describe("settings", () => {
     await expect(page.getByRole("button", { name: "Stop checking" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Close settings" }).click();
-    await expect(dial(page).count).toHaveText("5/9");
-    await expect(dial(page).nowline).toHaveText("Matching product Italy");
+    await expect(dial(page).count).toHaveText("3/9");
+    await expect(dial(page).nowline).toHaveText("Matching product Italy +2");
 
     await page.getByRole("button", { name: "Settings" }).click();
     const japan = page.getByRole("checkbox", { name: "🇯🇵 Japan" });
@@ -942,7 +945,7 @@ test.describe("focus", () => {
     await startRun(page);
     await expect(scrollArea(page)).toBeFocused();
     await emitProgress(page, progressStep(scn, "UK", "SEARCH"));
-    await expect(dial(page).count).toHaveText("2/9");
+    await expect(dial(page).nowline).toHaveText("Searching United Kingdom +2");
     await expect(scrollArea(page)).toBeFocused();
 
     await page.getByRole("button", { name: "Stop checking" }).click();
