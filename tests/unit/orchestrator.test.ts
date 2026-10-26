@@ -6,10 +6,12 @@ import { setDeliveryLocation } from "../../src/content/location-setter";
 import { extractProductDataWithOffers } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import { extractSourceContext } from "../../src/content/source-extractor";
-import { MARKETPLACE_CODES, getMarketplaceByDomain } from "../../src/shared/markets";
+import { MARKETPLACE_CODES, buildProductUrl, getMarketplaceByDomain } from "../../src/shared/markets";
 import {
   CANCEL_COMPARISON,
   LOAD_SOURCE,
+  OFFSCREEN_CANCEL_RUN,
+  OFFSCREEN_TARGET,
   RUN_COMPARISON,
   RUN_COMPARISON_PROGRESS,
   RUN_COMPARISON_RESULT
@@ -47,6 +49,15 @@ const ACTIVE_TAB_ID = 1;
 const SOURCE_URL = "https://www.amazon.com/dp/B000000001";
 const FIXTURE_ROOT = join(process.cwd(), "tests", "fixtures");
 const POPUP_CLOSED_ERROR = "Could not establish connection. Receiving end does not exist.";
+const SINGLE_DOCUMENT_ERROR = "Only a single offscreen document may be created.";
+const NO_DOCUMENT_ERROR = "No current offscreen document.";
+const EXTENSION_ID = "across-amazon-test";
+const WORKER_SENDER: chrome.runtime.MessageSender = {
+  id: EXTENSION_ID,
+  url: `chrome-extension://${EXTENSION_ID}/background/service-worker.js`
+};
+const TAB_PATH = { offscreen: false } as const;
+const PAGE_PATH = /^\/s$|\/dp\/[A-Z0-9]{10}/i;
 const CANCELLED_ERROR = "Comparison cancelled by user";
 const TAB_CLOSED_ERROR = "The tab was closed.";
 const FRAME_REMOVED_ERROR = "Frame with ID 0 was removed.";
@@ -133,6 +144,7 @@ type WindowScope = Record<string, unknown>;
 type Prepare = (group: FixtureGroup, market: Marketplace, document: Document) => void;
 type SendResponse = (response?: unknown) => void;
 type MessageListener = (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+type OffscreenListener = (message: unknown, sender: chrome.runtime.MessageSender, sendResponse: SendResponse) => boolean;
 type TabUpdatedListener = (tabId: number, changeInfo: { status?: string }) => void;
 type TabRemovedListener = (tabId: number) => void;
 type DocumentState = "blank" | "loading" | "removed" | "replaced" | "error" | "no-access" | "idle";
@@ -141,6 +153,7 @@ interface FakeTab {
   id: number;
   url: string;
   label: string;
+  market?: Marketplace;
   dom: JSDOM;
   responseStatus: number;
   scope: WindowScope;
@@ -175,9 +188,27 @@ interface InjectionFrame {
 interface ExtensionMessage {
   type: string;
   payload: unknown;
+  target?: string;
+}
+
+interface FetchAnswer {
+  ok: boolean;
+  status: number;
+  url?: string;
+  headers?: Headers;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+  text?: () => Promise<string>;
+}
+
+interface ServedPage {
+  label: string;
+  dom: JSDOM;
+  status?: number;
+  finalUrl: string;
 }
 
 interface HarnessOptions {
+  offscreen?: boolean;
   enabledMarketplaces?: Marketplace[];
   comparisonCurrency?: string;
   activeUrl?: string;
@@ -208,7 +239,9 @@ interface Harness {
   fetch: ReturnType<typeof vi.fn>;
   storage: Record<string, unknown>;
   events: string[];
+  eventMarkets: Array<Marketplace | undefined>;
   messages: ExtensionMessage[];
+  offscreenMessages: ExtensionMessage[];
   tabsCreate: ReturnType<typeof vi.fn>;
   tabsRemove: ReturnType<typeof vi.fn>;
   executeScript: ReturnType<typeof vi.fn>;
@@ -241,6 +274,7 @@ function newTab(id: number, url: string, label: string, dom: JSDOM, responseStat
     id,
     url,
     label,
+    market: getMarketplaceByDomain(new URL(url).hostname),
     dom,
     responseStatus,
     scope: {},
@@ -288,7 +322,7 @@ function readOffersFixture(file: string): string {
 function setPageAsin(document: Document, asin: string): void {
   const input = document.querySelector<HTMLInputElement>("#ASIN");
   if (input) {
-    input.value = asin;
+    input.setAttribute("value", asin);
   }
   const canonical = document.querySelector<HTMLLinkElement>("link[rel='canonical']");
   if (canonical) {
@@ -338,7 +372,50 @@ const CONTENT_SCRIPTS: Record<string, (tab: FakeTab) => void> = {
   }
 };
 
-function createHarness(options: HarnessOptions): Harness {
+function abortError(): DOMException {
+  return new DOMException("This operation was aborted", "AbortError");
+}
+
+function abortable<T>(signal: AbortSignal | null | undefined, work: Promise<T>): Promise<T> {
+  if (!signal) {
+    return work;
+  }
+  if (signal.aborted) {
+    return Promise.reject(abortError());
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+function pageResponse(html: string, url: string, status: number): FetchAnswer {
+  const bytes = new TextEncoder().encode(html);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    url,
+    headers: new Headers({ "content-type": "text/html;charset=UTF-8" }),
+    arrayBuffer: async () => bytes.slice().buffer,
+    text: async () => html
+  };
+}
+
+function isOffscreenMessage(message: ExtensionMessage): boolean {
+  return message.target === OFFSCREEN_TARGET;
+}
+
+function createHarness(options: HarnessOptions, offscreenListener: OffscreenListener): Harness {
   const storage: Record<string, unknown> = {
     "settings:v1": {
       enabledMarketplaces: options.enabledMarketplaces ?? ["US", "UK", "DE"],
@@ -347,13 +424,21 @@ function createHarness(options: HarnessOptions): Harness {
   };
   const tabs = new Map<number, FakeTab>();
   const events: string[] = [];
+  const eventMarkets: Array<Marketplace | undefined> = [];
   const messages: ExtensionMessage[] = [];
+  const offscreenMessages: ExtensionMessage[] = [];
+  let offscreenOpen = false;
   const listeners: MessageListener[] = [];
   const updatedListeners = new Set<TabUpdatedListener>();
   const removedListeners = new Set<TabRemovedListener>();
   let nextTabId = 100;
   let fxHold = options.holdFx;
   const locations = new Map<Marketplace, string>(MARKETPLACE_CODES.map((market) => [market, options.locations?.[market] ?? "US"]));
+
+  function log(event: string, market?: Marketplace): void {
+    events.push(event);
+    eventMarkets.push(market);
+  }
 
   function fixtureDom(group: FixtureGroup, market: Marketplace, url: string): JSDOM {
     return loadFixtureDom(group, market, url, locations.get(market) ?? "US", options.prepare);
@@ -395,11 +480,11 @@ function createHarness(options: HarnessOptions): Harness {
     return { group: "missing", dom: fixtureDom("missing", market, url) };
   }
 
-  function servePage(market: Marketplace, url: string): { label: string; dom: JSDOM; status?: number } {
+  function servePage(market: Marketplace, url: string): ServedPage {
     const parsed = new URL(url);
     if (parsed.pathname === "/s" && options.checkpointOn?.includes(market)) {
       const checkpointUrl = new URL(CHECKPOINT_PATH, url).href;
-      return { label: `checkpoint/${market}`, dom: new JSDOM(CHECKPOINT_HTML, { url: checkpointUrl }) };
+      return { label: `checkpoint/${market}`, dom: new JSDOM(CHECKPOINT_HTML, { url: checkpointUrl }), finalUrl: checkpointUrl };
     }
     const requestedAsin = /\/dp\/([A-Z0-9]{10})/i.exec(parsed.pathname)?.[1]?.toUpperCase();
     const { group, dom } =
@@ -408,12 +493,19 @@ function createHarness(options: HarnessOptions): Harness {
         : loadProductPage(market, url, requestedAsin);
     const label = `${group}/${market}`;
     if (options.robotCheckOn?.includes(label) || options.robotCheckOn?.includes(url)) {
-      return { label: `robot-check/${market}`, dom: new JSDOM(ROBOT_CHECK_HTML, { url }) };
+      return { label: `robot-check/${market}`, dom: new JSDOM(ROBOT_CHECK_HTML, { url }), finalUrl: url };
     }
     if (options.serviceUnavailableOn?.includes(label) || options.serviceUnavailableOn?.includes(url)) {
-      return { label: `http-503/${market}`, dom: new JSDOM(SERVICE_UNAVAILABLE_HTML, { url }), status: 503 };
+      return { label: `http-503/${market}`, dom: new JSDOM(SERVICE_UNAVAILABLE_HTML, { url }), status: 503, finalUrl: url };
     }
-    return { label, dom, status: group === "missing" ? 404 : 200 };
+    const pageAsin = dom.window.document.querySelector<HTMLInputElement>("#ASIN")?.value;
+    const redirected = group === "product" && pageAsin && pageAsin !== requestedAsin && options.redirectAsinOn?.includes(market);
+    return {
+      label,
+      dom,
+      status: group === "missing" ? 404 : 200,
+      finalUrl: redirected ? buildProductUrl(market, pageAsin) : url
+    };
   }
 
   function openTempTab(url: string): FakeTab {
@@ -431,26 +523,26 @@ function createHarness(options: HarnessOptions): Harness {
   async function awaitDocument(tab: FakeTab): Promise<"ready" | "replaced"> {
     switch (tab.document) {
       case "blank":
-        events.push(`blank ${tab.label}`);
+        log(`blank ${tab.label}`, tab.market);
         throw new Error(NO_HOST_ACCESS_ERROR);
       case "error":
-        events.push(`error page ${tab.label}`);
+        log(`error page ${tab.label}`, tab.market);
         throw new Error(ERROR_PAGE_ERROR);
       case "no-access":
-        events.push(`no access ${tab.label}`);
+        log(`no access ${tab.label}`, tab.market);
         throw new Error(NO_HOST_ACCESS_ERROR);
       case "removed":
-        events.push(`frame removed ${tab.label}`);
+        log(`frame removed ${tab.label}`, tab.market);
         tab.document = "idle";
         throw new Error(FRAME_REMOVED_ERROR);
       case "replaced":
-        events.push(`replaced ${tab.label}`);
+        log(`replaced ${tab.label}`, tab.market);
         tab.document = "idle";
         return "replaced";
       case "loading":
         if (!tab.waited) {
           tab.waited = true;
-          events.push(`loading ${tab.label}`);
+          log(`loading ${tab.label}`, tab.market);
         }
         await Promise.race([
           tab.idle,
@@ -464,7 +556,7 @@ function createHarness(options: HarnessOptions): Harness {
     }
     if (!tab.served) {
       tab.served = true;
-      events.push(`ready ${tab.label}`);
+      log(`ready ${tab.label}`, tab.market);
     }
     return "ready";
   }
@@ -477,7 +569,7 @@ function createHarness(options: HarnessOptions): Harness {
 
     const frame = { frameId: 0, documentId: `doc-${tab.id}` };
     if (injection.injectImmediately && !tab.served) {
-      events.push(`inject immediately ${tab.label}`);
+      log(`inject immediately ${tab.label}`, tab.market);
       return runInDocument({ ...tab, dom: new JSDOM(UNPARSED_DOCUMENT_HTML, { url: tab.url }) }, injection, frame);
     }
     if ((await awaitDocument(tab)) === "replaced") {
@@ -489,7 +581,7 @@ function createHarness(options: HarnessOptions): Harness {
   async function runInDocument(tab: FakeTab, injection: Injection, frame: InjectionFrame): Promise<InjectionFrame[]> {
     if (injection.files) {
       for (const file of injection.files) {
-        events.push(`inject ${file} ${tab.label}`);
+        log(`inject ${file} ${tab.label}`, tab.market);
         if (options.failScriptOn === tab.label || options.failScriptOn === tab.url) {
           throw new Error(FRAME_REMOVED_ERROR);
         }
@@ -533,7 +625,7 @@ function createHarness(options: HarnessOptions): Harness {
 
   const tabsCreate = vi.fn(async ({ url }: { url: string; active?: boolean }) => {
     const tab = openTempTab(url);
-    events.push(`open ${tab.label}`);
+    log(`open ${tab.label}`, tab.market);
     options.onTabCreated?.(tab, harness);
     return { id: tab.id, url, active: false, status: "loading" };
   });
@@ -548,7 +640,7 @@ function createHarness(options: HarnessOptions): Harness {
     const tab = requireTab(tabId);
     tabs.delete(tabId);
     tab.close();
-    events.push(`close ${tab.label}`);
+    log(`close ${tab.label}`, tab.market);
   }
 
   const tabsRemove = vi.fn(async (tabId: number) => {
@@ -560,47 +652,60 @@ function createHarness(options: HarnessOptions): Harness {
 
   const executeScript = vi.fn(async (injection: Injection) => runInjection(injection));
 
-  async function answerAmazon(market: Marketplace, url: URL, init: RequestInit) {
+  async function answerAmazon(market: Marketplace, url: URL, init: RequestInit): Promise<FetchAnswer> {
     const headers = (init.headers ?? {}) as Record<string, string>;
+    const via = init.credentials === "include" ? "fetch " : "";
+    const answer = (status: number, body: string): FetchAnswer => ({
+      ok: status >= 200 && status < 300,
+      status,
+      url: url.href,
+      text: async () => body
+    });
     if (url.pathname === LOCATION_FORM_PATH) {
-      events.push(`location form ${url.hostname}`);
+      log(`${via}location form ${url.hostname}`, market);
       await options.holdLocation;
       const form = options.notOfferedOn?.includes(market) ? "AU-modal.html" : locationFormFile(market);
-      const body = headers["anti-csrftoken-a2z"] === PAGE_TOKEN ? readLocationFixture(form) : readLocationFixture("degraded-modal.html");
-      return { ok: true, status: 200, text: async () => body };
+      return answer(200, readLocationFixture(headers["anti-csrftoken-a2z"] === PAGE_TOKEN ? form : "degraded-modal.html"));
     }
     if (url.pathname === ADDRESS_CHANGE_PATH && init.method === "POST") {
       const countryCode = (JSON.parse(String(init.body)) as { countryCode: string }).countryCode;
-      events.push(`location change ${url.hostname} ${countryCode}`);
+      log(`${via}location change ${url.hostname} ${countryCode}`, market);
       const accepted =
         headers["anti-csrftoken-a2z"] === POST_TOKEN &&
         headers["Content-Type"] === "application/json" &&
         !options.rejectLocationOn?.includes(market);
       if (!accepted) {
-        return { ok: true, status: 200, text: async () => "" };
+        return answer(200, "");
       }
       locations.set(market, countryCode);
       const success = JSON.parse(readLocationFixture("address-change-CH.json")) as { address: Record<string, unknown> };
-      const body = JSON.stringify({ ...success, address: { ...success.address, countryCode, district: countryCode } });
-      return { ok: true, status: 200, text: async () => body };
+      return answer(200, JSON.stringify({ ...success, address: { ...success.address, countryCode, district: countryCode } }));
     }
     if (url.pathname === OFFERS_PATH) {
-      events.push(`offers ${url.hostname}`);
+      log(`${via}offers ${url.hostname}`, market);
       await options.holdOffers;
       const file = options.offersOn?.[market];
-      return file ? { ok: true, status: 200, text: async () => readOffersFixture(file) } : { ok: false, status: 404, text: async () => "" };
+      return file ? answer(200, readOffersFixture(file)) : answer(404, "");
     }
-    return { ok: false, status: 404, text: async () => "" };
+    return answer(404, "");
   }
 
-  const fetchMock = vi.fn(async (input: string, init: RequestInit = {}) => {
+  async function answerPage(market: Marketplace, url: URL): Promise<FetchAnswer> {
+    const page = servePage(market, url.href);
+    log(`fetch ${page.label}`, market);
+    return pageResponse(page.dom.serialize(), page.finalUrl, page.status ?? 200);
+  }
+
+  const fetchMock = vi.fn(async (input: string, init: RequestInit = {}): Promise<FetchAnswer> => {
     const url = new URL(input);
     const market = getMarketplaceByDomain(url.hostname);
     if (market) {
-      return answerAmazon(market, url, init);
+      const fetched = init.credentials === "include";
+      const answer = fetched && PAGE_PATH.test(url.pathname) ? answerPage(market, url) : answerAmazon(market, url, init);
+      return fetched ? abortable(init.signal, answer) : answer;
     }
     const host = url.hostname;
-    events.push(`fx ${host}`);
+    log(`fx ${host}`);
     const hold = fxHold;
     fxHold = undefined;
     await hold;
@@ -610,7 +715,46 @@ function createHarness(options: HarnessOptions): Harness {
     return { ok: true, status: 200, text: async () => ECB_XML };
   });
 
+  async function sendToOffscreen(message: ExtensionMessage): Promise<unknown> {
+    const copy = JSON.parse(JSON.stringify(message)) as ExtensionMessage;
+    offscreenMessages.push(copy);
+    if (copy.type === OFFSCREEN_CANCEL_RUN) {
+      log("offscreen cancel");
+    }
+    if (!offscreenOpen) {
+      throw new Error(POPUP_CLOSED_ERROR);
+    }
+    return new Promise((resolve) => {
+      let answered = false;
+      const keepsChannel = offscreenListener(copy, WORKER_SENDER, (response) => {
+        answered = true;
+        resolve(response === undefined ? undefined : JSON.parse(JSON.stringify(response)));
+      });
+      if (!keepsChannel && !answered) {
+        resolve(undefined);
+      }
+    });
+  }
+
+  const offscreenMock = {
+    createDocument: vi.fn(async () => {
+      if (offscreenOpen) {
+        throw new Error(SINGLE_DOCUMENT_ERROR);
+      }
+      offscreenOpen = true;
+      log("offscreen create");
+    }),
+    closeDocument: vi.fn(async () => {
+      if (!offscreenOpen) {
+        throw new Error(NO_DOCUMENT_ERROR);
+      }
+      offscreenOpen = false;
+      log("offscreen close");
+    })
+  };
+
   const chromeMock = {
+    ...(options.offscreen === false ? {} : { offscreen: offscreenMock }),
     tabs: {
       create: tabsCreate,
       get: vi.fn(async (tabId: number) => {
@@ -644,12 +788,17 @@ function createHarness(options: HarnessOptions): Harness {
       }
     },
     runtime: {
+      id: EXTENSION_ID,
       sendMessage: vi.fn(async (message: ExtensionMessage) => {
+        if (isOffscreenMessage(message)) {
+          return sendToOffscreen(message);
+        }
         const copy = structuredClone(message);
         messages.push(copy);
         if (copy.type === RUN_COMPARISON_PROGRESS) {
           const payload = copy.payload as RunComparisonProgressPayload;
-          events.push(payload.latest ? `progress ${payload.latest.phase} ${payload.latest.marketplace}` : "progress DONE");
+          const latest = payload.latest;
+          log(latest ? `progress ${latest.phase} ${latest.marketplace}` : "progress DONE", latest?.marketplace);
         }
         if (options.popupClosed) {
           throw new Error(POPUP_CLOSED_ERROR);
@@ -668,7 +817,9 @@ function createHarness(options: HarnessOptions): Harness {
     fetch: fetchMock,
     storage,
     events,
+    eventMarkets,
     messages,
+    offscreenMessages,
     tabsCreate,
     tabsRemove,
     executeScript,
@@ -692,10 +843,11 @@ function createHarness(options: HarnessOptions): Harness {
 }
 
 async function bootServiceWorker(options: HarnessOptions = {}): Promise<Harness> {
-  const harness = createHarness(options);
+  vi.resetModules();
+  const { handleOffscreenMessage } = await import("../../src/offscreen/page-reader");
+  const harness = createHarness(options, handleOffscreenMessage);
   vi.stubGlobal("chrome", harness.chrome);
   vi.stubGlobal("fetch", harness.fetch);
-  vi.resetModules();
   await import("../../src/background/service-worker");
   return harness;
 }
@@ -802,11 +954,7 @@ function eventsAfterStartup(harness: Harness): string[] {
 }
 
 function marketEvents(harness: Harness, market: Marketplace): string[] {
-  const start = harness.events.indexOf(`progress OPEN ${market}`);
-  const end = harness.events.findIndex(
-    (event, index) => index > start && (event.startsWith("progress OPEN ") || event === "progress DONE")
-  );
-  return harness.events.slice(start, end === -1 ? undefined : end);
+  return harness.events.filter((_event, index) => harness.eventMarkets[index] === market);
 }
 
 afterEach(() => {
@@ -1015,7 +1163,7 @@ describe("background orchestrator", () => {
     });
 
     it("emits each phase at the right point of the tab lifecycle", async () => {
-      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+      const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE"] });
 
       await runViaWorker(harness);
 
@@ -1415,7 +1563,7 @@ describe("background orchestrator", () => {
     });
 
     it("searches when the page for the source ASIN cannot be scripted", async () => {
-      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], failScriptOn: "missing/DE" });
+      const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE"], failScriptOn: "missing/DE" });
 
       const payload = await runViaWorker(harness);
 
@@ -1426,6 +1574,7 @@ describe("background orchestrator", () => {
 
     it("searches when the page for the source ASIN is closed while it loads", async () => {
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab, self) => {
           if (tab.label === "missing/DE") {
@@ -1445,6 +1594,7 @@ describe("background orchestrator", () => {
 
     it("stops without searching when Stop arrives while the page for the source ASIN loads", async () => {
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         sourceAsinOn: ["DE"],
         onTabCreated: (tab) => {
@@ -2009,6 +2159,7 @@ describe("background orchestrator", () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       try {
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE"],
           holdOffers: deferred().promise,
           prepare: onlyOtherSellersOn("DE")
@@ -2194,6 +2345,7 @@ describe("background orchestrator", () => {
     describe("when the page for the source colour cannot be read", () => {
       const BLUE_VARIANT_URL = `https://www.amazon.de/dp/${BLUE_VARIANT_ASIN}`;
       const switchingOptions: HarnessOptions = {
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         variantAsinsOn: { DE: [BLUE_VARIANT_ASIN] },
         prepare: colourPages((url) => (url === RED_LISTING_URL ? "Red" : "Blue"), [
@@ -2387,6 +2539,7 @@ describe("background orchestrator", () => {
     it("stops mid-run, closes a tab opened after Stop at once and returns partial results with source, baseline and FX", async () => {
       let cancelResponse: unknown;
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab, self) => {
           if (tab.label === "search/UK") {
@@ -2418,6 +2571,7 @@ describe("background orchestrator", () => {
     it("closes the stopped run's tabs at once, ends it with the cancellation error and lets a new run on the same tab complete", async () => {
       let held: FakeTab | undefined;
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab) => {
           if (!held) {
@@ -2457,6 +2611,7 @@ describe("background orchestrator", () => {
       const fx = deferred();
       let held: FakeTab | undefined;
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         holdFx: fx.promise,
         onTabCreated: (tab) => {
@@ -2497,6 +2652,7 @@ describe("background orchestrator", () => {
     it("stops a run that is still going when a new run starts on the same tab", async () => {
       let held: FakeTab | undefined;
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab) => {
           if (!held) {
@@ -2529,6 +2685,7 @@ describe("background orchestrator", () => {
     it("reads each page as soon as its document is idle, without waiting for the tab to finish loading", async () => {
       const opened: FakeTab[] = [];
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab) => {
           tab.status = "loading";
@@ -2550,6 +2707,7 @@ describe("background orchestrator", () => {
 
     it("waits for a page that is still loading and reads it once its document is idle", async () => {
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab, self) => {
           holdLoading(tab);
@@ -2571,6 +2729,7 @@ describe("background orchestrator", () => {
 
     it("tries again while a new tab still shows about:blank, which Chrome does not let it script", async () => {
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab, self) => {
           if (tab.label === "missing/DE") {
@@ -2596,6 +2755,7 @@ describe("background orchestrator", () => {
 
     it("inspects a page again when Chrome answers for a document a navigation replaced", async () => {
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab) => {
           if (tab.label === "search/DE") {
@@ -2619,6 +2779,7 @@ describe("background orchestrator", () => {
 
     it("inspects a page again when a navigation removes the frame it was injecting into", async () => {
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab) => {
           if (tab.label === "missing/DE") {
@@ -2642,6 +2803,7 @@ describe("background orchestrator", () => {
 
     it("gives up on an error page at once and searches instead of waiting for the deadline", async () => {
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab) => {
           if (tab.label === "missing/DE") {
@@ -2659,6 +2821,7 @@ describe("background orchestrator", () => {
     it("records a market whose tab is closed while loading as PARSE_FAILED without waiting for the timeout", async () => {
       let closedTabId: number | undefined;
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab, self) => {
           if (tab.label === "search/DE") {
@@ -2695,6 +2858,7 @@ describe("background orchestrator", () => {
       it("gives up on a tab that never leaves about:blank after 20 seconds", async () => {
         let blankTabId: number | undefined;
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE", "UK"],
           onTabCreated: (tab) => {
             if (tab.label === "search/DE") {
@@ -2722,6 +2886,7 @@ describe("background orchestrator", () => {
 
       it("gives up at once on a tab that finished loading on a host Chrome does not let it script", async () => {
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE", "UK"],
           onTabCreated: (tab) => {
             if (tab.label.endsWith("/DE")) {
@@ -2751,6 +2916,7 @@ describe("background orchestrator", () => {
       it("ends the wait as a closed tab when Chrome reports the tab gone before it sends onRemoved", async () => {
         let closedTabId = 0;
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE", "UK"],
           onTabCreated: (tab) => {
             if (tab.label === "search/DE") {
@@ -2786,6 +2952,7 @@ describe("background orchestrator", () => {
       it("ends the wait as a closed tab when the tab is gone by the time it asks whether the tab is still loading", async () => {
         let closedTabId = 0;
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE", "UK"],
           onTabCreated: (tab, self) => {
             if (tab.label === "search/DE") {
@@ -2817,6 +2984,7 @@ describe("background orchestrator", () => {
 
       it("does not read a page that landed on another store's host and searches after 20 seconds", async () => {
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE"],
           onTabCreated: (tab) => {
             if (tab.label === "missing/DE") {
@@ -2838,6 +3006,7 @@ describe("background orchestrator", () => {
 
       it("reads the store's page once a tab that answered from another host lands on it", async () => {
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE"],
           sourceAsinOn: ["DE"],
           onTabCreated: (tab) => {
@@ -2872,7 +3041,7 @@ describe("background orchestrator", () => {
       });
 
       it("gives up on a search page whose read never answers after 25 seconds and checks the next store", async () => {
-        const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], holdScriptOn: ["search/DE"] });
+        const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE", "UK"], holdScriptOn: ["search/DE"] });
 
         const run = runViaWorker(harness);
         await vi.waitFor(() => expect(harness.events).toContain("inject content/search-extractor.js search/DE"));
@@ -2899,6 +3068,7 @@ describe("background orchestrator", () => {
 
       it("stops trying again once Stop closes a tab that still shows about:blank", async () => {
         const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE", "UK"],
           onTabCreated: (tab) => {
             holdBlank(tab);
@@ -3105,6 +3275,7 @@ describe("background orchestrator", () => {
     it("keeps checking and caches the run when two stores fail without a robot check", async () => {
       const closedTabIds: number[] = [];
       const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "UK", "DE", "FR"],
         onTabCreated: (tab, self) => {
           if (tab.label === "search/UK" || tab.label === "search/DE") {
@@ -3234,7 +3405,7 @@ describe("background orchestrator", () => {
     ])(
       "records a market whose %s page cannot be scripted as PARSE_FAILED and closes its tab before the next market starts",
       async (label, script) => {
-        const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], failScriptOn: label });
+        const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE", "UK"], failScriptOn: label });
 
         const payload = await runViaWorker(harness);
 
@@ -3256,6 +3427,7 @@ describe("background orchestrator", () => {
         try {
           let stalledTabId: number | undefined;
           const harness = await bootServiceWorker({
+            ...TAB_PATH,
             enabledMarketplaces: ["US", "DE", "UK"],
             onTabCreated: (tab) => {
               if (tab.label === label) {
