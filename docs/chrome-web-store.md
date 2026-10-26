@@ -2,7 +2,7 @@
 
 Everything the Chrome Web Store developer dashboard asks for, drafted from the code. Paste each block into the field it names. Each claim comes from the code, with a pointer where it matters, so check the pointers again when the code changes.
 
-Version 0.1.0 was submitted on 2026-10-20 and published on 2026-10-22. The listing is at https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc.
+Version 0.1.0 was submitted on 2026-10-20 and published on 2026-10-22. The listing is at https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc. Version 0.2.0 (tag `v0.2.0`, `release/across-amazon-0.2.0.zip`, SHA-256 `ed1b95dfb66be95cdd1ad39a4a550b891e8458c6678336ba11141e3591e504ce`) was submitted on 2026-10-26 with "Publish automatically after it has passed review" ticked; until it passes review, the store offers 0.1.0.
 
 ## Store listing
 
@@ -89,6 +89,12 @@ Across Amazon compares the delivered price (item, shipping and import fees) of t
 | `www.ecb.europa.eu` | The service worker downloads the European Central Bank's daily euro reference rates (`eurofxref-daily.xml`) to convert each store's delivered total into one currency. The feed sends no CORS headers, so the request needs the host permission. Normally fetched once per UTC day; only a successful download is cached, so after a failure it is retried on the next check (`src/background/fx-service.ts`). |
 | `api.frankfurter.dev` | Fallback for the same daily rates (`/v1/latest?base=EUR`), used only when the ECB feed cannot be loaded. Listing the host keeps the fallback independent of its CORS headers. |
 
+The dashboard has a single host permission field of at most 1,000 characters, so the rows above are condensed into it. Text submitted with 0.2.0:
+
+```text
+Amazon stores (amazon.com, .ca, .com.mx, .co.uk, .de, .fr, .it, .es, .co.jp, .com.au): to read the product page the user is on and, during a check, to download the other stores' product and search pages in the offscreen document with the user's Amazon session, or read one in a background tab when it cannot be read that way. The extension also sends each store its own "Choose your location" request, so it quotes delivery to the user's country, and its "See All Buying Options" request when a page shows no price. Page addresses come from the product's ASIN and from Amazon's own search results. www.ecb.europa.eu: the European Central Bank's daily euro reference rates, to convert each store's total into one currency; the feed sends no CORS headers. api.frankfurter.dev: the same daily rates, used only when the ECB feed cannot be loaded.
+```
+
 ### Remote code
 
 ```text
@@ -137,7 +143,13 @@ The policy is published at https://across-amazon.dortort.dev/privacy/, which the
 
 ## Test instructions for reviewers
 
-The dashboard's "Test instructions" field (under Distribution), plain text:
+The dashboard's test instructions (Access, Test instructions, "Additional instructions") take 500 characters at most, so the steps further down are the full version and the field holds a condensed one. Text submitted with 0.2.0:
+
+```text
+No account needed. 1) Open a product page (URL with /dp/) of a popular item Amazon sells and ships, on amazon.com or amazon.co.uk. 2) Click the Across Amazon icon, then "Check 9 other Amazons". In about 15 seconds the popup ranks the stores by delivered total (item + shipping + import fees, at ECB rates); click a row for its breakdown. Stores that cannot deliver are listed with the reason. The check sets each other store's "Deliver to" country to yours and never buys anything.
+```
+
+Full steps, plain text:
 
 ```text
 No account, sign-in or credentials are needed.
@@ -179,7 +191,7 @@ From `.omc/artifacts/store-assets/final/`:
 - [x] Decide on the icon and store graphics: the orange curved arrow under the globe can read as Amazon's smile logo, which a reviewer may take as implied endorsement. The icon and graphics were submitted with the arrow as drawn, and the description carries the "Not affiliated with or endorsed by Amazon" line.
 - [ ] Decide whether the privacy policy names the publisher, and with which name, before publishing it.
 - [ ] Check that every pointer above still matches the code that was packaged.
-- [ ] For the next version: paste the `offscreen` justification above into the privacy practices tab.
-- [ ] For the next version: check that the privacy policy with its new effective date is live on the site.
+- [x] For the next version: paste the `offscreen` justification above into the privacy practices tab. Done for 0.2.0 on 2026-10-26, with the `scripting` and host permission justifications updated.
+- [x] For the next version: check that the privacy policy with its new effective date is live on the site. https://across-amazon.dortort.dev/privacy/ showed "Effective date: 2026-10-26" before 0.2.0 was submitted.
 - [x] For the next version: finish the live validation of three stores at a time read without tabs, and confirm or revise the "about 9 seconds" figure and the wording on when a tab opens, here, in the popup and on the site. Done on 2026-10-26 in a real Chrome profile, through the popup, with nine stores each: the Anker USB-C cable B09LCMVB3F from amazon.com took 12.6 seconds, LEGO 76417 B0CGVJVQV8 from amazon.de 13.2 seconds and the Sony WH-1000XM5 B09XS7JWHH from amazon.com 19.6 seconds, that is 4.2 to 6.5 seconds for every round of three stores, since a search or a variant read takes longer than an ASIN hit. The figure was revised to about 15 seconds for nine stores, 5 seconds for every three. None of the three runs opened a tab: they left no Amazon page in Chrome's history, against 11 to 44 a run for the builds that read every page in a tab, so the wording on when a tab opens stands.
-- [ ] For the next version: regenerate the store listing's third and fourth screenshots (`screenshot-3.png`, the running view, and `screenshot-4.png`, the idle view) from the new popup.
+- [x] For the next version: regenerate the store listing's third and fourth screenshots (`screenshot-3.png`, the running view, and `screenshot-4.png`, the idle view) from the new popup. Done for 0.2.0 on 2026-10-26 with `node src/render.mjs`; the dashboard now holds the new third and fourth screenshots.
