@@ -43,13 +43,13 @@ The footer reads "ECB daily rates" until a check has loaded exchange rates. Afte
 
 <img src="screenshots/running.png" width="360" alt="Running popup with a progress dial at 4 of 9, Searching France, and chips for Canada, Mexico, United Kingdom, Germany and France">
 
-Each marketplace is first looked up by your product's ASIN, Amazon's own product identifier, and searched only when it does not list that ASIN. Its pages are read in background tabs that open without taking focus and close as soon as they have been read. Before a marketplace's first page is read, its delivery location is [set to your destination](#your-destination-and-the-other-marketplaces). The popup shows:
+Each marketplace is first looked up by your product's ASIN, Amazon's own product identifier, and searched only when it does not list that ASIN. Its pages are read in background tabs that open without taking focus. Each page is read as soon as its content has arrived, without waiting for Amazon's images and ads, and its tab closes as soon as it has been read. Before a marketplace's first page is read, its delivery location is [set to your destination](#your-destination-and-the-other-marketplaces). The popup shows:
 
 - **The dial**: how many marketplaces are finished out of the total (4/9 here).
 - **The current step** for the marketplace in progress: *Opening tab*, *Searching*, *Matching product* or *Reading cost stack*, followed by its domain. A marketplace that lists your product's ASIN goes straight from *Opening tab* to *Reading cost stack*.
 - **A chip per finished marketplace**, in the order they were checked. A green chip shows the delivered total in your display currency. A chip with "—" means that marketplace could not be compared. The [issues list](#5-issues) explains why once the check is done. The blue chip with "…" is the marketplace being checked now.
 
-**Stop checking** cancels the run and closes any background tabs it opened. Closing the popup does not stop a check: it finishes in the background and its result is [cached](#what-the-numbers-mean). Reopen the popup on the same tab to follow its progress.
+**Stop checking** cancels the run and closes any background tabs it opened. Closing the popup does not stop a check: it finishes in the background and its result is [cached](#what-the-numbers-mean), unless Amazon showed a robot check. Reopen the popup on the same tab to follow its progress.
 
 ## 3. Verdict
 
@@ -111,7 +111,7 @@ Marketplaces that could not be compared are folded under **N marketplaces could 
 | --- | --- |
 | No confident match | The marketplace does not list your product's ASIN and no search result scored above the matching threshold, or the closest listing is another variant that its page does not offer in yours, so nothing is compared rather than risking the wrong product. |
 | Delivered total not quotable | Amazon did not show the item price or the shipping for your destination, for example because the item cannot be shipped there. The note names the destination ("Amazon did not show a delivered price to Switzerland."), and when Amazon gives a reason it repeats it, for example: Amazon says: “This item cannot be shipped to your selected delivery location.” When the page offered "See All Buying Options" but no offer in that list delivers new to your destination, the note ends with "No other seller delivers the item new there either."; when that list could not be read, it ends with the reason, for example "Other offers could not be read: Amazon answered HTTP 503." |
-| Could not read the page | The product page could not be read, or the tab failed to load in time. |
+| Could not read the page | The product page could not be read, or it did not load within 20 seconds. When Amazon showed a robot check instead of a page, the note names the marketplace: "Amazon showed a robot check on amazon.co.uk instead of the page." The error page Amazon serves with HTTP 503 when it turns requests away counts as a robot check. No other page of that marketplace is opened, and the other marketplaces are still checked. |
 | Could not set delivery location | The marketplace kept quoting delivery to another place because its delivery location could not be switched to your destination, for example because it does not offer that country. The note says which: "This store does not offer delivery to Switzerland." or "Could not set this store's delivery location to Switzerland, so its price is for another place." |
 
 **Check again** at the bottom starts a new check.
@@ -161,4 +161,4 @@ A delivered price only compares with yours when every marketplace quotes the sam
 - **Delta**: the converted delivered total minus the converted delivered total of the page you are on. The page you are on is always the reference.
 - **Saving percentage**: the saving divided by the delivered total on the page you are on.
 - **Confidence**: how sure the extension is that a listing is the same product. See [What "Check match" means](#what-check-match-means).
-- **30-minute cache**: a finished check is stored in the extension's local storage, keyed by product, variant, destination, the "Deliver to" text on the page you are on and the set of marketplaces checked. **Check again** within 30 minutes returns that result instantly instead of opening the background tabs again. After 30 minutes a fresh check runs.
+- **30-minute cache**: a finished check is stored in the extension's local storage, keyed by product, variant, destination, the "Deliver to" text on the page you are on and the set of marketplaces checked. **Check again** within 30 minutes returns that result instantly instead of opening the background tabs again. After 30 minutes a fresh check runs. A check in which Amazon showed a robot check is not stored, so **Check again** checks every marketplace again.
