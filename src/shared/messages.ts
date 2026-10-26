@@ -2,6 +2,7 @@ import type {
   ExtensionSettings,
   LoadSourcePayload,
   PageJob,
+  PageJobResult,
   RunComparisonProgressPayload,
   RunComparisonResultPayload
 } from "./types";
@@ -144,5 +145,20 @@ export function isOffscreenCancelRunRequest(value: unknown): value is OffscreenC
       (value as { target?: string }).target === OFFSCREEN_TARGET &&
       (value as { type?: string }).type === OFFSCREEN_CANCEL_RUN &&
       typeof (value as { payload?: { runKey?: unknown } }).payload?.runKey === "string"
+  );
+}
+
+const PAGE_JOB_OUTCOMES: ReadonlySet<string> = new Set<PageJobResult["outcome"]>([
+  "read",
+  "fallback",
+  "location-set",
+  "not-found",
+  "robot-check",
+  "cancelled"
+]);
+
+export function isPageJobResult(value: unknown): value is PageJobResult {
+  return Boolean(
+    value && typeof value === "object" && PAGE_JOB_OUTCOMES.has(String((value as { outcome?: unknown }).outcome))
   );
 }
