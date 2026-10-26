@@ -446,22 +446,38 @@ async function readTargetTab<T>(
   return first.reopen ? readTempTab(url, targetMarket, token, read) : first.value;
 }
 
+interface PageSpec<T> {
+  inTab: (tabId: number) => Promise<T>;
+}
+
+function readPage<T>(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  url: string,
+  token: RunToken,
+  spec: PageSpec<T>,
+  onRead?: () => void
+): Promise<T> {
+  return readTargetTab(source, targetMarket, url, token, (tabId) => {
+    onRead?.();
+    return spec.inTab(tabId);
+  });
+}
+
 function readProductPage(
   source: SourceContext,
   targetMarket: Marketplace,
   url: string,
   token: RunToken,
-  onLoaded?: () => void
+  onRead?: () => void
 ): Promise<ProductExtractionResult | undefined> {
-  return readTargetTab(source, targetMarket, url, token, (tabId) => {
-    onLoaded?.();
-    return extractProductData(tabId, {
-      marketplace: targetMarket,
-      sourceDestinationCountryCode: source.destinationCountryCode,
-      sourceDeliverTo: source.deliverTo,
-      readOtherOffers: true
-    });
-  });
+  const request: ProductExtractionRequest = {
+    marketplace: targetMarket,
+    sourceDestinationCountryCode: source.destinationCountryCode,
+    sourceDeliverTo: source.deliverTo,
+    readOtherOffers: true
+  };
+  return readPage(source, targetMarket, url, token, { inTab: (tabId) => extractProductData(tabId, request) }, onRead);
 }
 
 type AsinLookup = { status: "MATCHED"; productData: ProductExtractionResult } | { status: "DEAD" | "MISSED" };
@@ -608,14 +624,16 @@ async function searchForMatch(
   token: RunToken,
   enterPhase: (phase: ComparisonPhase) => void
 ): Promise<{ candidate: SearchCandidate; score: MatchScore } | undefined> {
+  const request: SearchExtractionRequest = { marketplace: targetMarket, limit: 8 };
   for (const query of queries) {
-    const candidates = await readTargetTab(source, targetMarket, buildSearchUrl(targetMarket, query), token, (tabId) => {
-      enterPhase("SEARCH");
-      return extractSearchCandidates(tabId, {
-        marketplace: targetMarket,
-        limit: 8
-      });
-    });
+    const candidates = await readPage(
+      source,
+      targetMarket,
+      buildSearchUrl(targetMarket, query),
+      token,
+      { inTab: (tabId) => extractSearchCandidates(tabId, request) },
+      () => enterPhase("SEARCH")
+    );
 
     enterPhase("MATCH");
     const best = pickBestCandidate(
