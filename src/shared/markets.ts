@@ -32,6 +32,8 @@ export const MARKETPLACE_BY_CODE: Record<Marketplace, MarketplaceConfig> = MARKE
 
 export const MARKETPLACE_CODES = MARKETPLACES.map((market) => market.code);
 
+export const MARKET_CONCURRENCY = 3;
+
 export function getMarketplaceByDomain(hostname: string): Marketplace | undefined {
   const host = hostname.toLowerCase();
   return MARKETPLACES.find((market) => market.domain === host)?.code;

@@ -6,6 +6,7 @@ import { setDeliveryLocation } from "../../src/content/location-setter";
 import { extractProductDataWithOffers } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
 import { extractSourceContext } from "../../src/content/source-extractor";
+import { sortComparisonResults } from "../../src/shared/comparison";
 import { MARKETPLACE_CODES, buildProductUrl, getMarketplaceByDomain } from "../../src/shared/markets";
 import {
   CANCEL_COMPARISON,
@@ -20,7 +21,6 @@ import {
 import { buildComparisonCacheKey } from "../../src/shared/storage";
 import type {
   CachedComparisonRecord,
-  ComparisonPhase,
   ComparisonResult,
   FxTable,
   LoadSourcePayload,
@@ -237,6 +237,7 @@ interface HarnessOptions {
   offersStatusOn?: Partial<Record<Marketplace, number>>;
   fetchKeepsLocationOn?: string[];
   fetchShowsLocationOn?: Record<string, string>;
+  pageLatencyMs?: number;
   enabledMarketplaces?: Marketplace[];
   comparisonCurrency?: string;
   activeUrl?: string;
@@ -260,6 +261,7 @@ interface HarnessOptions {
   serviceUnavailableOn?: string[];
   checkpointOn?: Marketplace[];
   holdScriptOn?: string[];
+  holdTabCreateOn?: string[];
 }
 
 interface Harness {
@@ -278,6 +280,7 @@ interface Harness {
   executeScript: ReturnType<typeof vi.fn>;
   openTempTabs: () => string[];
   tabListenerCount: () => number;
+  peakRequestsPerHost: () => number;
   documentIdle: (tabId: number) => void;
   silentRemove: (tabId: number) => void;
   dispatch: (message: unknown) => Promise<unknown>;
@@ -460,6 +463,8 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
   const offscreenMessages: ExtensionMessage[] = [];
   const pageFetches: PageFetch[] = [];
   const refusedOffers = new Set<Marketplace>();
+  const requestsByHost = new Map<string, number>();
+  let peakPerHost = 0;
   let offscreenOpen = options.offscreenOpenAtStart === true;
   const listeners: MessageListener[] = [];
   const updatedListeners = new Set<TabUpdatedListener>();
@@ -471,6 +476,16 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
   function log(event: string, market?: Marketplace): void {
     events.push(event);
     eventMarkets.push(market);
+  }
+
+  function startRequest(host: string): void {
+    const count = (requestsByHost.get(host) ?? 0) + 1;
+    requestsByHost.set(host, count);
+    peakPerHost = Math.max(peakPerHost, count);
+  }
+
+  function endRequest(host: string): void {
+    requestsByHost.set(host, (requestsByHost.get(host) ?? 1) - 1);
   }
 
   function initialLocation(market: Marketplace): string {
@@ -597,6 +612,7 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     }
     if (!tab.served) {
       tab.served = true;
+      endRequest(new URL(tab.url).hostname);
       log(`ready ${tab.label}`, tab.market);
     }
     return "ready";
@@ -666,6 +682,11 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
 
   const tabsCreate = vi.fn(async ({ url }: { url: string; active?: boolean }) => {
     const tab = openTempTab(url);
+    if (options.holdTabCreateOn?.includes(tab.label)) {
+      tabs.delete(tab.id);
+      return new Promise<never>(() => undefined);
+    }
+    startRequest(new URL(url).hostname);
     log(`open ${tab.label}`, tab.market);
     options.onTabCreated?.(tab, harness);
     return { id: tab.id, url, active: false, status: "loading" };
@@ -681,6 +702,10 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     const tab = requireTab(tabId);
     tabs.delete(tabId);
     tab.close();
+    if (!tab.served) {
+      tab.served = true;
+      endRequest(new URL(tab.url).hostname);
+    }
     log(`close ${tab.label}`, tab.market);
   }
 
@@ -777,13 +802,25 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     return pageResponse(page.dom.serialize(), finalUrl, status);
   }
 
+  async function answerStore(market: Marketplace, url: URL, init: RequestInit, fetched: boolean): Promise<FetchAnswer> {
+    if (options.pageLatencyMs !== undefined) {
+      await new Promise((resolve) => setTimeout(resolve, options.pageLatencyMs));
+    }
+    return fetched && PAGE_PATH.test(url.pathname) ? answerPage(market, url) : answerAmazon(market, url, init);
+  }
+
   const fetchMock = vi.fn(async (input: string, init: RequestInit = {}): Promise<FetchAnswer> => {
     const url = new URL(input);
     const market = getMarketplaceByDomain(url.hostname);
     if (market) {
       const fetched = init.credentials === "include";
-      const answer = fetched && PAGE_PATH.test(url.pathname) ? answerPage(market, url) : answerAmazon(market, url, init);
-      return fetched ? abortable(init.signal, answer) : answer;
+      const answer = answerStore(market, url, init, fetched);
+      startRequest(url.hostname);
+      try {
+        return await (fetched ? abortable(init.signal, answer) : answer);
+      } finally {
+        endRequest(url.hostname);
+      }
     }
     const host = url.hostname;
     log(`fx ${host}`);
@@ -926,6 +963,7 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     openTempTabs: () =>
       [...tabs.values()].filter((tab) => tab.id !== ACTIVE_TAB_ID && tab.id !== SECOND_TAB_ID).map((tab) => tab.label),
     tabListenerCount: () => updatedListeners.size + removedListeners.size,
+    peakRequestsPerHost: () => peakPerHost,
     documentIdle,
     silentRemove,
     dispatch: (message) => {
@@ -1077,6 +1115,10 @@ function pageJobs(harness: Harness): PageJob[] {
     .map((message) => message.payload as PageJob);
 }
 
+function peakStoresInFlight(harness: Harness): number {
+  return Math.max(0, ...progressPayloads(harness).map((progress) => progress.inFlight.length));
+}
+
 function countOf(harness: Harness, event: string): number {
   return harness.events.filter((logged) => logged === event).length;
 }
@@ -1175,11 +1217,7 @@ describe("background orchestrator", () => {
       }
       expect(harness.openTempTabs()).toEqual([]);
 
-      const jpOpen = progressPayloads(harness).find(
-        (progress) => progress.latest?.marketplace === "JP" && progress.latest.phase === "OPEN"
-      );
-      expect(jpOpen?.completed).toBe(5);
-      expect(jpOpen?.results?.map((result) => result.marketplace)).toEqual(["ES", "IT", "UK", "DE", "FR"]);
+      expect(progressPayloads(harness).at(-1)?.results).toEqual(payload.results);
     });
 
     it("writes the cache record with the baseline and FX table", async () => {
@@ -1239,52 +1277,44 @@ describe("background orchestrator", () => {
   });
 
   describe("progress", () => {
-    it("emits OPEN, SEARCH, MATCH and READ per market with growing sorted results, then a completion message", async () => {
+    it("emits each store's phases in order with growing sorted results, a message per finished store, then a completion message", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"] });
 
       await runViaWorker(harness);
       const progress = progressPayloads(harness);
 
-      const phaseMessage = (
-        completed: number,
-        marketplace: Marketplace,
-        phase: ComparisonPhase,
-        results: Marketplace[]
-      ) => ({
-        completed,
-        total: 2,
-        inFlight: [{ marketplace, phase }],
-        latest: { marketplace, phase },
-        results
-      });
-      expect(
-        progress.map(({ completed, total, inFlight, latest, results }) => ({
-          completed,
-          total,
-          inFlight,
-          latest,
-          results: results?.map((result) => result.marketplace)
-        }))
-      ).toEqual([
-        phaseMessage(0, "UK", "OPEN", []),
-        phaseMessage(0, "UK", "SEARCH", []),
-        phaseMessage(0, "UK", "MATCH", []),
-        phaseMessage(0, "UK", "READ", []),
-        phaseMessage(1, "DE", "OPEN", ["UK"]),
-        phaseMessage(1, "DE", "SEARCH", ["UK"]),
-        phaseMessage(1, "DE", "MATCH", ["UK"]),
-        phaseMessage(1, "DE", "READ", ["UK"]),
-        { completed: 2, total: 2, inFlight: [], latest: undefined, results: ["UK", "DE"] }
-      ]);
-
-      for (const entry of progress) {
-        expect(entry).toMatchObject({ activeTabId: ACTIVE_TAB_ID, runId: "run-1", fxTable: EXPECTED_FX_TABLE });
+      for (const market of ["UK", "DE"] as const) {
+        expect(progress.filter(({ latest }) => latest?.marketplace === market).map(({ latest }) => latest?.phase)).toEqual([
+          "OPEN",
+          "SEARCH",
+          "MATCH",
+          "READ"
+        ]);
+      }
+      for (const [index, entry] of progress.entries()) {
+        expect(entry).toMatchObject({ total: 2, activeTabId: ACTIVE_TAB_ID, runId: "run-1", fxTable: EXPECTED_FX_TABLE });
+        expect(entry.completed).toBeGreaterThanOrEqual(progress[index - 1]?.completed ?? 0);
+        expect(entry.completed).toBe(entry.results?.length);
+        expect(entry.results).toEqual(sortComparisonResults(entry.results ?? []));
+        expect(entry.inFlight.length).toBeLessThanOrEqual(3);
+        expect(entry.inFlight.map(({ marketplace }) => marketplace)).toEqual(
+          (["UK", "DE"] as const).filter((market) => entry.inFlight.some(({ marketplace }) => marketplace === market))
+        );
+        if (entry.latest) {
+          expect(entry.inFlight).toContainEqual(entry.latest);
+        }
       }
 
+      const finished = progress.filter((entry) => !entry.latest);
+      expect(finished.map(({ completed, inFlight }) => [completed, inFlight.length])).toEqual([
+        [1, 1],
+        [2, 0]
+      ]);
       const final = progress[progress.length - 1];
-      expect(final.inFlight).toEqual([]);
+      expect(final).toEqual(finished[1]);
       expect(final).not.toHaveProperty("latest");
-      expect(progress[4].results?.[0].normalizedTotal).toEqual({ amount: 47.79, currency: "USD" });
+      expect(final.results?.map((result) => result.marketplace)).toEqual(["UK", "DE"]);
+      expect(final.results?.[0].normalizedTotal).toEqual({ amount: 47.79, currency: "USD" });
       expect(final.results?.[1]).toEqual(EXPECTED_DE_RESULT);
     });
 
@@ -1448,15 +1478,13 @@ describe("background orchestrator", () => {
 
       await runViaWorker(harness);
 
-      expect(progressPayloads(harness).map(({ latest }) => [latest?.marketplace, latest?.phase])).toEqual([
-        ["UK", "OPEN"],
-        ["UK", "READ"],
-        ["DE", "OPEN"],
-        ["DE", "SEARCH"],
-        ["DE", "MATCH"],
-        ["DE", "READ"],
-        [undefined, undefined]
-      ]);
+      const phasesOf = (market: Marketplace) =>
+        progressPayloads(harness)
+          .filter(({ latest }) => latest?.marketplace === market)
+          .map(({ latest }) => latest?.phase);
+      expect(phasesOf("UK")).toEqual(["OPEN", "READ"]);
+      expect(phasesOf("DE")).toEqual(["OPEN", "SEARCH", "MATCH", "READ"]);
+      expect(progressPayloads(harness).at(-1)).not.toHaveProperty("latest");
     });
 
     it("searches a marketplace that has no page for the source ASIN", async () => {
@@ -1740,26 +1768,22 @@ describe("background orchestrator", () => {
         enabledMarketplaces: ["US", "DE", "UK"],
         sourceAsinOn: ["DE"],
         onTabCreated: (tab) => {
-          if (tab.label === "product/DE") {
+          if (tab.label === "product/DE" || tab.label === "missing/UK") {
             holdLoading(tab);
           }
         }
       });
 
       const run = startRunViaWorker(harness, "run-1");
-      await vi.waitFor(() => expect(harness.events).toContain("loading product/DE"));
+      await vi.waitFor(() => expect(harness.events).toEqual(expect.arrayContaining(["loading product/DE", "loading missing/UK"])));
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       await run;
 
       expect(resultPayloads(harness, "run-1")).toEqual([
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
       ]);
-      expect(harness.events.slice(harness.events.indexOf("progress OPEN DE"))).toEqual([
-        "progress OPEN DE",
-        "open product/DE",
-        "loading product/DE",
-        "close product/DE"
-      ]);
+      expect(marketEvents(harness, "DE")).toEqual(["progress OPEN DE", "open product/DE", "loading product/DE", "close product/DE"]);
+      expect(marketEvents(harness, "UK")).toEqual(["progress OPEN UK", "open missing/UK", "loading missing/UK", "close missing/UK"]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(harness.tabListenerCount()).toBe(0);
     });
@@ -1768,11 +1792,11 @@ describe("background orchestrator", () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE", "UK"],
         sourceAsinOn: ["DE"],
-        holdFetchOn: ["product/DE"]
+        holdFetchOn: ["product/DE", "missing/UK"]
       });
 
       const run = startRunViaWorker(harness, "run-1");
-      await vi.waitFor(() => expect(harness.events).toContain("fetch product/DE"));
+      await vi.waitFor(() => expect(harness.events).toEqual(expect.arrayContaining(["fetch product/DE", "fetch missing/UK"])));
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       await run;
 
@@ -1780,8 +1804,9 @@ describe("background orchestrator", () => {
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
       ]);
       expect(marketEvents(harness, "DE")).toEqual(["progress OPEN DE", "fetch product/DE"]);
-      expect(harness.events.slice(harness.events.indexOf("fetch product/DE"))).toEqual([
-        "fetch product/DE",
+      expect(marketEvents(harness, "UK")).toEqual(["progress OPEN UK", "fetch missing/UK"]);
+      expect(harness.events.filter((event) => event.startsWith("offscreen "))).toEqual([
+        "offscreen create",
         "offscreen cancel",
         "offscreen close"
       ]);
@@ -2123,18 +2148,20 @@ describe("background orchestrator", () => {
       });
 
       const run = startRunViaWorker(harness, "run-1");
-      await vi.waitFor(() => expect(harness.events).toContain("fetch location form www.amazon.de"));
+      await vi.waitFor(() =>
+        expect(harness.events).toEqual(
+          expect.arrayContaining(["fetch location form www.amazon.de", "fetch location form www.amazon.co.uk"])
+        )
+      );
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       await run;
 
       expect(resultPayloads(harness, "run-1")).toEqual([
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
       ]);
-      expect(harness.events.slice(harness.events.indexOf("fetch location form www.amazon.de"))).toEqual([
-        "fetch location form www.amazon.de",
-        "offscreen cancel",
-        "offscreen close"
-      ]);
+      expect(marketEvents(harness, "DE").at(-1)).toBe("fetch location form www.amazon.de");
+      expect(marketEvents(harness, "UK").at(-1)).toBe("fetch location form www.amazon.co.uk");
+      expect(harness.events.slice(-2)).toEqual(["offscreen cancel", "offscreen close"]);
       expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
@@ -2169,17 +2196,17 @@ describe("background orchestrator", () => {
       });
 
       const run = startRunViaWorker(harness, "run-1");
-      await vi.waitFor(() => expect(harness.events).toContain("location form www.amazon.de"));
+      await vi.waitFor(() =>
+        expect(harness.events).toEqual(expect.arrayContaining(["location form www.amazon.de", "location form www.amazon.co.uk"]))
+      );
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       await run;
 
       expect(resultPayloads(harness, "run-1")).toEqual([
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
       ]);
-      expect(harness.events.slice(harness.events.indexOf("location form www.amazon.de"))).toEqual([
-        "location form www.amazon.de",
-        "close missing/DE"
-      ]);
+      expect(marketEvents(harness, "DE").slice(-2)).toEqual(["location form www.amazon.de", "close missing/DE"]);
+      expect(marketEvents(harness, "UK").slice(-2)).toEqual(["location form www.amazon.co.uk", "close missing/UK"]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(harness.tabListenerCount()).toBe(0);
     });
@@ -3065,6 +3092,12 @@ describe("background orchestrator", () => {
         ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab, self) => {
+          if (tab.label === "missing/UK") {
+            holdLoading(tab);
+            void vi
+              .waitFor(() => expect(progressPayloads(self).at(-1)?.results?.map((result) => result.marketplace)).toEqual(["DE"]))
+              .then(() => self.documentIdle(tab.id));
+          }
           if (tab.label === "search/UK") {
             void self
               .dispatch({ type: CANCEL_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } })
@@ -3086,36 +3119,40 @@ describe("background orchestrator", () => {
       expect(payload.baseline).toEqual(EXPECTED_BASELINE);
       expect(payload.fxTable).toEqual(EXPECTED_FX_TABLE);
 
-      expect(harness.events.slice(harness.events.indexOf("open search/UK"))).toEqual(["open search/UK", "close search/UK"]);
+      expect(marketEvents(harness, "UK").slice(-2)).toEqual(["open search/UK", "close search/UK"]);
+      expect(harness.events.at(-1)).toBe("close search/UK");
       expect(harness.openTempTabs()).toEqual([]);
       expect(Object.keys(harness.storage).some((key) => key.startsWith("cmp:"))).toBe(false);
     });
 
     it("closes the stopped run's tabs at once, ends it with the cancellation error and lets a new run on the same tab complete", async () => {
-      let held: FakeTab | undefined;
+      let holding = true;
       const harness = await bootServiceWorker({
         ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab) => {
-          if (!held) {
+          if (holding) {
             holdLoading(tab);
-            held = tab;
           }
         }
       });
 
       const firstRun = startRunViaWorker(harness, "run-1");
-      await vi.waitFor(() => expect(harness.events).toContain("loading missing/DE"));
+      await vi.waitFor(() => expect(harness.events).toEqual(expect.arrayContaining(["loading missing/DE", "loading missing/UK"])));
       const progressBeforeCancel = progressPayloads(harness, "run-1");
 
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       expect(harness.openTempTabs()).toEqual([]);
-      expect(harness.events).toContain("close missing/DE");
+      expect(harness.events).toEqual(expect.arrayContaining(["close missing/DE", "close missing/UK"]));
 
+      holding = false;
       const second = await runViaWorker(harness, "run-2");
       await firstRun;
 
-      expect(progressBeforeCancel.map(({ latest }) => [latest?.phase, latest?.marketplace])).toEqual([["OPEN", "DE"]]);
+      expect(progressBeforeCancel.map(({ latest }) => [latest?.phase, latest?.marketplace])).toEqual([
+        ["OPEN", "DE"],
+        ["OPEN", "UK"]
+      ]);
       expect(progressPayloads(harness, "run-1")).toEqual(progressBeforeCancel);
       expect(resultPayloads(harness, "run-1")).toEqual([
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-1" })
@@ -3132,17 +3169,11 @@ describe("background orchestrator", () => {
 
     it("keeps a new run's tabs when the stopped run cleans up later, so a second Stop still stops the new run", async () => {
       const fx = deferred();
-      let held: FakeTab | undefined;
       const harness = await bootServiceWorker({
         ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         holdFx: fx.promise,
-        onTabCreated: (tab) => {
-          if (!held) {
-            holdLoading(tab);
-            held = tab;
-          }
-        }
+        onTabCreated: (tab) => holdLoading(tab)
       });
 
       const firstRun = startRunViaWorker(harness, "run-1");
@@ -3150,7 +3181,7 @@ describe("background orchestrator", () => {
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
 
       const secondRun = startRunViaWorker(harness, "run-2");
-      await vi.waitFor(() => expect(harness.events).toContain("loading missing/DE"));
+      await vi.waitFor(() => expect(harness.events).toEqual(expect.arrayContaining(["loading missing/DE", "loading missing/UK"])));
 
       fx.resolve();
       await firstRun;
@@ -3159,7 +3190,7 @@ describe("background orchestrator", () => {
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-1" })
       ]);
       expect(progressPayloads(harness, "run-1")).toEqual([]);
-      expect(harness.openTempTabs()).toEqual(["missing/DE"]);
+      expect(harness.openTempTabs()).toEqual(["missing/DE", "missing/UK"]);
 
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       await secondRun;
@@ -3167,9 +3198,25 @@ describe("background orchestrator", () => {
       expect(resultPayloads(harness, "run-2")).toEqual([
         expect.objectContaining({ error: CANCELLED_ERROR, results: [], activeTabId: ACTIVE_TAB_ID, runId: "run-2" })
       ]);
-      expect(progressPayloads(harness, "run-2").map((progress) => progress.latest?.phase)).toEqual(["OPEN"]);
+      expect(progressPayloads(harness, "run-2").map(({ latest }) => [latest?.phase, latest?.marketplace])).toEqual([
+        ["OPEN", "DE"],
+        ["OPEN", "UK"]
+      ]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(Object.keys(harness.storage).some((key) => key.startsWith("cmp:"))).toBe(false);
+    });
+
+    it("returns at once on Stop while Chrome has not answered a request to open a tab", async () => {
+      const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE", "UK"], holdTabCreateOn: ["missing/DE"] });
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(progressPayloads(harness).at(-1)?.results?.map((result) => result.marketplace)).toEqual(["UK"]));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      const payload = await run;
+
+      expect(payload.error).toBe(CANCELLED_ERROR);
+      expect(payload.results.map((result) => result.marketplace)).toEqual(["UK"]);
+      expect(harness.openTempTabs()).toEqual([]);
     });
 
     it("stops a run that is still going when a new run starts on the same tab", async () => {
@@ -3198,27 +3245,95 @@ describe("background orchestrator", () => {
     });
   });
 
-  describe("cancellation of downloads", () => {
-    it("aborts the download in progress, tells the offscreen document once and opens no tab", async () => {
-      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], holdFetchOn: ["missing/DE"] });
+  describe("concurrency", () => {
+    it("checks at most three stores at a time and never two requests to one store at once", async () => {
+      const quick = await runViaWorker(await bootServiceWorker({ enabledMarketplaces: MARKETPLACE_CODES }));
+      const harness = await bootServiceWorker({ enabledMarketplaces: MARKETPLACE_CODES, pageLatencyMs: 5 });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toHaveLength(9);
+      expect(payload.results).toEqual(quick.results);
+      expect(peakStoresInFlight(harness)).toBe(3);
+      expect(harness.peakRequestsPerHost()).toBe(1);
+    });
+
+    it("keeps one request to a store in flight when the first offscreen document takes seconds to open", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          locations: { US: "CH" },
+          sourceAsinOn: ["DE"],
+          holdCreate: new Promise<void>((resolve) => setTimeout(resolve, 4_000)),
+          pageLatencyMs: 14_000
+        });
+
+        const run = runViaWorker(harness);
+        await vi.advanceTimersByTimeAsync(120_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(pageJobs(harness)).toHaveLength(1);
+        expect(harness.peakRequestsPerHost()).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("ranks stores with equal totals in the order of the settings, whichever finishes first", async () => {
+      const dePage = new JSDOM(readFileSync(join(FIXTURE_ROOT, "product", "DE.html"), "utf8")).window.document;
+      const release = deferred();
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "FR", "DE"],
+        holdFetchOn: ["product/FR"],
+        holdFetch: release.promise,
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "FR") {
+            for (const selector of OFFER_SELECTORS) {
+              removeElement(document, selector);
+              document.body.insertAdjacentHTML("beforeend", dePage.querySelector(selector)?.outerHTML ?? "");
+            }
+          }
+        }
+      });
 
       const run = runViaWorker(harness);
-      await vi.waitFor(() => expect(harness.events).toContain("fetch missing/DE"));
-      const download = harness.fetch.mock.results.at(-1)?.value as Promise<unknown>;
+      await vi.waitFor(() => expect(progressPayloads(harness).at(-1)?.results?.map((result) => result.marketplace)).toEqual(["DE"]));
+      release.resolve();
+      const payload = await run;
+
+      expect(payload.results.map((result) => [result.marketplace, result.status, result.normalizedTotal])).toEqual([
+        ["FR", "OK", { amount: 48.49, currency: "USD" }],
+        ["DE", "OK", { amount: 48.49, currency: "USD" }]
+      ]);
+    });
+  });
+
+  describe("cancellation of downloads", () => {
+    it("aborts the three downloads in progress, tells the offscreen document once and opens no tab", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "UK", "DE", "FR", "IT"],
+        holdFetchOn: ["missing/UK", "missing/DE", "missing/FR"]
+      });
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.pageFetches).toHaveLength(3));
+      const downloads = harness.fetch.mock.results.slice(-3).map((result) => result.value as Promise<unknown>);
       await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
       const payload = await run;
 
-      await expect(download).rejects.toMatchObject({ name: "AbortError" });
+      for (const download of downloads) {
+        await expect(download).rejects.toMatchObject({ name: "AbortError" });
+      }
       expect(payload.error).toBe(CANCELLED_ERROR);
       expect(payload.results).toEqual([]);
       expect(harness.offscreenMessages.filter((message) => message.type === OFFSCREEN_CANCEL_RUN)).toEqual([
         { target: OFFSCREEN_TARGET, type: OFFSCREEN_CANCEL_RUN, payload: { runKey: pageJobs(harness)[0].runKey } }
       ]);
-      expect(harness.events.slice(harness.events.indexOf("fetch missing/DE"))).toEqual([
-        "fetch missing/DE",
-        "offscreen cancel",
-        "offscreen close"
-      ]);
+      expect(fetchedOn(harness, "IT")).toEqual([]);
+      expect(harness.events.slice(-2)).toEqual(["offscreen cancel", "offscreen close"]);
       expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
@@ -3417,9 +3532,10 @@ describe("background orchestrator", () => {
 
   describe("tab loading", () => {
     function tabEvents(harness: Harness, label: string): string[] {
-      const start = harness.events.indexOf(`open ${label}`);
-      const end = harness.events.indexOf(`close ${label}`, start);
-      return harness.events.slice(start, end + 1);
+      const events = marketEvents(harness, label.slice(label.indexOf("/") + 1) as Marketplace);
+      const start = events.indexOf(`open ${label}`);
+      const end = events.indexOf(`close ${label}`, start);
+      return events.slice(start, end + 1);
     }
 
     it("reads each page as soon as its document is idle, without waiting for the tab to finish loading", async () => {
@@ -3780,7 +3896,7 @@ describe("background orchestrator", () => {
         expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
       });
 
-      it("gives up on a search page whose read never answers after 25 seconds and checks the next store", async () => {
+      it("gives up on a search page whose read never answers after 25 seconds and still checks the other stores", async () => {
         const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE", "UK"], holdScriptOn: ["search/DE"] });
 
         const run = runViaWorker(harness);
@@ -3816,7 +3932,7 @@ describe("background orchestrator", () => {
         });
 
         const run = startRunViaWorker(harness, "run-1");
-        await vi.waitFor(() => expect(harness.events).toContain("blank missing/DE"));
+        await vi.waitFor(() => expect(harness.events).toEqual(expect.arrayContaining(["blank missing/DE", "blank missing/UK"])));
         await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
         await run;
         const injectionsAtStop = harness.executeScript.mock.calls.length;
@@ -3825,9 +3941,10 @@ describe("background orchestrator", () => {
         expect(resultPayloads(harness, "run-1")).toEqual([
           expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
         ]);
-        expect(harness.events.at(-1)).toBe("close missing/DE");
+        expect(marketEvents(harness, "DE").at(-1)).toBe("close missing/DE");
+        expect(marketEvents(harness, "UK").at(-1)).toBe("close missing/UK");
         expect(harness.executeScript.mock.calls.length).toBe(injectionsAtStop);
-        expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+        expect(harness.tabsCreate).toHaveBeenCalledTimes(2);
         expect(harness.tabListenerCount()).toBe(0);
       });
     });
@@ -4037,13 +4154,13 @@ describe("background orchestrator", () => {
     });
 
     it("keeps checking and caches the run when two stores fail without a robot check", async () => {
-      const closedTabIds: number[] = [];
+      const closedTabIds = new Map<string, number>();
       const harness = await bootServiceWorker({
         ...TAB_PATH,
         enabledMarketplaces: ["US", "UK", "DE", "FR"],
         onTabCreated: (tab, self) => {
           if (tab.label === "search/UK" || tab.label === "search/DE") {
-            closedTabIds.push(tab.id);
+            closedTabIds.set(tab.label, tab.id);
             holdLoading(tab);
             setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
           }
@@ -4059,8 +4176,8 @@ describe("background orchestrator", () => {
         ["UK", "PARSE_FAILED"]
       ]);
       expect(payload.results.slice(1).map((result) => result.notes)).toEqual([
-        [`Tab ${closedTabIds[1]} was closed before it finished loading`],
-        [`Tab ${closedTabIds[0]} was closed before it finished loading`]
+        [`Tab ${closedTabIds.get("search/DE")} was closed before it finished loading`],
+        [`Tab ${closedTabIds.get("search/UK")} was closed before it finished loading`]
       ]);
       expect(openedOn(harness, "FR")).toEqual(["missing/FR", "search/FR", "product/FR"]);
       expect(hasCachedComparison(harness)).toBe(true);
@@ -4111,17 +4228,15 @@ describe("background orchestrator", () => {
       });
 
       const run = runViaWorker(harness);
-      await vi.waitFor(() => expect(harness.events).toContain("fetch missing/UK"));
+      await vi.waitFor(() => expect(progressPayloads(harness).at(-1)?.results).toEqual([DE_ROBOT_CHECK]));
+      expect(harness.events).toContain("fetch missing/UK");
       await cancelViaWorker(harness);
       const payload = await run;
 
       expect(payload.error).toBe(CANCELLED_ERROR);
       expect(payload.results).toEqual([DE_ROBOT_CHECK]);
-      expect(harness.events.slice(harness.events.indexOf("fetch missing/UK"))).toEqual([
-        "fetch missing/UK",
-        "offscreen cancel",
-        "offscreen close"
-      ]);
+      expect(marketEvents(harness, "UK")).toEqual(["progress OPEN UK", "fetch missing/UK"]);
+      expect(harness.events.slice(-2)).toEqual(["offscreen cancel", "offscreen close"]);
       expect(openedOn(harness, "UK")).toEqual([]);
       expect(hasCachedComparison(harness)).toBe(false);
       expect(harness.openTempTabs()).toEqual([]);
@@ -4342,7 +4457,7 @@ describe("background orchestrator", () => {
       ["search/DE", "content/search-extractor.js"],
       ["product/DE", "content/product-extractor.js"]
     ])(
-      "records a market whose %s page cannot be scripted as PARSE_FAILED and closes its tab before the next market starts",
+      "records a market whose %s page cannot be scripted as PARSE_FAILED and closes its tab",
       async (label, script) => {
         const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE", "UK"], failScriptOn: label });
 
@@ -4360,7 +4475,7 @@ describe("background orchestrator", () => {
     );
 
     it.each(["search/DE", "product/DE"])(
-      "records a market whose %s page does not load within 20 seconds as PARSE_FAILED and closes its tab before the next market starts",
+      "records a market whose %s page does not load within 20 seconds as PARSE_FAILED and closes its tab",
       async (label) => {
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
         try {
@@ -4378,10 +4493,8 @@ describe("background orchestrator", () => {
 
           const run = runViaWorker(harness);
           await vi.waitFor(() => expect(harness.events).toContain(`loading ${label}`));
-          expect(harness.events).not.toContain("progress OPEN UK");
           await vi.advanceTimersByTimeAsync(15_000);
           expect(harness.openTempTabs()).toEqual([label]);
-          expect(harness.events).not.toContain("progress OPEN UK");
           await vi.advanceTimersByTimeAsync(5_000);
           const payload = await run;
 
