@@ -3311,6 +3311,81 @@ describe("background orchestrator", () => {
     });
   });
 
+  describe("run deadline", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const stalledOptions: HarnessOptions = {
+      enabledMarketplaces: ["US", "DE", "UK"],
+      shapelessOn: ["product/DE"],
+      holdScriptOn: ["product/DE"]
+    };
+
+    it("ends a check after 240 seconds, reports the unfinished store and keeps the run out of the cache", async () => {
+      const harness = await bootServiceWorker(stalledOptions);
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.events).toContain("inject content/product-extractor.js product/DE"));
+      await vi.waitFor(() => expect(progressPayloads(harness).at(-1)?.results?.map((result) => result.marketplace)).toEqual(["UK"]));
+      await vi.advanceTimersByTimeAsync(239_000);
+      expect(harness.openTempTabs()).toEqual(["product/DE"]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const payload = await run;
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results.map((result) => [result.marketplace, result.status, result.notes])).toEqual([
+        ["UK", "OK", ["Matched by search", "Match confidence: HIGH"]],
+        ["DE", "PARSE_FAILED", ["Timed out after 240 seconds"]]
+      ]);
+      expect(progressPayloads(harness).at(-1)).toMatchObject({ completed: 2, total: 2, inFlight: [] });
+      expect(progressPayloads(harness).at(-1)).not.toHaveProperty("latest");
+      expect(marketEvents(harness, "DE").slice(-2)).toEqual([
+        "inject content/product-extractor.js product/DE",
+        "close product/DE"
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.events.filter((event) => event.startsWith("offscreen "))).toEqual([
+        "offscreen create",
+        "offscreen cancel",
+        "offscreen close"
+      ]);
+      expect(Object.keys(harness.storage).some((key) => key.startsWith("cmp:"))).toBe(false);
+    });
+
+    it("checks the stores again on the next run after one that ran out of time", async () => {
+      const harness = await bootServiceWorker(stalledOptions);
+      const first = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.events).toContain("inject content/product-extractor.js product/DE"));
+      await vi.advanceTimersByTimeAsync(240_000);
+      await first;
+      const pagesBefore = harness.pageFetches.length;
+
+      const second = runViaWorker(harness, "run-2");
+      await vi.waitFor(() => expect(harness.pageFetches.length).toBeGreaterThan(pagesBefore));
+      await vi.waitFor(() => expect(countOf(harness, "inject content/product-extractor.js product/DE")).toBe(2));
+      await vi.advanceTimersByTimeAsync(240_000);
+      const payload = await second;
+
+      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([
+        ["UK", "OK"],
+        ["DE", "PARSE_FAILED"]
+      ]);
+      expect(fetchedOn(harness, "UK")).toEqual([
+        "missing/UK",
+        "search/UK",
+        "product/UK",
+        "missing/UK",
+        "search/UK",
+        "product/UK"
+      ]);
+    });
+  });
+
   describe("cancellation of downloads", () => {
     it("aborts the three downloads in progress, tells the offscreen document once and opens no tab", async () => {
       const harness = await bootServiceWorker({

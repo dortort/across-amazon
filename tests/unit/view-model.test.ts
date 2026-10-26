@@ -796,6 +796,13 @@ describe("issueNote", () => {
     expect(statusText(robotCheck.status)).toBe("Could not read the page");
   });
 
+  it("says the check ran out of time for a store it did not finish", () => {
+    const unfinished = failedResult("IT", "PARSE_FAILED", 0, ["Timed out after 240 seconds"]);
+
+    expect(issueNote(unfinished, "CH")).toBe("The check ran out of time before this store was read.");
+    expect(statusText(unfinished.status)).toBe("Could not read the page");
+  });
+
   it("gives the same sentence with or without notes", () => {
     expect(issueNote(failedResult("FR", "UNAVAILABLE", 0.9))).toBe(issueNote(fr));
     expect(issueNote(failedResult("ES", "PARSE_FAILED", 0.89, [" "]))).toBe(issueNote(es));

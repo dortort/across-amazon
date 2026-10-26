@@ -1,3 +1,4 @@
+import { TIMED_OUT_NOTE } from "../shared/comparison";
 import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName } from "../shared/markets";
 import { deliveredTotal, deliveredTotalIn, formatMoney } from "../shared/money";
 import { ROBOT_CHECK_NOTE_PREFIX } from "../shared/robot-check";
@@ -345,6 +346,9 @@ export function issueNote(result: ComparisonResult, destinationCountryCode?: str
       const robotCheckDomain = noteAfter(result, ROBOT_CHECK_NOTE_PREFIX);
       if (robotCheckDomain) {
         return `Amazon showed a robot check on ${robotCheckDomain} instead of the page.`;
+      }
+      if (result.notes?.includes(TIMED_OUT_NOTE)) {
+        return "The check ran out of time before this store was read.";
       }
       return "The product page could not be read.";
     }
