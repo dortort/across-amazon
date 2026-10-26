@@ -41,11 +41,11 @@ The footer reads "ECB daily rates" until a check has loaded exchange rates. Afte
 
 ## 2. Running
 
-<img src="screenshots/running.png" width="360" alt="Running popup with a progress dial at 4 of 9, Searching France, and chips for Canada, Mexico, United Kingdom, Germany and France">
+<img src="screenshots/running.png" width="360" alt="Running popup with a progress dial at 3 of 9, Searching France +2, chips for Canada, Mexico and the United Kingdom, and Germany, France and Italy in progress">
 
 Each marketplace is first looked up by your product's ASIN, Amazon's own product identifier, and searched only when it does not list that ASIN. Its pages are read in background tabs that open without taking focus. Each page is read as soon as its content has arrived, without waiting for Amazon's images and ads, and its tab closes as soon as it has been read. Before a marketplace's first page is read, its delivery location is [set to your destination](#your-destination-and-the-other-marketplaces). The popup shows:
 
-- **The dial**: how many marketplaces are finished out of the total (4/9 here).
+- **The dial**: how many marketplaces are finished out of the total (3/9 here).
 - **The current step** for the marketplace in progress: *Opening tab*, *Searching*, *Matching product* or *Reading cost stack*, followed by its domain. A marketplace that lists your product's ASIN goes straight from *Opening tab* to *Reading cost stack*.
 - **A chip per finished marketplace**, in the order they were checked. A green chip shows the delivered total in your display currency. A chip with "—" means that marketplace could not be compared. The [issues list](#5-issues) explains why once the check is done. The blue chip with "…" is the marketplace being checked now.
 

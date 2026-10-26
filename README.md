@@ -12,7 +12,7 @@ The website at https://across-amazon.dortort.dev has the privacy policy, the FAQ
 
 | Idle | Running | Breakdown |
 | :---: | :---: | :---: |
-| <img src="docs/screenshots/idle.png" width="260" alt="Idle popup with the product and a Check 9 other Amazons button"> | <img src="docs/screenshots/running.png" width="260" alt="Progress dial at 4 of 9 with a chip per checked marketplace"> | <img src="docs/screenshots/sheet.png" width="260" alt="Germany breakdown: item, shipping, import fees and delivered total"> |
+| <img src="docs/screenshots/idle.png" width="260" alt="Idle popup with the product and a Check 9 other Amazons button"> | <img src="docs/screenshots/running.png" width="260" alt="Progress dial at 3 of 9 with a chip per checked marketplace and one per marketplace in progress"> | <img src="docs/screenshots/sheet.png" width="260" alt="Germany breakdown: item, shipping, import fees and delivered total"> |
 
 <sub>Screenshots show the real popup with illustrative fixture data, not real prices.</sub>
 
