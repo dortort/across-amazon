@@ -17,6 +17,7 @@ const ORDINARY_FOLDERS = [
   "not-found-live"
 ];
 const CAPTURED_URL = "https://www.amazon.co.uk/dp/B09XS7JWHH";
+const SERVICE_UNAVAILABLE_URL = "https://www.amazon.de/s?k=widget";
 const CHECKPOINT_URL = "https://www.amazon.com/checkpoint/continue?token=TEST-TOKEN";
 const PRODUCT_URL = "https://www.amazon.com/dp/B000000001";
 const AUTOMATED_ACCESS_CONTACT = "api-services-support@amazon.com";
@@ -29,6 +30,7 @@ const ROBOT_CHECK_PATHS = [
 ];
 
 const robotCheckHtml = readFileSync(join(FIXTURE_ROOT, "robot-check.html"), "utf8");
+const serviceUnavailableHtml = readFileSync(join(FIXTURE_ROOT, "service-unavailable.html"), "utf8");
 
 const ordinaryPages = ORDINARY_FOLDERS.flatMap((folder) =>
   readdirSync(join(FIXTURE_ROOT, folder))
@@ -48,14 +50,18 @@ function page(body: string): string {
   return `<!doctype html><html><head><title>Amazon.com</title></head><body>${body}</body></html>`;
 }
 
-function inspectInPage(html: string, url: string, markers: RobotCheckMarkers = ROBOT_CHECK_MARKERS): PageInspection {
+function inspectInPage(html: string, url: string, status?: number): PageInspection {
   const { window } = new JSDOM(html, { url });
-  const injected = new Function("document", "location", "markers", `return (${inspectPage.toString()})(markers);`) as (
-    document: Document,
-    location: Location,
-    markers: RobotCheckMarkers
-  ) => PageInspection;
-  return injected(window.document, window.location, structuredClone(markers));
+  const navigation = status === undefined ? {} : { responseStatus: status };
+  const performance = { getEntriesByType: (type: string) => (type === "navigation" ? [navigation] : []) };
+  const injected = new Function(
+    "document",
+    "location",
+    "performance",
+    "markers",
+    `return (${inspectPage.toString()})(markers);`
+  ) as (document: Document, location: Location, performance: unknown, markers: RobotCheckMarkers) => PageInspection;
+  return injected(window.document, window.location, performance, structuredClone(ROBOT_CHECK_MARKERS));
 }
 
 describe("robot check", () => {
@@ -72,11 +78,25 @@ describe("robot check", () => {
   });
 
   describe.each([
-    ["in the page", (html: string, url: string) => inspectInPage(html, url).robotCheck],
-    ["from the HTML", (html: string, url: string) => isRobotCheck(url, html)]
+    ["in the page", (html: string, url: string, status?: number) => inspectInPage(html, url, status ?? 200).robotCheck],
+    ["from the HTML", (html: string, url: string, status?: number) => isRobotCheck(url, html, status ?? 200)]
   ])("%s", (_how, check) => {
     it("recognises the robot check amazon.co.uk served at a product page's address", () => {
       expect(check(robotCheckHtml, CAPTURED_URL)).toBe(true);
+    });
+
+    it("recognises the robot check when it comes with HTTP 503", () => {
+      expect(check(robotCheckHtml, CAPTURED_URL, 503)).toBe(true);
+    });
+
+    it("recognises the error page amazon.de served with HTTP 503 by its status", () => {
+      expect(serviceUnavailableHtml).toContain(AUTOMATED_ACCESS_CONTACT);
+      expect(serviceUnavailableHtml).not.toContain("validateCaptcha");
+      expect(check(serviceUnavailableHtml, SERVICE_UNAVAILABLE_URL, 503)).toBe(true);
+    });
+
+    it("does not read that error page as a robot check without its status", () => {
+      expect(check(serviceUnavailableHtml, SERVICE_UNAVAILABLE_URL, 200)).toBe(false);
     });
 
     it("recognises the older validateCaptcha form", () => {
@@ -95,7 +115,7 @@ describe("robot check", () => {
       "does not read Amazon's automated access notice on the not-found page %s as a robot check",
       (_name, entry) => {
         expect(entry.html).toContain(AUTOMATED_ACCESS_CONTACT);
-        expect(check(entry.html, entry.url)).toBe(false);
+        expect(check(entry.html, entry.url, 404)).toBe(false);
       }
     );
 
@@ -109,6 +129,12 @@ describe("robot check", () => {
     it.each(ordinaryPages.map((entry) => [entry.name, entry]))("does not flag %s", (_name, entry) => {
       expect(check(entry.html, entry.url)).toBe(false);
     });
+  });
+
+  it("reads a page without a status as before, as Chrome before version 109 reports none", () => {
+    expect(isRobotCheck(SERVICE_UNAVAILABLE_URL, serviceUnavailableHtml)).toBe(false);
+    expect(inspectInPage(serviceUnavailableHtml, SERVICE_UNAVAILABLE_URL).robotCheck).toBe(false);
+    expect(inspectInPage(robotCheckHtml, CAPTURED_URL).robotCheck).toBe(true);
   });
 
   it("reports the address of the page it inspected", () => {
