@@ -243,11 +243,19 @@ async function extractSourceContext(activeTabId: number): Promise<SourceContext>
   return extracted.source;
 }
 
-async function extractSearchCandidates(tabId: number, request: SearchExtractionRequest): Promise<SearchCandidate[]> {
+async function readSearchCandidates(tabId: number, request: SearchExtractionRequest): Promise<SearchCandidate[]> {
   await writeWindowValue(tabId, "__ACROSS_AMAZON_SEARCH_REQUEST__", request);
   await runScriptFile(tabId, "content/search-extractor.js");
   const result = await readWindowValue<SearchCandidate[]>(tabId, "__ACROSS_AMAZON_SEARCH_CANDIDATES__");
   return result ?? [];
+}
+
+function extractSearchCandidates(tabId: number, request: SearchExtractionRequest): Promise<SearchCandidate[]> {
+  return withTimeout(
+    readSearchCandidates(tabId, request),
+    PRODUCT_TIMEOUT_MS,
+    "Timed out reading the search page after 25 seconds"
+  );
 }
 
 async function extractProductData(tabId: number, request: ProductExtractionRequest): Promise<ProductExtractionResult | undefined> {

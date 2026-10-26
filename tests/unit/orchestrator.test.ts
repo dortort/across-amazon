@@ -200,6 +200,7 @@ interface HarnessOptions {
   robotCheckOn?: string[];
   serviceUnavailableOn?: string[];
   checkpointOn?: Marketplace[];
+  holdScriptOn?: string[];
 }
 
 interface Harness {
@@ -491,6 +492,9 @@ function createHarness(options: HarnessOptions): Harness {
         events.push(`inject ${file} ${tab.label}`);
         if (options.failScriptOn === tab.label || options.failScriptOn === tab.url) {
           throw new Error(FRAME_REMOVED_ERROR);
+        }
+        if (file.endsWith("-extractor.js") && options.holdScriptOn?.includes(tab.label)) {
+          await tab.closed;
         }
         const script = CONTENT_SCRIPTS[file];
         if (!script) {
@@ -2865,6 +2869,32 @@ describe("background orchestrator", () => {
           "close product/DE"
         ]);
         expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+      });
+
+      it("gives up on a search page whose read never answers after 25 seconds and checks the next store", async () => {
+        const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], holdScriptOn: ["search/DE"] });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("inject content/search-extractor.js search/DE"));
+        await vi.advanceTimersByTimeAsync(24_000);
+        expect(harness.openTempTabs()).toEqual(["search/DE"]);
+        await vi.advanceTimersByTimeAsync(1_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results.map((result) => [result.marketplace, result.status, result.notes])).toEqual([
+          ["UK", "OK", ["Matched by search", "Match confidence: HIGH"]],
+          ["DE", "PARSE_FAILED", ["Timed out reading the search page after 25 seconds"]]
+        ]);
+        expect(tabEvents(harness, "search/DE")).toEqual([
+          "open search/DE",
+          "ready search/DE",
+          "progress SEARCH DE",
+          "inject content/search-extractor.js search/DE",
+          "close search/DE"
+        ]);
+        expect(harness.openTempTabs()).toEqual([]);
+        expect(harness.tabListenerCount()).toBe(0);
       });
 
       it("stops trying again once Stop closes a tab that still shows about:blank", async () => {
