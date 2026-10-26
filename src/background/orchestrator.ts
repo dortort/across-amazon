@@ -13,6 +13,7 @@ import {
 import { deliveredTotalIn, getDefaultCurrencyForMarketplace } from "../shared/money";
 import { sortComparisonResults, withCheapestOtherOffer } from "../shared/comparison";
 import { ROBOT_CHECK_MARKERS, inspectPage, robotCheckNote } from "../shared/robot-check";
+import type { PageInspection } from "../shared/robot-check";
 import { buildComparisonCacheKey, loadSettings, readComparisonCache, writeComparisonCache } from "../shared/storage";
 import type {
   ComparisonPhase,
@@ -44,6 +45,12 @@ const LOCATION_TIMEOUT_MS = 20_000;
 const PRODUCT_REQUEST_KEY = "__ACROSS_AMAZON_PRODUCT_REQUEST__";
 const PRODUCT_RESULT_KEY = "__ACROSS_AMAZON_PRODUCT_RESULT__";
 const PRODUCT_TIMEOUT_MS = 25_000;
+const PAGE_LOAD_TIMEOUT_MS = 20_000;
+const FIRST_RETRY_DELAY_MS = 100;
+const MAX_RETRY_DELAY_MS = 1_000;
+const NO_TAB_ERROR = "No tab with id";
+const NO_HOST_ACCESS_ERROR = "Cannot access contents of the page";
+const FRAME_REMOVED_ERROR = "Frame with ID 0 was removed";
 
 class RobotCheckError extends Error {}
 
@@ -94,47 +101,78 @@ function assertNotCancelled(token: RunToken): void {
   }
 }
 
-function waitForTabComplete(tabId: number, timeoutMs = 15_000): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const settle = (error?: Error): void => {
-      clearTimeout(timeoutId);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.tabs.onRemoved.removeListener(onRemoved);
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
+function isStorePage(pageUrl: string, storeHost: string): boolean {
+  const page = new URL(pageUrl);
+  return (page.protocol === "https:" || page.protocol === "http:") && page.hostname === storeHost;
+}
+
+function waitForStorePage(tabId: number, url: string): Promise<PageInspection> {
+  const storeHost = new URL(url).hostname;
+  return new Promise<PageInspection>((resolve, reject) => {
+    let settled = false;
+    let retryDelayMs = FIRST_RETRY_DELAY_MS;
+    let retryId: ReturnType<typeof setTimeout> | undefined;
+
+    const settle = (outcome: () => void): void => {
+      if (settled) {
+        return;
       }
+      settled = true;
+      clearTimeout(timeoutId);
+      clearTimeout(retryId);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      outcome();
     };
 
-    const onUpdated = (updatedTabId: number, changeInfo: chrome.tabs.OnUpdatedInfo): void => {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
-        settle();
-      }
-    };
+    const fail = (error: Error): void => settle(() => reject(error));
+    const failClosed = (): void => fail(new Error(`Tab ${tabId} was closed before it finished loading`));
 
     const onRemoved = (removedTabId: number): void => {
       if (removedTabId === tabId) {
-        settle(new Error(`Tab ${tabId} was closed before it finished loading`));
+        failClosed();
       }
     };
 
-    const timeoutId = setTimeout(() => {
-      settle(new Error(`Timed out waiting for tab ${tabId} to complete`));
-    }, timeoutMs);
-
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.onRemoved.addListener(onRemoved);
-    chrome.tabs.get(tabId).then(
-      (tab) => {
-        if (tab.status === "complete") {
-          settle();
-        }
-      },
-      (error: unknown) => {
-        settle(new Error(errorMessage(error, `Unable to read tab ${tabId}`)));
+    const retry = (): void => {
+      if (settled) {
+        return;
       }
-    );
+      retryId = setTimeout(inspect, retryDelayMs);
+      retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
+    };
+
+    const inspect = (): void => {
+      chrome.scripting.executeScript({ target: { tabId }, func: inspectPage, args: [ROBOT_CHECK_MARKERS] }).then(
+        ([frame]) => {
+          const page = frame?.result;
+          if (page && isStorePage(page.url, storeHost)) {
+            settle(() => resolve(page));
+          } else {
+            retry();
+          }
+        },
+        (error: unknown) => {
+          const message = errorMessage(error, String(error));
+          const injectionError = error instanceof Error ? error : new Error(message);
+          if (message.startsWith(NO_TAB_ERROR)) {
+            failClosed();
+          } else if (message.startsWith(FRAME_REMOVED_ERROR)) {
+            retry();
+          } else if (message.startsWith(NO_HOST_ACCESS_ERROR)) {
+            chrome.tabs.get(tabId).then((tab) => (tab.status === "complete" ? fail(injectionError) : retry()), failClosed);
+          } else {
+            fail(injectionError);
+          }
+        }
+      );
+    };
+
+    const timeoutId = setTimeout(() => {
+      fail(new Error(`Timed out waiting for tab ${tabId} to load`));
+    }, PAGE_LOAD_TIMEOUT_MS);
+
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    inspect();
   });
 }
 
@@ -327,17 +365,6 @@ async function extractBaseline(
   }
 }
 
-async function assertNoRobotCheck(tabId: number, targetMarket: Marketplace): Promise<void> {
-  const [frame] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: inspectPage,
-    args: [ROBOT_CHECK_MARKERS]
-  });
-  if (frame?.result?.robotCheck) {
-    throw new RobotCheckError(robotCheckNote(marketDisplayDomain(targetMarket)));
-  }
-}
-
 async function readTempTab<T>(
   url: string,
   targetMarket: Marketplace,
@@ -346,8 +373,10 @@ async function readTempTab<T>(
 ): Promise<T> {
   const tabId = await openInactiveTab(url, token);
   try {
-    await waitForTabComplete(tabId);
-    await assertNoRobotCheck(tabId, targetMarket);
+    const page = await waitForStorePage(tabId, url);
+    if (page.robotCheck) {
+      throw new RobotCheckError(robotCheckNote(marketDisplayDomain(targetMarket)));
+    }
     return await read(tabId);
   } finally {
     await closeTempTab(tabId, token);

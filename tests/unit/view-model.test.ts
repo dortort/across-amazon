@@ -781,7 +781,7 @@ describe("issueNote", () => {
       marketplace: "CA",
       status: "PARSE_FAILED",
       confidence: 0,
-      notes: ["Timed out waiting for tab 123 to complete", "Missing FX conversion path to USD"]
+      notes: ["Timed out waiting for tab 123 to load", "Missing FX conversion path to USD"]
     };
     expect(issueNote(timedOut, "US")).toBe("The product page could not be read.");
   });
@@ -1050,7 +1050,7 @@ describe("trustSentence", () => {
     expect(trustSentence(noisy)).toBe(
       "We are 91% sure this is the same product — title, brand and variant all line up."
     );
-    expect(trustSentence({ ...it_, notes: ["Timed out waiting for tab 7 to complete"] })).toBe(
+    expect(trustSentence({ ...it_, notes: ["Timed out waiting for tab 7 to load"] })).toBe(
       "We are 76% sure this is the same product."
     );
   });

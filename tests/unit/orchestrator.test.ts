@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setDeliveryLocation } from "../../src/content/location-setter";
 import { extractProductDataWithOffers } from "../../src/content/product-extractor";
 import { extractSearchCandidates } from "../../src/content/search-extractor";
@@ -35,6 +35,10 @@ const FIXTURE_ROOT = join(process.cwd(), "tests", "fixtures");
 const POPUP_CLOSED_ERROR = "Could not establish connection. Receiving end does not exist.";
 const CANCELLED_ERROR = "Comparison cancelled by user";
 const TAB_CLOSED_ERROR = "The tab was closed.";
+const FRAME_REMOVED_ERROR = "Frame with ID 0 was removed.";
+const NO_HOST_ACCESS_ERROR =
+  "Cannot access contents of the page. Extension manifest must request permission to access the respective host.";
+const ERROR_PAGE_ERROR = "Frame with ID 0 is showing error page";
 const LOCATION_FORM_PATH = "/portal-migration/hz/glow/get-rendered-address-selections";
 const ADDRESS_CHANGE_PATH = "/portal-migration/hz/glow/address-change";
 const OFFERS_PATH = "/gp/product/ajax/aodAjaxMain/ref=aod_f_new";
@@ -45,6 +49,7 @@ const ROBOT_CHECK_HTML = readFileSync(join(FIXTURE_ROOT, "robot-check.html"), "u
 const CHECKPOINT_PATH = "/checkpoint/continue?token=TEST-CHECKPOINT-TOKEN";
 const CHECKPOINT_HTML =
   "<!doctype html><html><head><title>Amazon.com</title></head><body><p>Checking your browser</p></body></html>";
+const UNPARSED_DOCUMENT_HTML = "<!doctype html><html><head></head><body></body></html>";
 
 const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
@@ -120,6 +125,7 @@ type SendResponse = (response?: unknown) => void;
 type MessageListener = (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
 type TabUpdatedListener = (tabId: number, changeInfo: { status?: string }) => void;
 type TabRemovedListener = (tabId: number) => void;
+type DocumentState = "blank" | "loading" | "removed" | "replaced" | "error" | "no-access" | "idle";
 
 interface FakeTab {
   id: number;
@@ -128,7 +134,11 @@ interface FakeTab {
   dom: JSDOM;
   scope: WindowScope;
   status: "loading" | "complete";
-  completeDuringStatusCheck?: boolean;
+  document: DocumentState;
+  waited: boolean;
+  served: boolean;
+  idle: Promise<void>;
+  reachIdle: () => void;
   closed: Promise<never>;
   close: () => void;
 }
@@ -138,6 +148,13 @@ interface Injection {
   files?: string[];
   func?: (...args: never[]) => unknown;
   args?: unknown[];
+  injectImmediately?: boolean;
+}
+
+interface InjectionFrame {
+  frameId: number;
+  documentId: string;
+  result?: unknown;
 }
 
 interface ExtensionMessage {
@@ -180,7 +197,8 @@ interface Harness {
   executeScript: ReturnType<typeof vi.fn>;
   openTempTabs: () => string[];
   tabListenerCount: () => number;
-  finishLoading: (tabId: number) => void;
+  documentIdle: (tabId: number) => void;
+  silentRemove: (tabId: number) => void;
   dispatch: (message: unknown) => Promise<unknown>;
 }
 
@@ -214,6 +232,40 @@ function tabClosing(): { closed: Promise<never>; close: () => void } {
   });
   closed.catch(() => undefined);
   return { closed, close };
+}
+
+function documentLoading(): { idle: Promise<void>; reachIdle: () => void } {
+  let reachIdle: () => void = () => undefined;
+  const idle = new Promise<void>((resolve) => {
+    reachIdle = resolve;
+  });
+  return { idle, reachIdle };
+}
+
+function newTab(id: number, url: string, label: string, dom: JSDOM): FakeTab {
+  return {
+    id,
+    url,
+    label,
+    dom,
+    scope: {},
+    status: "complete",
+    document: "idle",
+    waited: false,
+    served: false,
+    ...documentLoading(),
+    ...tabClosing()
+  };
+}
+
+function holdLoading(tab: FakeTab): void {
+  tab.status = "loading";
+  tab.document = "loading";
+}
+
+function holdBlank(tab: FakeTab): void {
+  tab.status = "loading";
+  tab.document = "blank";
 }
 
 function locationFormFile(market: Marketplace): string {
@@ -315,7 +367,7 @@ function createHarness(options: HarnessOptions): Harness {
   function requireTab(tabId: number): FakeTab {
     const tab = tabs.get(tabId);
     if (!tab) {
-      throw new Error(`No tab with id: ${tabId}.`);
+      throw new Error(`No tab with id: ${tabId}`);
     }
     return tab;
   }
@@ -328,7 +380,7 @@ function createHarness(options: HarnessOptions): Harness {
         ? new JSDOM(options.activeHtml ?? "<!doctype html><html><body></body></html>", { url })
         : fixtureDom("source", market, url);
     const label = market && options.activeHtml === undefined ? `source/${market}` : "active";
-    tabs.set(ACTIVE_TAB_ID, { id: ACTIVE_TAB_ID, url, label, dom, scope: {}, status: "complete", ...tabClosing() });
+    tabs.set(ACTIVE_TAB_ID, { ...newTab(ACTIVE_TAB_ID, url, label, dom), served: true });
   }
 
   function loadProductPage(market: Marketplace, url: string, requestedAsin?: string): { group: FixtureGroup; dom: JSDOM } {
@@ -372,33 +424,76 @@ function createHarness(options: HarnessOptions): Harness {
       throw new Error(`No fixture for ${url}`);
     }
     const { label, dom } = servePage(market, url);
-    const tab: FakeTab = {
-      id: nextTabId,
-      url,
-      label,
-      dom,
-      scope: {},
-      status: "complete",
-      ...tabClosing()
-    };
+    const tab = newTab(nextTabId, url, label, dom);
     nextTabId += 1;
     tabs.set(tab.id, tab);
     return tab;
   }
 
-  async function runInjection(injection: Injection): Promise<Array<{ frameId: number; documentId: string; result?: unknown }>> {
+  async function awaitDocument(tab: FakeTab): Promise<"ready" | "replaced"> {
+    switch (tab.document) {
+      case "blank":
+        events.push(`blank ${tab.label}`);
+        throw new Error(NO_HOST_ACCESS_ERROR);
+      case "error":
+        events.push(`error page ${tab.label}`);
+        throw new Error(ERROR_PAGE_ERROR);
+      case "no-access":
+        events.push(`no access ${tab.label}`);
+        throw new Error(NO_HOST_ACCESS_ERROR);
+      case "removed":
+        events.push(`frame removed ${tab.label}`);
+        tab.document = "idle";
+        throw new Error(FRAME_REMOVED_ERROR);
+      case "replaced":
+        events.push(`replaced ${tab.label}`);
+        tab.document = "idle";
+        return "replaced";
+      case "loading":
+        if (!tab.waited) {
+          tab.waited = true;
+          events.push(`loading ${tab.label}`);
+        }
+        await Promise.race([
+          tab.idle,
+          tab.closed.catch(() => {
+            throw new Error(FRAME_REMOVED_ERROR);
+          })
+        ]);
+        break;
+      case "idle":
+        break;
+    }
+    if (!tab.served) {
+      tab.served = true;
+      events.push(`ready ${tab.label}`);
+    }
+    return "ready";
+  }
+
+  async function runInjection(injection: Injection): Promise<InjectionFrame[]> {
     const tab = requireTab(injection.target.tabId);
     if (tab.url.startsWith("chrome://")) {
       throw new Error("Cannot access a chrome:// URL");
     }
 
     const frame = { frameId: 0, documentId: `doc-${tab.id}` };
+    if (injection.injectImmediately && !tab.served) {
+      events.push(`inject immediately ${tab.label}`);
+      return runInDocument({ ...tab, dom: new JSDOM(UNPARSED_DOCUMENT_HTML, { url: tab.url }) }, injection, frame);
+    }
+    if ((await awaitDocument(tab)) === "replaced") {
+      return [{ ...frame, result: null }];
+    }
+    return runInDocument(tab, injection, frame);
+  }
 
+  async function runInDocument(tab: FakeTab, injection: Injection, frame: InjectionFrame): Promise<InjectionFrame[]> {
     if (injection.files) {
       for (const file of injection.files) {
         events.push(`inject ${file} ${tab.label}`);
         if (options.failScriptOn === tab.label || options.failScriptOn === tab.url) {
-          throw new Error("Frame with ID 0 was removed.");
+          throw new Error(FRAME_REMOVED_ERROR);
         }
         const script = CONTENT_SCRIPTS[file];
         if (!script) {
@@ -433,19 +528,21 @@ function createHarness(options: HarnessOptions): Harness {
     return { id: tab.id, url, active: false, status: "loading" };
   });
 
-  function finishLoading(tabId: number): void {
+  function documentIdle(tabId: number): void {
     const tab = requireTab(tabId);
-    tab.status = "complete";
-    for (const listener of [...updatedListeners]) {
-      listener(tabId, { status: "complete" });
-    }
+    tab.document = "idle";
+    tab.reachIdle();
   }
 
-  const tabsRemove = vi.fn(async (tabId: number) => {
+  function silentRemove(tabId: number): void {
     const tab = requireTab(tabId);
     tabs.delete(tabId);
     tab.close();
     events.push(`close ${tab.label}`);
+  }
+
+  const tabsRemove = vi.fn(async (tabId: number) => {
+    silentRemove(tabId);
     for (const listener of [...removedListeners]) {
       listener(tabId);
     }
@@ -508,12 +605,7 @@ function createHarness(options: HarnessOptions): Harness {
       create: tabsCreate,
       get: vi.fn(async (tabId: number) => {
         const tab = requireTab(tabId);
-        const snapshot = { id: tab.id, url: tab.url, status: tab.status };
-        events.push(`${tab.status === "complete" ? "ready" : "loading"} ${tab.label}`);
-        if (tab.completeDuringStatusCheck) {
-          finishLoading(tabId);
-        }
-        return snapshot;
+        return { id: tab.id, url: tab.url, status: tab.status };
       }),
       remove: tabsRemove,
       onUpdated: {
@@ -572,7 +664,8 @@ function createHarness(options: HarnessOptions): Harness {
     executeScript,
     openTempTabs: () => [...tabs.values()].filter((tab) => tab.id !== ACTIVE_TAB_ID).map((tab) => tab.label),
     tabListenerCount: () => updatedListeners.size + removedListeners.size,
-    finishLoading,
+    documentIdle,
+    silentRemove,
     dispatch: (message) => {
       const listener = listeners[listeners.length - 1];
       if (!listener) {
@@ -1262,7 +1355,7 @@ describe("background orchestrator", () => {
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab, self) => {
           if (tab.label === "missing/DE") {
-            tab.status = "loading";
+            holdLoading(tab);
             setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
           }
         }
@@ -1282,7 +1375,7 @@ describe("background orchestrator", () => {
         sourceAsinOn: ["DE"],
         onTabCreated: (tab) => {
           if (tab.label === "product/DE") {
-            tab.status = "loading";
+            holdLoading(tab);
           }
         }
       });
@@ -2061,7 +2154,7 @@ describe("background orchestrator", () => {
         expect(harness.openTempTabs()).toEqual([]);
       });
 
-      it("keeps the search match with a note when the page never finishes loading", async () => {
+      it("keeps the search match with a note when the page does not load within 20 seconds", async () => {
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
         try {
           let stalledTabId: number | undefined;
@@ -2070,18 +2163,18 @@ describe("background orchestrator", () => {
             onTabCreated: (tab) => {
               if (tab.url === BLUE_VARIANT_URL) {
                 stalledTabId = tab.id;
-                tab.status = "loading";
+                holdLoading(tab);
               }
             }
           });
 
           const run = runViaWorker(harness);
           await vi.waitFor(() => expect(harness.events).toContain("loading product/DE"));
-          await vi.advanceTimersByTimeAsync(15_000);
+          await vi.advanceTimersByTimeAsync(20_000);
           const payload = await run;
 
           expect(payload.error).toBeUndefined();
-          expect(payload.results).toEqual([keptRedListing(`Timed out waiting for tab ${stalledTabId} to complete`)]);
+          expect(payload.results).toEqual([keptRedListing(`Timed out waiting for tab ${stalledTabId} to load`)]);
           expect(harness.openTempTabs()).toEqual([]);
           expect(harness.tabListenerCount()).toBe(0);
         } finally {
@@ -2094,7 +2187,7 @@ describe("background orchestrator", () => {
           ...switchingOptions,
           onTabCreated: (tab) => {
             if (tab.url === BLUE_VARIANT_URL) {
-              tab.status = "loading";
+              holdLoading(tab);
             }
           }
         });
@@ -2254,7 +2347,7 @@ describe("background orchestrator", () => {
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab) => {
           if (!held) {
-            tab.status = "loading";
+            holdLoading(tab);
             held = tab;
           }
         }
@@ -2294,7 +2387,7 @@ describe("background orchestrator", () => {
         holdFx: fx.promise,
         onTabCreated: (tab) => {
           if (!held) {
-            tab.status = "loading";
+            holdLoading(tab);
             held = tab;
           }
         }
@@ -2333,7 +2426,7 @@ describe("background orchestrator", () => {
         enabledMarketplaces: ["US", "DE", "UK"],
         onTabCreated: (tab) => {
           if (!held) {
-            tab.status = "loading";
+            holdLoading(tab);
             held = tab;
           }
         }
@@ -2353,12 +2446,40 @@ describe("background orchestrator", () => {
   });
 
   describe("tab loading", () => {
-    it("waits for a loading tab to report complete before reading it", async () => {
+    function tabEvents(harness: Harness, label: string): string[] {
+      const start = harness.events.indexOf(`open ${label}`);
+      const end = harness.events.indexOf(`close ${label}`, start);
+      return harness.events.slice(start, end + 1);
+    }
+
+    it("reads each page as soon as its document is idle, without waiting for the tab to finish loading", async () => {
+      const opened: FakeTab[] = [];
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        onTabCreated: (tab) => {
+          tab.status = "loading";
+          opened.push(tab);
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(opened.map((tab) => [tab.label, tab.status])).toEqual([
+        ["missing/DE", "loading"],
+        ["search/DE", "loading"],
+        ["product/DE", "loading"]
+      ]);
+      expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    it("waits for a page that is still loading and reads it once its document is idle", async () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE"],
         onTabCreated: (tab, self) => {
-          tab.status = "loading";
-          setTimeout(() => self.finishLoading(tab.id), 0);
+          holdLoading(tab);
+          setTimeout(() => self.documentIdle(tab.id), 0);
         }
       });
 
@@ -2368,17 +2489,20 @@ describe("background orchestrator", () => {
       expect(harness.events.slice(harness.events.indexOf("open search/DE"), harness.events.indexOf("progress SEARCH DE") + 1)).toEqual([
         "open search/DE",
         "loading search/DE",
+        "ready search/DE",
         "progress SEARCH DE"
       ]);
       expect(harness.tabListenerCount()).toBe(0);
     });
 
-    it("reads a tab that finishes loading between the listener registration and the status check", async () => {
+    it("tries again while a new tab still shows about:blank, which Chrome does not let it script", async () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE"],
-        onTabCreated: (tab) => {
-          tab.status = "loading";
-          tab.completeDuringStatusCheck = true;
+        onTabCreated: (tab, self) => {
+          if (tab.label === "missing/DE") {
+            holdBlank(tab);
+            setTimeout(() => self.documentIdle(tab.id), 0);
+          }
         }
       });
 
@@ -2386,12 +2510,76 @@ describe("background orchestrator", () => {
 
       expect(payload.error).toBeUndefined();
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-      expect(harness.events.filter((event) => event.startsWith("loading "))).toEqual([
-        "loading missing/DE",
-        "loading search/DE",
-        "loading product/DE"
+      expect(tabEvents(harness, "missing/DE")).toEqual([
+        "open missing/DE",
+        "blank missing/DE",
+        "ready missing/DE",
+        "inject content/location-setter.js missing/DE",
+        "inject content/product-extractor.js missing/DE",
+        "close missing/DE"
       ]);
-      expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    it("inspects a page again when Chrome answers for a document a navigation replaced", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        onTabCreated: (tab) => {
+          if (tab.label === "search/DE") {
+            tab.document = "replaced";
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(tabEvents(harness, "search/DE")).toEqual([
+        "open search/DE",
+        "replaced search/DE",
+        "ready search/DE",
+        "progress SEARCH DE",
+        "inject content/search-extractor.js search/DE",
+        "close search/DE"
+      ]);
+    });
+
+    it("inspects a page again when a navigation removes the frame it was injecting into", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        onTabCreated: (tab) => {
+          if (tab.label === "missing/DE") {
+            tab.document = "removed";
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(tabEvents(harness, "missing/DE")).toEqual([
+        "open missing/DE",
+        "frame removed missing/DE",
+        "ready missing/DE",
+        "inject content/location-setter.js missing/DE",
+        "inject content/product-extractor.js missing/DE",
+        "close missing/DE"
+      ]);
+    });
+
+    it("gives up on an error page at once and searches instead of waiting for the deadline", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        onTabCreated: (tab) => {
+          if (tab.label === "missing/DE") {
+            tab.document = "error";
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(tabEvents(harness, "missing/DE")).toEqual(["open missing/DE", "error page missing/DE", "close missing/DE"]);
     });
 
     it("records a market whose tab is closed while loading as PARSE_FAILED without waiting for the timeout", async () => {
@@ -2401,7 +2589,7 @@ describe("background orchestrator", () => {
         onTabCreated: (tab, self) => {
           if (tab.label === "search/DE") {
             closedTabId = tab.id;
-            tab.status = "loading";
+            holdLoading(tab);
             setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
           }
         }
@@ -2417,6 +2605,221 @@ describe("background orchestrator", () => {
       expect(payload.results[1].notes).toEqual([`Tab ${closedTabId} was closed before it finished loading`]);
       expect(harness.openTempTabs()).toEqual([]);
       expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    describe("with fake timers", () => {
+      const SIGN_IN_HTML = "<!doctype html><html><head><title>Amazon Sign-In</title></head><body></body></html>";
+
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("gives up on a tab that never leaves about:blank after 20 seconds", async () => {
+        let blankTabId: number | undefined;
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE", "UK"],
+          onTabCreated: (tab) => {
+            if (tab.label === "search/DE") {
+              blankTabId = tab.id;
+              holdBlank(tab);
+            }
+          }
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("blank search/DE"));
+        await vi.advanceTimersByTimeAsync(19_000);
+        expect(harness.openTempTabs()).toEqual(["search/DE"]);
+        await vi.advanceTimersByTimeAsync(1_000);
+        const payload = await run;
+
+        expect(payload.results.map((result) => [result.marketplace, result.status, result.notes])).toEqual([
+          ["UK", "OK", ["Matched by search", "Match confidence: HIGH"]],
+          ["DE", "PARSE_FAILED", [`Timed out waiting for tab ${blankTabId} to load`]]
+        ]);
+        expect(harness.events.filter((event) => event === "blank search/DE").length).toBeGreaterThan(5);
+        expect(harness.openTempTabs()).toEqual([]);
+        expect(harness.tabListenerCount()).toBe(0);
+      });
+
+      it("gives up at once on a tab that finished loading on a host Chrome does not let it script", async () => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE", "UK"],
+          onTabCreated: (tab) => {
+            if (tab.label.endsWith("/DE")) {
+              tab.document = "no-access";
+            }
+          }
+        });
+
+        let finished = false;
+        const run = runViaWorker(harness).finally(() => {
+          finished = true;
+        });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(finished).toBe(true);
+        const payload = await run;
+
+        expect(payload.results.map((result) => [result.marketplace, result.status, result.notes])).toEqual([
+          ["UK", "OK", ["Matched by search", "Match confidence: HIGH"]],
+          ["DE", "PARSE_FAILED", [NO_HOST_ACCESS_ERROR]]
+        ]);
+        expect(tabEvents(harness, "missing/DE")).toEqual(["open missing/DE", "no access missing/DE", "close missing/DE"]);
+        expect(tabEvents(harness, "search/DE")).toEqual(["open search/DE", "no access search/DE", "close search/DE"]);
+        expect(harness.openTempTabs()).toEqual([]);
+        expect(harness.tabListenerCount()).toBe(0);
+      });
+
+      it("ends the wait as a closed tab when Chrome reports the tab gone before it sends onRemoved", async () => {
+        let closedTabId = 0;
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE", "UK"],
+          onTabCreated: (tab) => {
+            if (tab.label === "search/DE") {
+              closedTabId = tab.id;
+              holdBlank(tab);
+            }
+          }
+        });
+        const injectionsInto = (tabId: number): number =>
+          harness.executeScript.mock.calls.filter(([injection]) => (injection as Injection).target.tabId === tabId).length;
+
+        let finished = false;
+        const run = runViaWorker(harness).finally(() => {
+          finished = true;
+        });
+        await vi.waitFor(() => expect(harness.events).toContain("blank search/DE"));
+        harness.silentRemove(closedTabId);
+        const injectionsAtRemoval = injectionsInto(closedTabId);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(finished).toBe(true);
+        const payload = await run;
+
+        expect(payload.results.map((result) => [result.marketplace, result.status, result.notes])).toEqual([
+          ["UK", "OK", ["Matched by search", "Match confidence: HIGH"]],
+          ["DE", "PARSE_FAILED", [`Tab ${closedTabId} was closed before it finished loading`]]
+        ]);
+        expect(injectionsInto(closedTabId)).toBe(injectionsAtRemoval + 1);
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(injectionsInto(closedTabId)).toBe(injectionsAtRemoval + 1);
+        expect(harness.tabListenerCount()).toBe(0);
+      });
+
+      it("ends the wait as a closed tab when the tab is gone by the time it asks whether the tab is still loading", async () => {
+        let closedTabId = 0;
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE", "UK"],
+          onTabCreated: (tab, self) => {
+            if (tab.label === "search/DE") {
+              closedTabId = tab.id;
+              holdBlank(tab);
+              self.executeScript.mockImplementationOnce(async () => {
+                self.silentRemove(tab.id);
+                throw new Error(NO_HOST_ACCESS_ERROR);
+              });
+            }
+          }
+        });
+
+        let finished = false;
+        const run = runViaWorker(harness).finally(() => {
+          finished = true;
+        });
+        await vi.advanceTimersByTimeAsync(50);
+        expect(finished).toBe(true);
+        const payload = await run;
+
+        expect(payload.results.map((result) => [result.marketplace, result.status, result.notes])).toEqual([
+          ["UK", "OK", ["Matched by search", "Match confidence: HIGH"]],
+          ["DE", "PARSE_FAILED", [`Tab ${closedTabId} was closed before it finished loading`]]
+        ]);
+        expect(harness.chrome.tabs.get).toHaveBeenCalledWith(closedTabId);
+        expect(harness.tabListenerCount()).toBe(0);
+      });
+
+      it("does not read a page that landed on another store's host and searches after 20 seconds", async () => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          onTabCreated: (tab) => {
+            if (tab.label === "missing/DE") {
+              tab.dom = new JSDOM(SIGN_IN_HTML, { url: "https://www.amazon.com/ap/signin" });
+            }
+          }
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("ready missing/DE"));
+        await vi.advanceTimersByTimeAsync(19_000);
+        expect(harness.openTempTabs()).toEqual(["missing/DE"]);
+        await vi.advanceTimersByTimeAsync(1_000);
+        const payload = await run;
+
+        expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+        expect(tabEvents(harness, "missing/DE")).toEqual(["open missing/DE", "ready missing/DE", "close missing/DE"]);
+      });
+
+      it("reads the store's page once a tab that answered from another host lands on it", async () => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          sourceAsinOn: ["DE"],
+          onTabCreated: (tab) => {
+            const storeDom = tab.dom;
+            tab.dom = new JSDOM(SIGN_IN_HTML, { url: "https://www.amazon.com/ap/signin" });
+            setTimeout(() => {
+              tab.dom = storeDom;
+            }, 500);
+          }
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("ready product/DE"));
+        await vi.advanceTimersByTimeAsync(400);
+        expect(harness.openTempTabs()).toEqual(["product/DE"]);
+        expect(harness.events.slice(harness.events.indexOf("open product/DE"))).toEqual(["open product/DE", "ready product/DE"]);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(harness.events).toContain("inject content/product-extractor.js product/DE");
+        const payload = await run;
+
+        expect(payload.results.map((result) => [result.marketplace, result.status, result.notes])).toEqual([
+          ["DE", "OK", ["Matched by ASIN"]]
+        ]);
+        expect(tabEvents(harness, "product/DE")).toEqual([
+          "open product/DE",
+          "ready product/DE",
+          "inject content/location-setter.js product/DE",
+          "inject content/product-extractor.js product/DE",
+          "close product/DE"
+        ]);
+        expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+      });
+
+      it("stops trying again once Stop closes a tab that still shows about:blank", async () => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE", "UK"],
+          onTabCreated: (tab) => {
+            holdBlank(tab);
+          }
+        });
+
+        const run = startRunViaWorker(harness, "run-1");
+        await vi.waitFor(() => expect(harness.events).toContain("blank missing/DE"));
+        await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+        await run;
+        const injectionsAtStop = harness.executeScript.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(5_000);
+
+        expect(resultPayloads(harness, "run-1")).toEqual([
+          expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
+        ]);
+        expect(harness.events.at(-1)).toBe("close missing/DE");
+        expect(harness.executeScript.mock.calls.length).toBe(injectionsAtStop);
+        expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+        expect(harness.tabListenerCount()).toBe(0);
+      });
     });
   });
 
@@ -2558,7 +2961,7 @@ describe("background orchestrator", () => {
         onTabCreated: (tab, self) => {
           if (tab.label === "search/UK" || tab.label === "search/DE") {
             closedTabIds.push(tab.id);
-            tab.status = "loading";
+            holdLoading(tab);
             setTimeout(() => void self.chrome.tabs.remove(tab.id), 0);
           }
         }
@@ -2690,7 +3093,7 @@ describe("background orchestrator", () => {
     );
 
     it.each(["search/DE", "product/DE"])(
-      "records a market whose %s page never finishes loading as PARSE_FAILED and closes its tab before the next market starts",
+      "records a market whose %s page does not load within 20 seconds as PARSE_FAILED and closes its tab before the next market starts",
       async (label) => {
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
         try {
@@ -2700,7 +3103,7 @@ describe("background orchestrator", () => {
             onTabCreated: (tab) => {
               if (tab.label === label) {
                 stalledTabId = tab.id;
-                tab.status = "loading";
+                holdLoading(tab);
               }
             }
           });
@@ -2709,6 +3112,9 @@ describe("background orchestrator", () => {
           await vi.waitFor(() => expect(harness.events).toContain(`loading ${label}`));
           expect(harness.events).not.toContain("progress OPEN UK");
           await vi.advanceTimersByTimeAsync(15_000);
+          expect(harness.openTempTabs()).toEqual([label]);
+          expect(harness.events).not.toContain("progress OPEN UK");
+          await vi.advanceTimersByTimeAsync(5_000);
           const payload = await run;
 
           expect(payload.error).toBeUndefined();
@@ -2716,7 +3122,7 @@ describe("background orchestrator", () => {
             ["UK", "OK"],
             ["DE", "PARSE_FAILED"]
           ]);
-          expect(payload.results[1].notes).toEqual([`Timed out waiting for tab ${stalledTabId} to complete`]);
+          expect(payload.results[1].notes).toEqual([`Timed out waiting for tab ${stalledTabId} to load`]);
           expect(marketEvents(harness, "DE").slice(-2)).toEqual([`loading ${label}`, `close ${label}`]);
           expect(harness.openTempTabs()).toEqual([]);
           expect(harness.tabListenerCount()).toBe(0);
