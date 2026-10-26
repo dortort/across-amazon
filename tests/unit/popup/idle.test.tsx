@@ -31,7 +31,7 @@ describe("idle view", () => {
     expect(screen.getByRole("button", { name: "Check 9 other Amazons" })).toBeEnabled();
     expect(
       screen.getByText(
-        "Takes about 9 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
+        "Takes about 15 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
       )
     ).toHaveClass("dB-hint");
     expect(screen.getByRole("button", { name: "Settings" })).toHaveTextContent("⚙");
@@ -93,7 +93,7 @@ describe("idle view", () => {
 
     expect(
       screen.getByText(
-        "Takes about 9 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to your address."
+        "Takes about 15 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to your address."
       )
     ).toHaveClass("dB-hint");
     expect(screen.queryByText(/delivery location/)).not.toBeInTheDocument();

@@ -49,7 +49,7 @@ export interface CheckChipEntry {
 }
 
 const MATCH_CHECK_THRESHOLD = 0.9;
-const SECONDS_PER_ROUND = 3;
+const SECONDS_PER_ROUND = 5;
 const MIN_ESTIMATED_SECONDS = 5;
 const MINUS_SIGN = "−";
 const SOURCE_TRUST_SENTENCE = "This is the page you are on. Prices are what Amazon showed when we checked.";

@@ -247,7 +247,7 @@ describe("marketplace setting", () => {
 
     await app.user.click(screen.getByRole("button", { name: "Close settings" }));
     expect(screen.getByRole("button", { name: "Check 8 other Amazons" })).toBeInTheDocument();
-    expect(screen.getByText(/^Takes about 9 seconds\./)).toBeInTheDocument();
+    expect(screen.getByText(/^Takes about 15 seconds\./)).toBeInTheDocument();
   });
 
   it("re-enables a marketplace in its canonical position", async () => {

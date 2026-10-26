@@ -157,7 +157,7 @@ test.describe("a full comparison", () => {
     await expect(runButton(page)).toBeEnabled();
     await expect(
       page.getByText(
-        "Takes about 9 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
+        "Takes about 15 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
       )
     ).toBeVisible();
     await expect(page.getByText("ECB daily rates")).toBeVisible();
@@ -810,7 +810,7 @@ test.describe("settings", () => {
     await page.getByRole("button", { name: "Close settings" }).click();
 
     await expect(runButton(page)).toHaveText("Check 8 other Amazons");
-    await expect(page.getByText(/^Takes about 9 seconds\./)).toBeVisible();
+    await expect(page.getByText(/^Takes about 15 seconds\./)).toBeVisible();
 
     await startRun(page);
     await expect(dial(page).count).toHaveText("0/8");

@@ -1181,10 +1181,10 @@ describe("checkChips", () => {
 });
 
 describe("estimatedSeconds", () => {
-  it("allows three seconds for every three marketplaces, checked at the same time", () => {
-    expect(estimatedSeconds(9)).toBe(9);
-    expect(estimatedSeconds(4)).toBe(6);
-    expect(estimatedSeconds(10)).toBe(12);
+  it("allows five seconds for every three marketplaces, checked at the same time", () => {
+    expect(estimatedSeconds(9)).toBe(15);
+    expect(estimatedSeconds(4)).toBe(10);
+    expect(estimatedSeconds(10)).toBe(20);
   });
 
   it("never promises less than five seconds", () => {
