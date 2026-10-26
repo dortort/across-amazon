@@ -786,6 +786,13 @@ describe("issueNote", () => {
     expect(issueNote(timedOut, "US")).toBe("The product page could not be read.");
   });
 
+  it("names the store that showed a robot check", () => {
+    const robotCheck = failedResult("UK", "PARSE_FAILED", 0, ["Amazon showed a robot check on amazon.co.uk"]);
+
+    expect(issueNote(robotCheck, "CH")).toBe("Amazon showed a robot check on amazon.co.uk instead of the page.");
+    expect(statusText(robotCheck.status)).toBe("Could not read the page");
+  });
+
   it("gives the same sentence with or without notes", () => {
     expect(issueNote(failedResult("FR", "UNAVAILABLE", 0.9))).toBe(issueNote(fr));
     expect(issueNote(failedResult("ES", "PARSE_FAILED", 0.89, [" "]))).toBe(issueNote(es));
