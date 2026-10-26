@@ -1042,8 +1042,19 @@ describe("phaseLabel", () => {
 });
 
 describe("startingMarkets", () => {
-  it("shows the first target as being checked before any progress arrives", () => {
-    expect(startingMarkets(["CA", "MX", "UK", "DE"])).toEqual([{ marketplace: "CA", phase: "OPEN" }]);
+  it("shows the first three targets as being checked before any progress arrives", () => {
+    expect(startingMarkets(["CA", "MX", "UK", "DE"])).toEqual([
+      { marketplace: "CA", phase: "OPEN" },
+      { marketplace: "MX", phase: "OPEN" },
+      { marketplace: "UK", phase: "OPEN" }
+    ]);
+  });
+
+  it("shows every target when there are fewer than three", () => {
+    expect(startingMarkets(["FR", "JP"])).toEqual([
+      { marketplace: "FR", phase: "OPEN" },
+      { marketplace: "JP", phase: "OPEN" }
+    ]);
   });
 
   it("shows none without targets", () => {

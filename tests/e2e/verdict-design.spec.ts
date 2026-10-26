@@ -494,9 +494,9 @@ test.describe("progress dial", () => {
     expect(thirdDone).toContain(`${ACCENT} 33%`);
 
     await emitProgress(page, progressStep(scn, "AU", "READ"));
-    await expect(page.locator(".dB-dial-num")).toHaveText("8/9");
-    await expect(dialRing).toHaveCSS("--p", "89%");
-    expect(await computed(dialRing, "background-image")).toContain(`${ACCENT} 89%`);
+    await expect(page.locator(".dB-dial-num")).toHaveText("6/9");
+    await expect(dialRing).toHaveCSS("--p", "67%");
+    expect(await computed(dialRing, "background-image")).toContain(`${ACCENT} 67%`);
   });
 });
 
@@ -645,7 +645,14 @@ test.describe("visual snapshots", () => {
     await startRun(page);
     await emitProgress(page, progressStep(scn, "DE", "MATCH"));
     await expect(page.locator(".dB-dial-num")).toHaveText("3/9");
-    await expect(page.locator(".dB-chk")).toHaveText(["🇨🇦 CA $391.44", "🇲🇽 MX —", "🇬🇧 UK $372.16", "🇩🇪 DE …"]);
+    await expect(page.locator(".dB-chk")).toHaveText([
+      "🇨🇦 CA $391.44",
+      "🇲🇽 MX —",
+      "🇬🇧 UK $372.16",
+      "🇩🇪 DE …",
+      "🇫🇷 FR …",
+      "🇮🇹 IT …"
+    ]);
     await parkPointer(page);
     await expect(page).toHaveScreenshot("verdict-running.png", SNAPSHOT);
   });

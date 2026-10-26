@@ -40,16 +40,20 @@ function runningState(container: HTMLElement) {
 }
 
 describe("running view", () => {
-  it("shows the first target being checked before any progress arrives", async () => {
+  it("shows the first three targets being checked before any progress arrives", async () => {
     const app = await renderRunning();
 
     expect(runningState(app.container)).toEqual({
       dial: "0%",
       count: "0/9",
-      nowline: "Checking Canada",
+      nowline: "Checking Canada +2",
       market: "Canada",
       domain: "amazon.ca",
-      chips: [["dB-chk now", "🇨🇦 CA …"]]
+      chips: [
+        ["dB-chk now", "🇨🇦 CA …"],
+        ["dB-chk now", "🇲🇽 MX …"],
+        ["dB-chk now", "🇬🇧 UK …"]
+      ]
     });
   });
 

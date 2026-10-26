@@ -68,14 +68,15 @@ function shots(h: typeof Harness): Shot[] {
         await h.openPopup(page, scn);
         await h.startRun(page);
         await h.emitProgress(page, h.progressStep(scn, "FR", "SEARCH"));
-        await expect(page.locator(".dB-dial-num")).toHaveText("4/9");
-        await expect(page.locator(".dB-nowline")).toHaveText("Searching France");
+        await expect(page.locator(".dB-dial-num")).toHaveText("3/9");
+        await expect(page.locator(".dB-nowline")).toHaveText("Searching France +2");
         await expect(page.locator(".dB-chk")).toHaveText([
           "🇨🇦 CA $391.44",
           "🇲🇽 MX —",
           "🇬🇧 UK $372.16",
-          "🇩🇪 DE $349.05",
-          "🇫🇷 FR …"
+          "🇩🇪 DE …",
+          "🇫🇷 FR …",
+          "🇮🇹 IT …"
         ]);
       }
     },

@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { sortComparisonResults } from "../../src/shared/comparison";
+import { MARKET_CONCURRENCY } from "../../src/shared/markets";
 import {
   CANCEL_COMPARISON,
   LOAD_SOURCE,
@@ -14,6 +15,7 @@ import type {
   ExtensionSettings,
   FxTable,
   LoadSourcePayload,
+  MarketProgress,
   Marketplace,
   RunComparisonProgressPayload,
   RunComparisonResultPayload,
@@ -122,24 +124,40 @@ export function progressSteps(scn: Scenario): RunComparisonProgressPayload[] {
   const total = targets.length;
   const finished: ComparisonResult[] = [];
   const steps: RunComparisonProgressPayload[] = [];
+  let completed = 0;
 
-  targets.forEach((market, completed) => {
+  for (let start = 0; start < total; start += MARKET_CONCURRENCY) {
+    const round = targets.slice(start, start + MARKET_CONCURRENCY);
+    let inFlight: MarketProgress[] = [];
     for (const phase of PHASES) {
-      const latest = { marketplace: market, phase };
-      steps.push({
-        completed,
-        total,
-        inFlight: [latest],
-        latest,
-        results: sortComparisonResults(finished),
-        fxTable: scn.fxTable
-      });
+      for (const market of round) {
+        const latest = { marketplace: market, phase };
+        inFlight =
+          phase === "OPEN"
+            ? [...inFlight, latest]
+            : inFlight.map((entry) => (entry.marketplace === market ? latest : entry));
+        steps.push({
+          completed,
+          total,
+          inFlight,
+          latest,
+          results: sortComparisonResults(finished),
+          fxTable: scn.fxTable
+        });
+      }
     }
-    const result = scn.results.find((candidate) => candidate.marketplace === market);
-    if (result) {
-      finished.push(result);
+    for (const market of round) {
+      completed += 1;
+      const result = scn.results.find((candidate) => candidate.marketplace === market);
+      if (result) {
+        finished.push(result);
+      }
+      inFlight = inFlight.filter((entry) => entry.marketplace !== market);
+      if (completed < total) {
+        steps.push({ completed, total, inFlight, results: sortComparisonResults(finished), fxTable: scn.fxTable });
+      }
     }
-  });
+  }
 
   steps.push({ completed: total, total, inFlight: [], results: sortComparisonResults(finished), fxTable: scn.fxTable });
   return steps;
@@ -154,6 +172,15 @@ export function progressStep(
     (candidate) => candidate.latest?.marketplace === market && candidate.latest.phase === phase
   );
   if (!step) {
+    throw new Error(`${market} is not a target of this scenario`);
+  }
+  return step;
+}
+
+export function finishedStep(scn: Scenario, market: Marketplace): RunComparisonProgressPayload {
+  const completed = targetsOf(scn).indexOf(market) + 1;
+  const step = progressSteps(scn).find((candidate) => !candidate.latest && candidate.completed === completed);
+  if (completed === 0 || !step) {
     throw new Error(`${market} is not a target of this scenario`);
   }
   return step;

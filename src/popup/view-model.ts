@@ -1,5 +1,5 @@
 import { TIMED_OUT_NOTE } from "../shared/comparison";
-import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName } from "../shared/markets";
+import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, MARKET_CONCURRENCY, countryName } from "../shared/markets";
 import { deliveredTotal, deliveredTotalIn, formatMoney } from "../shared/money";
 import { ROBOT_CHECK_NOTE_PREFIX } from "../shared/robot-check";
 import type {
@@ -423,7 +423,7 @@ export function phaseLabel(phase?: ComparisonPhase): string {
 }
 
 export function startingMarkets(runTargets: Marketplace[]): MarketProgress[] {
-  return runTargets.slice(0, 1).map((marketplace) => ({ marketplace, phase: "OPEN" }));
+  return runTargets.slice(0, MARKET_CONCURRENCY).map((marketplace) => ({ marketplace, phase: "OPEN" }));
 }
 
 export function shownMarket(inFlight: MarketProgress[], latest?: MarketProgress): MarketProgress | undefined {

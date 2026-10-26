@@ -185,7 +185,7 @@ describe("idle view", () => {
     expect(screen.getByText(/^Takes about 5 seconds\./)).toBeInTheDocument();
   });
 
-  it("starts a run with the active tab and shows the first target before any progress", async () => {
+  it("starts a run with the active tab and shows the first three targets before any progress", async () => {
     const app = await renderLoaded();
 
     await app.user.click(screen.getByRole("button", { name: "Check 9 other Amazons" }));
@@ -195,10 +195,12 @@ describe("idle view", () => {
     ]);
     expect(screen.getByText("0/9")).toHaveClass("dB-dial-num");
     expect(app.container.querySelector<HTMLElement>(".dB-dial")?.style.getPropertyValue("--p")).toBe("0%");
-    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Checking Canada");
+    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Checking Canada +2");
     expect(app.container.querySelector(".dB-nowsub")).toHaveTextContent("amazon.ca");
     expect(Array.from(app.container.querySelectorAll(".dB-chk.now")).map((chip) => chip.textContent)).toEqual([
-      "🇨🇦 CA …"
+      "🇨🇦 CA …",
+      "🇲🇽 MX …",
+      "🇬🇧 UK …"
     ]);
     expect(screen.getByRole("button", { name: "Stop checking" })).toBeInTheDocument();
   });
