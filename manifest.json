@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Across Amazon",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "See which Amazon store delivers the product you are viewing for less: item, shipping and import fees, in one currency.",
   "icons": {
     "16": "icons/icon-16.png",
