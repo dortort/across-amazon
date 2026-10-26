@@ -757,9 +757,12 @@ export async function runComparison(activeTabId: number, runId?: string): Promis
       };
     }
 
-    const extracted = await extractBaseline(activeTabId, source, true);
+    const baselineRead = extractBaseline(activeTabId, source, true);
+    const fxRead = getDailyFxTable();
+    fxRead.catch(() => undefined);
+    const extracted = await baselineRead;
     baseline = extracted?.baseline;
-    const table = await getDailyFxTable();
+    const table = await fxRead;
     fxTable = table;
 
     const comparisonCurrency = resolveComparisonCurrency(settings, source);

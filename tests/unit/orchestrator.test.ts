@@ -789,6 +789,14 @@ function replaceOfferWithLiveBlocks(document: Document, file: string, blocks: st
   }
 }
 
+function eventsAfterStartup(harness: Harness): string[] {
+  const [first, ...rest] = harness.events;
+  const storesStart = rest.findIndex((event) => event.startsWith("progress "));
+  expect(first).toBe("inject content/source-extractor.js source/US");
+  expect(rest.slice(0, storesStart).sort()).toEqual(["fx www.ecb.europa.eu", "inject content/product-extractor.js source/US"]);
+  return rest.slice(storesStart);
+}
+
 function marketEvents(harness: Harness, market: Marketplace): string[] {
   const start = harness.events.indexOf(`progress OPEN ${market}`);
   const end = harness.events.findIndex(
@@ -1007,10 +1015,7 @@ describe("background orchestrator", () => {
 
       await runViaWorker(harness);
 
-      expect(harness.events).toEqual([
-        "inject content/source-extractor.js source/US",
-        "inject content/product-extractor.js source/US",
-        "fx www.ecb.europa.eu",
+      expect(eventsAfterStartup(harness)).toEqual([
         "progress OPEN DE",
         "open missing/DE",
         "ready missing/DE",
@@ -1033,6 +1038,86 @@ describe("background orchestrator", () => {
     });
   });
 
+  describe("parallel reads", () => {
+    const offersOnSourcePage: HarnessOptions = {
+      enabledMarketplaces: ["DE", "US"],
+      activeUrl: "https://www.amazon.de/dp/B000000005",
+      offersOn: { DE: "DE-four-new-offers.html" },
+      prepare: (group, _market, document) => {
+        if (group === "source") {
+          offerOnlyOtherSellers(document);
+        }
+      }
+    };
+
+    function storeEvents(harness: Harness): string[] {
+      return harness.events.filter((event) => event.startsWith("open ") || event.startsWith("progress "));
+    }
+
+    it("asks for the exchange rates while the baseline is still being read", async () => {
+      const offers = deferred();
+      const harness = await bootServiceWorker({ ...offersOnSourcePage, holdOffers: offers.promise });
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.events).toEqual(expect.arrayContaining(["offers www.amazon.de", "fx www.ecb.europa.eu"])));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(storeEvents(harness)).toEqual([]);
+      offers.resolve();
+      const payload = await run;
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.baseline).toMatchObject({ marketplace: "DE", status: "OK", otherSeller: { seller: "Star Brick City" } });
+      expect(payload.results.map((result) => [result.marketplace, result.status])).toEqual([["US", "OK"]]);
+    });
+
+    it("starts no store before both the baseline and the exchange rates are in", async () => {
+      const fx = deferred();
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], holdFx: fx.promise });
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() =>
+        expect(harness.events).toEqual(expect.arrayContaining(["inject content/product-extractor.js source/US", "fx www.ecb.europa.eu"]))
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(storeEvents(harness)).toEqual([]);
+      fx.resolve();
+      const payload = await run;
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.baseline).toEqual(EXPECTED_BASELINE);
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+    });
+
+    it("keeps the raw baseline in the error payload when the rates fail while the baseline is still being read", async () => {
+      const unhandled: unknown[] = [];
+      const recordUnhandled = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", recordUnhandled);
+
+      try {
+        const offers = deferred();
+        const harness = await bootServiceWorker({ ...offersOnSourcePage, fxAvailable: false, holdOffers: offers.promise });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.fetch).toHaveBeenCalledTimes(3));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        offers.resolve();
+        const payload = await run;
+
+        expect(payload.error).toBe("Unable to load FX reference rates from ECB or Frankfurter");
+        expect(payload.results).toEqual([]);
+        expect(payload.fxTable).toBeUndefined();
+        expect(payload.baseline).toMatchObject({ marketplace: "DE", status: "OK", otherSeller: { seller: "Star Brick City" } });
+        expect(payload.baseline).not.toHaveProperty("normalizedTotal");
+        expect(storeEvents(harness)).toEqual([]);
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", recordUnhandled);
+      }
+    });
+  });
+
   describe("ASIN lookup", () => {
     const ASIN_DE_RESULT: ComparisonResult = {
       ...EXPECTED_DE_RESULT,
@@ -1050,10 +1135,7 @@ describe("background orchestrator", () => {
       expect(payload.results).toEqual([ASIN_DE_RESULT]);
       expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
       expect(harness.tabsCreate).toHaveBeenCalledWith({ url: "https://www.amazon.de/dp/B000000001", active: false });
-      expect(harness.events).toEqual([
-        "inject content/source-extractor.js source/US",
-        "inject content/product-extractor.js source/US",
-        "fx www.ecb.europa.eu",
+      expect(eventsAfterStartup(harness)).toEqual([
         "progress OPEN DE",
         "open product/DE",
         "ready product/DE",
