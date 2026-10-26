@@ -10,7 +10,7 @@ import runningShot from "../assets/screenshots/running.png";
 
 const sections = {
   steps: "What happens on each store",
-  permissions: "The two permissions it asks for",
+  permissions: "The permissions it asks for",
   hosts: "The sites it connects to",
   storage: "What it stores, and for how long",
   "delivery-location": "What it changes on other Amazon stores",
@@ -37,23 +37,24 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
       <p>
         Opening the popup only reads the product page you are on. Nothing else happens until you press the check
         button, which reads <span class="nowrap">“Check 9 other Amazons”</span> with the default settings. The
-        extension then looks for the same product on each other store, in background tabs that never take focus. A
-        check takes about 3 seconds per store. It reads what each store charges to deliver the product to you and
-        ranks the stores by that delivered total, converted to one currency at the European Central Bank’s daily rate.
+        extension then looks for the same product on each other store, three stores at a time, reading their pages in
+        the background. A check of nine stores takes about 9 seconds. It reads what each store charges to deliver the
+        product to you and ranks the stores by that delivered total, converted to one currency at the European Central
+        Bank’s daily rate.
       </p>
 
       <h2 id="steps">{sections.steps}</h2>
-      <p>The stores are checked one at a time. For each store, the extension does this:</p>
+      <p>Three stores are checked at a time. For each store, the extension does this:</p>
       <ol>
         <li>
-          <strong>Looks up your product by its ASIN.</strong> It opens the store’s page for your product’s ASIN,
-          Amazon’s own product identifier, in a background tab. If that page shows your product and it can be bought,
-          that is an exact match. When the store does not list the ASIN, or its listing is unavailable, it searches.
+          <strong>Looks up your product by its ASIN.</strong> It downloads the store’s page for your product’s ASIN,
+          Amazon’s own product identifier. If that page shows your product and it can be bought, that is an exact
+          match. When the store does not list the ASIN, or its listing is unavailable, it searches.
         </li>
         <li>
-          <strong>Sets the delivery location, if needed.</strong> On the first page it opens on the store, it reads
+          <strong>Sets the delivery location, if needed.</strong> On the first page it reads on the store, it reads
           which country the store delivers to. If the store delivers elsewhere, it sets the store’s delivery location to
-          your destination country and opens the page again, so the price it reads is quoted for your destination. The
+          your destination country and reads the page again, so the price it reads is quoted for your destination. The
           store is left that way afterwards: see <a href="#delivery-location">what it changes on other Amazon stores</a>.
         </li>
         <li>
@@ -61,8 +62,8 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
           store, first for the brand and model number when the title has one, then for the title, brand and selected
           variant. Each result is scored on how closely its title, brand and variant match your product. The best
           result must pass the matching threshold. Its page is then checked for your colour, pack and size. When it
-          shows another variant, the extension opens the variant the page offers with your attributes and reads that
-          page instead; when the page does not offer it, the store is reported as{" "}
+          shows another variant, the extension reads the page of the variant it offers with your attributes instead;
+          when the page does not offer it, the store is reported as{" "}
           <span class="nowrap">“No confident match”</span>. A store where no result passes the threshold is reported
           the same way.
         </li>
@@ -79,15 +80,23 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
           as far as Amazon’s offer shows them, says how many offers the quote was chosen from, and shows no import fees.
         </li>
         <li>
-          <strong>Closes the tab.</strong> Each tab closes as soon as it has been read, and the next store starts.
+          <strong>Opens a tab only when it must.</strong> From version 0.2.0 the pages are downloaded with your Amazon
+          session and read in a hidden page of the extension, which runs none of Amazon’s scripts and loads none of its
+          images or ads. A page that cannot be read that way opens in a background tab that never takes focus, for
+          example a robot check, a download that fails or takes longer than 15 seconds, a page the extension does not
+          recognise or that leads to another Amazon store, a page that shows another delivery destination than the one
+          the store is set to, a location change the store refuses from the extension, or an offers list it cannot
+          load. The tab closes as soon as the page has been read. Versions before 0.2.0 open every page in a background
+          tab, one store at a time.
         </li>
       </ol>
       <p>
         While the check runs, the popup shows the results so far. The dial counts the stores finished out of the
-        total. A line names the step for the store in
-        progress: <em>Opening tab</em>, <em>Searching</em>, <em>Matching product</em> or <em>Reading cost stack</em>.
-        Each finished store gets a chip with its delivered total in your display currency, or a dash when it could not
-        be compared.
+        total. A line names the step of the store that moved on
+        last: <em>Checking</em>, <em>Searching</em>, <em>Matching product</em> or <em>Reading cost stack</em>, with
+        “+2” when two more stores are being checked. Each finished store gets a chip with its delivered total in your
+        display currency, or a dash when it could not be compared, and a blue “…” chip marks each store still being
+        checked.
       </p>
       <Shot
         src={runningShot}
@@ -98,25 +107,31 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
         checked, France being searched. Prices are illustrative.
       </Shot>
       <p>
-        <span class="nowrap">“Stop checking”</span> cancels the run and closes any background tabs it opened. Closing
-        the popup does not stop a check: it finishes in the background and its result is stored, unless Amazon showed
-        a robot check. Reopen the popup on the same tab to follow its progress.
+        <span class="nowrap">“Stop checking”</span> cancels the run, stops the downloads in progress and closes any
+        background tab it opened. A check stops after 4 minutes, and a store not finished by then is listed as
+        <span class="nowrap">“Could not read the page”</span>. Closing the popup does not stop a check: it finishes in
+        the background and its result is stored, unless Amazon showed a robot check or the check ran out of time.
+        Reopen the popup on the same tab to follow its progress.
       </p>
       <p>
         When the last store is done, the popup ranks every store that quoted a delivered total, cheapest first,
         including the page you are on. The card at the top names the cheapest. Stores that could not be compared are
         listed under “N marketplaces could not be compared”, each with the reason. Press{" "}
         <span class="nowrap">“Check again”</span> within 30 minutes and the same result comes back at once from
-        storage, with no tabs opened. A check in which Amazon showed a robot check is not stored, so{" "}
-        <span class="nowrap">“Check again”</span> checks every store again.
+        storage, with nothing downloaded again and no tabs opened. A check in which Amazon showed a robot check, or
+        that ran out of time, is not stored, so <span class="nowrap">“Check again”</span> checks every store again.
       </p>
       <p>
-        The pages it opens are ordinary visits: they appear in Chrome’s history and, if you are signed in to Amazon,
-        may appear in your Amazon browsing and search history. They may also influence Amazon’s recommendations.
+        A page opened in a background tab is an ordinary visit and appears in Chrome’s history; a page downloaded in
+        the background (version 0.2.0 and later) does not. If you are signed in to Amazon, the pages it reads may
+        appear in your Amazon browsing and search history. They may also influence Amazon’s recommendations.
       </p>
 
       <h2 id="permissions">{sections.permissions}</h2>
-      <p>Apart from the sites in the <a href="#hosts">next section</a>, the extension asks Chrome for two permissions.</p>
+      <p>
+        Apart from the sites in the <a href="#hosts">next section</a>, the extension asks Chrome for these permissions.
+        Versions before 0.2.0 ask only for <code>scripting</code> and <code>storage</code>.
+      </p>
       <TableScroll label="Permissions">
         <table class="table-stack">
           <thead>
@@ -127,12 +142,23 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
           </thead>
           <tbody>
             <tr>
+              <th scope="row"><code>offscreen</code></th>
+              <td>
+                From version 0.2.0. During a check the extension opens one hidden page of its own, an offscreen
+                document. It downloads the other stores’ product and search pages with your Amazon session and reads
+                each one as data, in a document that runs none of the page’s scripts and loads none of its images or
+                ads, with the extension’s own packaged scripts. Chrome shows no warning for this permission. The
+                document is closed after the check.
+              </td>
+            </tr>
+            <tr>
               <th scope="row"><code>scripting</code></th>
               <td>
                 The extension declares no content scripts, so none of its code runs on a page by itself. When you open
                 the popup on one of the ten stores, and when you start a check, it injects its own packaged scripts
-                into the Amazon tab you are on and into the background tabs it opens on the other stores. The scripts
-                read the product, its price, shipping and import fees and the delivery destination, and set a store’s
+                into the Amazon tab you are on and into any background tab it opens on the other stores: from version
+                0.2.0 only for a page that cannot be read in the offscreen document, before that for every page. The
+                scripts read the product, its price, shipping and import fees and the delivery destination, and set a store’s
                 delivery country when needed. As each background tab loads, they check that it shows the store’s page
                 and not Amazon’s robot check. On a store page that is not a product page, the extension finds no
                 product and keeps nothing.
@@ -153,9 +179,9 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
       <h2 id="hosts">{sections.hosts}</h2>
       <p>
         The extension’s manifest lists twelve hosts. Its own requests go to them and to Amazon’s image servers, for the
-        product picture shown in the popup. The pages it opens in background tabs load whatever Amazon’s own pages
-        load, such as Amazon’s image and script servers. Nothing goes to a server of the developer: the extension has
-        none.
+        product picture shown in the popup. A page it downloads loads nothing else; a page it opens in a background
+        tab loads whatever Amazon’s own pages load, such as Amazon’s image and script servers. Nothing goes to a server
+        of the developer: the extension has none.
       </p>
       <TableScroll label="Hosts in the extension’s manifest">
         <table class="table-stack">
@@ -180,14 +206,15 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
                 </ul>
               </th>
               <td>
-                The extension runs its scripts in the Amazon tab you are on and in the background tabs, which open
-                product and search pages on the other stores. The popup uses this access to see that the tab you are on
-                is an Amazon store, without the broader <code>tabs</code> permission. To set a store’s delivery
-                country, the location script runs inside that store’s own page and sends the store’s own{" "}
-                <span class="nowrap">“Choose your location”</span> requests to the same store. During a check, on a
-                product page that shows no price but offers{" "}
-                <span class="nowrap">“See All Buying Options”</span>, the product script asks the same store for its
-                list of other sellers’ offers, as Amazon’s button does.
+                From version 0.2.0 the offscreen document downloads the other stores’ product and search pages and
+                sends their own <span class="nowrap">“Choose your location”</span> requests and their requests for
+                other sellers’ offers with your Amazon session. A page that cannot be read that way, and every page
+                before 0.2.0, opens in a background tab, where the extension’s scripts read it and send those requests
+                from the store’s own page. The extension also runs its scripts in the Amazon tab you are on, and the
+                popup uses this access to see that the tab you are on is an Amazon store, without the broader{" "}
+                <code>tabs</code> permission. The other sellers’ offers are asked for during a check, on a product page
+                that shows no price but offers <span class="nowrap">“See All Buying Options”</span>, as Amazon’s button
+                does.
               </td>
             </tr>
             <tr>
@@ -208,12 +235,15 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
         </table>
       </TableScroll>
       <p>
-        Your browser requests the Amazon pages with your own Amazon session, as if you had opened them yourself. The
-        stores receive only what a comparison needs: your destination country in their location request, the product’s
+        Your browser makes the Amazon requests with your own Amazon session. The stores receive only what a
+        comparison needs: your destination country in their location request, the product’s
         ASIN in the addresses of the product pages and, with the page’s own parameters, a new-offers filter and a page
         number, in the request for other sellers’ offers, and its title, brand, model number and selected variant as
-        search terms. If you are signed in, Amazon can link these requests to your account. The exchange rate requests carry
-        no information about you or the product. Like any web request, they let those servers see your IP address.
+        search terms. If you are signed in, Amazon can link these requests to your account. From version 0.2.0, the
+        requests the extension makes in the background come from the extension rather than from a store’s page, so
+        Amazon can tell them apart from your own visits, and the <span class="nowrap">“Choose your location”</span>
+        change it sends names the extension in its Origin header. The exchange rate requests carry no information
+        about you or the product. Like any web request, they let those servers see your IP address.
       </p>
 
       <h2 id="storage">{sections.storage}</h2>
@@ -237,9 +267,9 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
             <tr>
               <th scope="row">Check results</th>
               <td>
-                A finished check is reused for 30 minutes, unless Amazon showed a robot check during it. An older
-                result is deleted only when exactly the same check runs again; otherwise it stays until you remove the
-                extension or clear its storage.
+                A finished check is reused for 30 minutes, unless Amazon showed a robot check during it or it ran out
+                of time. An older result is deleted only when exactly the same check runs again; otherwise it stays
+                until you remove the extension or clear its storage.
               </td>
             </tr>
             <tr>
@@ -277,11 +307,13 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
       </p>
       <ul>
         <li>
-          <strong>How.</strong> On the first page it opens on a store, the extension reads which country the store
+          <strong>How.</strong> On the first page it reads on a store, the extension reads which country the store
           delivers to. If that is already your destination country, nothing is sent. Otherwise it makes the same two
-          requests the store’s own <span class="nowrap">“Choose your location”</span> box makes, from that page and in
-          your own browser session: it loads the location form, taking only its security token and list of countries,
-          then submits your country. Each store is set at most once per check.
+          requests the store’s own <span class="nowrap">“Choose your location”</span> box makes, in your own browser
+          session: it loads the location form, taking only its security token and list of countries, then submits your
+          country. From version 0.2.0 the requests go from the extension in the background, and again from the store’s
+          own page in a background tab when the store refuses them; before, they always go from the store’s page. Each
+          store is set at most once per check.
         </li>
         <li>
           <strong>Only a country.</strong> It never sets a name, town, postcode or address. Your saved addresses, cart
@@ -330,7 +362,8 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
       <h2 id="remote-code">{sections["remote-code"]}</h2>
       <p>
         The extension runs no remote code. Every script it runs is bundled in its package. It injects only its own
-        packaged files and functions into Amazon pages, and it never fetches code to run.
+        packaged files and functions into Amazon pages, and it never fetches code to run. From version 0.2.0, the
+        Amazon pages it downloads are read as data in an inert document, and none of their scripts runs.
       </p>
 
       <p class="closing">
