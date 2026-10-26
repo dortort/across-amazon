@@ -133,7 +133,8 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
                 the popup on one of the ten stores, and when you start a check, it injects its own packaged scripts
                 into the Amazon tab you are on and into the background tabs it opens on the other stores. The scripts
                 read the product, its price, shipping and import fees and the delivery destination, and set a store’s
-                delivery country when needed. On a store page that is not a product page, the extension finds no
+                delivery country when needed. As each background tab loads, they check that it shows the store’s page
+                and not Amazon’s robot check. On a store page that is not a product page, the extension finds no
                 product and keeps nothing.
               </td>
             </tr>
