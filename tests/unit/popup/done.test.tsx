@@ -381,6 +381,20 @@ describe("issues accordion", () => {
     expect(screen.queryByText(/Timed out/)).not.toBeInTheDocument();
   });
 
+  it("names the store that showed a robot check", async () => {
+    const robotCheck = { ...es, notes: ["Amazon showed a robot check on amazon.es"] };
+    const app = await renderDone(resultPayload({ results: [de, robotCheck] }));
+
+    await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
+
+    expect(
+      Array.from(app.container.querySelectorAll(".dB-issue")).map((issue) => [
+        issue.querySelector("strong")?.textContent,
+        issue.querySelector("p")?.textContent
+      ])
+    ).toEqual([["Spain — Could not read the page", "Amazon showed a robot check on amazon.es instead of the page."]]);
+  });
+
   it("names the destination country from the source in the shipping note", async () => {
     const app = await renderDone(resultPayload({ source: { ...source, destinationCountryCode: "CH" }, results: [de, jp] }));
 

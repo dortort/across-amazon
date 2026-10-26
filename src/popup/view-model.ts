@@ -1,5 +1,6 @@
 import { MARKETPLACE_BY_CODE, MARKETPLACE_CODES, countryName } from "../shared/markets";
 import { deliveredTotal, deliveredTotalIn, formatMoney } from "../shared/money";
+import { ROBOT_CHECK_NOTE_PREFIX } from "../shared/robot-check";
 import type {
   ComparisonPhase,
   ComparisonResult,
@@ -321,8 +322,13 @@ export function issueNote(result: ComparisonResult, destinationCountryCode?: str
         ...(unread ? [asSentence(`${OTHER_OFFERS_UNREAD_PREFIX}${unread}`)] : [])
       ].join(" ");
     }
-    case "PARSE_FAILED":
+    case "PARSE_FAILED": {
+      const robotCheckDomain = noteAfter(result, ROBOT_CHECK_NOTE_PREFIX);
+      if (robotCheckDomain) {
+        return `Amazon showed a robot check on ${robotCheckDomain} instead of the page.`;
+      }
       return "The product page could not be read.";
+    }
     case "NO_CONFIDENT_MATCH":
       return "No listing scored above the confidence floor.";
     default:
