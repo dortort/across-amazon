@@ -13,5 +13,5 @@
     "noEmit": true,
     "types": ["chrome", "node", "vitest/globals"]
   },
-  "include": ["src", "tests", "scripts", "vite.config.ts", "eslint.config.js", "playwright.config.ts"]
+  "include": ["src", "tests", "scripts", "vite.config.ts", "vite.offscreen.config.ts", "eslint.config.js", "playwright.config.ts"]
 }

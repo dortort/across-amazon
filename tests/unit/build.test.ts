@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,10 +7,15 @@ import { Script } from "node:vm";
 import { JSDOM } from "jsdom";
 import { build, parseAst } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { OFFSCREEN_PAGE_JOB } from "../../src/shared/messages";
 
 const REPO_ROOT = process.cwd();
 const FIXTURE_ROOT = join(REPO_ROOT, "tests", "fixtures");
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const OFFSCREEN_BUNDLE = "offscreen/offscreen.js";
+const EXTENSION_ID = "across-amazon-test";
+
+type MessageListener = (message: unknown, sender: unknown, sendResponse: (response?: unknown) => void) => boolean;
 
 interface Manifest {
   icons: Record<string, string>;
@@ -81,29 +86,31 @@ const CONTENT_SCRIPTS: ContentScriptCase[] = [
   }
 ];
 
-let outDir: string | undefined;
+let buildRoot: string | undefined;
 
 beforeAll(async () => {
-  outDir = await mkdtemp(join(tmpdir(), "across-amazon-build-"));
+  buildRoot = await mkdtemp(join(tmpdir(), "across-amazon-build-"));
   await build({
     root: REPO_ROOT,
     configFile: join(REPO_ROOT, "vite.config.ts"),
     logLevel: "silent",
-    build: { outDir, emptyOutDir: true, write: true }
+    build: { outDir: join(buildRoot, "dist"), emptyOutDir: true, write: true }
   });
-}, 20_000);
+  // No build overrides here: with dist inside the root, Vite would empty it unless the config says not to.
+  await build({ root: buildRoot, configFile: join(REPO_ROOT, "vite.offscreen.config.ts"), logLevel: "silent" });
+}, 40_000);
 
 afterAll(async () => {
-  if (outDir) {
-    await rm(outDir, { recursive: true, force: true });
+  if (buildRoot) {
+    await rm(buildRoot, { recursive: true, force: true });
   }
 });
 
 function builtPath(file: string): string {
-  if (!outDir) {
+  if (!buildRoot) {
     throw new Error("The build did not produce an output directory");
   }
-  return join(outDir, file);
+  return join(buildRoot, "dist", file);
 }
 
 async function readBuiltFile(file: string): Promise<string> {
@@ -149,6 +156,72 @@ describe("production build of the content scripts", () => {
       }
     }
   );
+});
+
+describe("production build of the offscreen document", () => {
+  it("keeps the main build's files when it writes into the same dist", () => {
+    const mainBuild = [
+      "popup.html",
+      "options.html",
+      "offscreen.html",
+      "background/service-worker.js",
+      ...CONTENT_SCRIPTS.map(({ file }) => file)
+    ];
+
+    expect(mainBuild.filter((file) => !existsSync(builtPath(file)))).toEqual([]);
+    expect(existsSync(builtPath(OFFSCREEN_BUNDLE))).toBe(true);
+  });
+
+  it("ships offscreen.html loading only the offscreen bundle, as a module", async () => {
+    const page = new JSDOM(await readBuiltFile("offscreen.html")).window.document;
+    const scripts = Array.from(page.querySelectorAll("script"), (script) => ({
+      type: script.getAttribute("type"),
+      src: script.getAttribute("src")
+    }));
+
+    expect(scripts).toEqual([{ type: "module", src: OFFSCREEN_BUNDLE }]);
+  });
+
+  it("bundles the offscreen document with no module syntax", async () => {
+    const code = await readBuiltFile(OFFSCREEN_BUNDLE);
+    const program = parseAst(code);
+
+    expect(program.body.filter((node) => /^(Import|Export)/.test(node.type))).toEqual([]);
+    expect(code).not.toMatch(/\bimport\s*\(|\bimport\.meta\b/);
+  });
+
+  it("answers a product job with nothing but the bundle", async () => {
+    const url = "https://www.amazon.de/dp/B000000005";
+    const html = new TextEncoder().encode(readFileSync(join(FIXTURE_ROOT, "product/DE.html"), "utf8"));
+    const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { runScripts: "outside-only" });
+    const scope = dom.window as unknown as Record<string, unknown>;
+    const listeners: MessageListener[] = [];
+    scope.chrome = {
+      runtime: { id: EXTENSION_ID, onMessage: { addListener: (listener: MessageListener) => listeners.push(listener) } }
+    };
+    scope.TextDecoder = TextDecoder;
+    scope.fetch = async (input: string) => ({
+      ok: true,
+      status: 200,
+      url: input,
+      headers: new Headers({ "content-type": "text/html;charset=UTF-8" }),
+      arrayBuffer: async () => html.slice().buffer
+    });
+
+    new Script(await readBuiltFile(OFFSCREEN_BUNDLE), { filename: OFFSCREEN_BUNDLE }).runInContext(dom.getInternalVMContext());
+    const page = { kind: "product", request: { marketplace: "DE", sourceDestinationCountryCode: "US" } };
+    const message = { target: "offscreen", type: OFFSCREEN_PAGE_JOB, payload: { runKey: "run-1", url, page } };
+    const answer = await new Promise<unknown>((resolve) => {
+      expect(listeners).toHaveLength(1);
+      expect(listeners[0](message, { id: EXTENSION_ID }, resolve)).toBe(true);
+    });
+
+    expect(JSON.parse(JSON.stringify(answer))).toMatchObject({
+      outcome: "read",
+      finalUrl: url,
+      product: { canonicalUrl: url, breakdown: { item: { amount: 37.2, currency: "EUR" } } }
+    });
+  });
 });
 
 describe("production build of the manifest icons", () => {
