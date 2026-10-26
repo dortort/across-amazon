@@ -76,7 +76,8 @@ describe("focus after a view swap", () => {
     const stop = screen.getByRole("button", { name: "Stop checking" });
     stop.focus();
 
-    app.progress({ completed: 3, total: 9, currentMarketplace: "DE", phase: "READ", runId: app.runId(0), results: [] });
+    const latest = { marketplace: "DE", phase: "READ" } as const;
+    app.progress({ completed: 3, total: 9, inFlight: [latest], latest, runId: app.runId(0), results: [] });
 
     expect(stop).toHaveFocus();
   });

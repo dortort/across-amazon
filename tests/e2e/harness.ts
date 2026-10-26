@@ -125,11 +125,12 @@ export function progressSteps(scn: Scenario): RunComparisonProgressPayload[] {
 
   targets.forEach((market, completed) => {
     for (const phase of PHASES) {
+      const latest = { marketplace: market, phase };
       steps.push({
         completed,
         total,
-        currentMarketplace: market,
-        phase,
+        inFlight: [latest],
+        latest,
         results: sortComparisonResults(finished),
         fxTable: scn.fxTable
       });
@@ -140,7 +141,7 @@ export function progressSteps(scn: Scenario): RunComparisonProgressPayload[] {
     }
   });
 
-  steps.push({ completed: total, total, results: sortComparisonResults(finished), fxTable: scn.fxTable });
+  steps.push({ completed: total, total, inFlight: [], results: sortComparisonResults(finished), fxTable: scn.fxTable });
   return steps;
 }
 
@@ -150,7 +151,7 @@ export function progressStep(
   phase: ComparisonPhase
 ): RunComparisonProgressPayload {
   const step = progressSteps(scn).find(
-    (candidate) => candidate.currentMarketplace === market && candidate.phase === phase
+    (candidate) => candidate.latest?.marketplace === market && candidate.latest.phase === phase
   );
   if (!step) {
     throw new Error(`${market} is not a target of this scenario`);

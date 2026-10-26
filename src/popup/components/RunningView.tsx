@@ -2,7 +2,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { MARKETPLACE_BY_CODE, marketDisplayDomain, marketLabel } from "../../shared/markets";
 import { formatMoney } from "../../shared/money";
 import type { ComparisonResult, FxTable, Marketplace, RunComparisonProgressPayload } from "../../shared/types";
-import { displayTotal, inCheckOrder, phaseLabel, progressPercent } from "../view-model";
+import { checkChips, displayTotal, phaseLabel, progressPercent, shownMarket, startingMarkets } from "../view-model";
 
 interface RunningViewProps {
   progress?: RunComparisonProgressPayload;
@@ -30,8 +30,10 @@ function CheckChip({ result, currency, fxTable }: CheckChipProps): ReactElement 
 export function RunningView({ progress, runTargets, currency, fxTable, onCancel }: RunningViewProps): ReactElement {
   const total = progress?.total ?? runTargets.length;
   const completed = progress?.completed ?? 0;
-  const current = progress ? progress.currentMarketplace : runTargets[0];
-  const checked = inCheckOrder(progress?.results ?? [], runTargets);
+  const running = progress ? progress.inFlight : startingMarkets(runTargets);
+  const shown = shownMarket(running, progress?.latest);
+  const more = running.length - 1;
+  const chips = checkChips(progress?.results ?? [], running, runTargets);
   const dialStyle = { "--p": `${progressPercent(completed, total)}%` } as CSSProperties;
 
   return (
@@ -47,23 +49,25 @@ export function RunningView({ progress, runTargets, currency, fxTable, onCancel 
         </div>
         <div>
           <p className="dB-nowline" aria-live="polite">
-            {current ? (
+            {shown ? (
               <>
-                {phaseLabel(progress?.phase)} <b>{marketLabel(current)}</b>
+                {phaseLabel(shown.phase)} <b>{marketLabel(shown.marketplace)}</b>
+                {more > 0 ? ` +${more}` : null}
               </>
             ) : null}
           </p>
-          <p className="dB-nowsub">{current ? marketDisplayDomain(current) : null}</p>
+          <p className="dB-nowsub">{shown ? marketDisplayDomain(shown.marketplace) : null}</p>
         </div>
         <div className="dB-checks">
-          {checked.map((result) => (
-            <CheckChip key={result.marketplace} result={result} currency={currency} fxTable={fxTable} />
-          ))}
-          {current ? (
-            <span className="dB-chk now">
-              {MARKETPLACE_BY_CODE[current].flag} {current} …
-            </span>
-          ) : null}
+          {chips.map(({ marketplace, result }) =>
+            result ? (
+              <CheckChip key={marketplace} result={result} currency={currency} fxTable={fxTable} />
+            ) : (
+              <span key={marketplace} className="dB-chk now">
+                {MARKETPLACE_BY_CODE[marketplace].flag} {marketplace} …
+              </span>
+            )
+          )}
         </div>
         <button type="button" className="dB-cta secondary" id="b-cancel" onClick={onCancel}>
           Stop checking

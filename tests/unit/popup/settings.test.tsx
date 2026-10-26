@@ -273,6 +273,6 @@ describe("marketplace setting", () => {
     await app.user.click(screen.getByRole("button", { name: "Check 6 other Amazons" }));
 
     expect(app.container.querySelector(".dB-dial-num")?.textContent).toBe("0/6");
-    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Opening tab Germany");
+    expect(app.container.querySelector(".dB-nowline")?.textContent).toBe("Checking Germany");
   });
 });

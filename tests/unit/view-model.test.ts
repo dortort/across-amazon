@@ -6,12 +6,14 @@ import type {
   ComparisonStatus,
   ExtensionSettings,
   FxTable,
+  MarketProgress,
   Marketplace,
   Money,
   SourceContext
 } from "../../src/shared/types";
 import {
   DISPLAY_CURRENCIES,
+  checkChips,
   checkLabel,
   computeVerdict,
   costLine,
@@ -32,13 +34,14 @@ import {
   otherSellerNote,
   percentFormat,
   formatVariantTokens,
-  inCheckOrder,
   phaseLabel,
   progressPercent,
   rankAvailable,
   rankedRows,
   resolveDisplayCurrency,
+  shownMarket,
   sourceCostSentence,
+  startingMarkets,
   statusText,
   targetMarkets,
   trustSentence
@@ -137,8 +140,8 @@ const mx = failedResult("MX", "NO_CONFIDENT_MATCH", 0.31, [
 
 const mockupResults: ComparisonResult[] = [ca, mx, uk, de, fr, it_, es, jp, au];
 
-function codes(results: ComparisonResult[]): Marketplace[] {
-  return results.map((result) => result.marketplace);
+function codes(entries: Array<{ marketplace: Marketplace }>): Marketplace[] {
+  return entries.map((entry) => entry.marketplace);
 }
 
 describe("DISPLAY_CURRENCIES", () => {
@@ -1019,15 +1022,47 @@ describe("otherSellerNote", () => {
 
 describe("phaseLabel", () => {
   it("maps each phase to the mockup copy", () => {
-    expect(phaseLabel("OPEN")).toBe("Opening tab");
+    expect(phaseLabel("OPEN")).toBe("Checking");
     expect(phaseLabel("SEARCH")).toBe("Searching");
     expect(phaseLabel("MATCH")).toBe("Matching product");
     expect(phaseLabel("READ")).toBe("Reading cost stack");
   });
 
-  it("defaults to opening a tab before the first phase arrives", () => {
-    expect(phaseLabel()).toBe("Opening tab");
-    expect(phaseLabel(undefined)).toBe("Opening tab");
+  it("defaults to checking before the first phase arrives", () => {
+    expect(phaseLabel()).toBe("Checking");
+    expect(phaseLabel(undefined)).toBe("Checking");
+  });
+});
+
+describe("startingMarkets", () => {
+  it("shows the first target as being checked before any progress arrives", () => {
+    expect(startingMarkets(["CA", "MX", "UK", "DE"])).toEqual([{ marketplace: "CA", phase: "OPEN" }]);
+  });
+
+  it("shows none without targets", () => {
+    expect(startingMarkets([])).toEqual([]);
+  });
+});
+
+describe("shownMarket", () => {
+  const inFlight: MarketProgress[] = [
+    { marketplace: "CA", phase: "SEARCH" },
+    { marketplace: "MX", phase: "OPEN" },
+    { marketplace: "UK", phase: "MATCH" }
+  ];
+
+  it("names the store whose phase changed last", () => {
+    expect(shownMarket(inFlight, { marketplace: "UK", phase: "MATCH" })).toEqual({ marketplace: "UK", phase: "MATCH" });
+  });
+
+  it("falls back to the first running store", () => {
+    expect(shownMarket(inFlight)).toEqual({ marketplace: "CA", phase: "SEARCH" });
+    expect(shownMarket(inFlight, { marketplace: "DE", phase: "READ" })).toEqual({ marketplace: "CA", phase: "SEARCH" });
+  });
+
+  it("names none when no store is running", () => {
+    expect(shownMarket([], { marketplace: "UK", phase: "READ" })).toBeUndefined();
+    expect(shownMarket([])).toBeUndefined();
   });
 });
 
@@ -1073,27 +1108,57 @@ describe("trustSentence", () => {
   });
 });
 
-describe("inCheckOrder", () => {
+describe("checkChips", () => {
   const order: Marketplace[] = ["CA", "MX", "UK", "DE", "FR", "IT", "ES", "JP", "AU"];
 
   it("orders results by the run's target order instead of price", () => {
-    expect(codes(inCheckOrder([de, uk, ca, mx], order))).toEqual(["CA", "MX", "UK", "DE"]);
-    expect(codes(inCheckOrder([de, it_, uk, ca, mx, jp], order))).toEqual(["CA", "MX", "UK", "DE", "IT", "JP"]);
+    expect(codes(checkChips([de, uk, ca, mx], [], order))).toEqual(["CA", "MX", "UK", "DE"]);
+    expect(codes(checkChips([de, it_, uk, ca, mx, jp], [], order))).toEqual(["CA", "MX", "UK", "DE", "IT", "JP"]);
   });
 
   it("follows a custom target order", () => {
-    expect(codes(inCheckOrder([de, uk, ca], ["DE", "CA", "UK"]))).toEqual(["DE", "CA", "UK"]);
+    expect(codes(checkChips([de, uk, ca], [], ["DE", "CA", "UK"]))).toEqual(["DE", "CA", "UK"]);
   });
 
-  it("puts results outside the target order last, in canonical order", () => {
-    expect(codes(inCheckOrder([jp, de, uk, ca], ["UK", "DE"]))).toEqual(["UK", "DE", "CA", "JP"]);
-    expect(codes(inCheckOrder([au, de, ca], []))).toEqual(["CA", "DE", "AU"]);
+  it("puts stores outside the target order last, in canonical order", () => {
+    const running: MarketProgress[] = [
+      { marketplace: "AU", phase: "OPEN" },
+      { marketplace: "UK", phase: "READ" }
+    ];
+
+    expect(codes(checkChips([jp, de, uk, ca], [], ["UK", "DE"]))).toEqual(["UK", "DE", "CA", "JP"]);
+    expect(codes(checkChips([au, de, ca], [], []))).toEqual(["CA", "DE", "AU"]);
+    expect(codes(checkChips([de], running, ["UK"]))).toEqual(["UK", "DE", "AU"]);
   });
 
   it("does not mutate its input", () => {
     const input = [de, uk, ca];
-    inCheckOrder(input, order);
+    checkChips(input, [{ marketplace: "MX", phase: "OPEN" }], order);
     expect(codes(input)).toEqual(["DE", "UK", "CA"]);
+  });
+
+  it("places each running store among the finished ones by the run's target order", () => {
+    const inFlight: MarketProgress[] = [
+      { marketplace: "MX", phase: "SEARCH" },
+      { marketplace: "FR", phase: "OPEN" },
+      { marketplace: "AU", phase: "READ" }
+    ];
+
+    expect(checkChips([de, uk, ca], inFlight, order)).toEqual([
+      { marketplace: "CA", result: ca },
+      { marketplace: "MX" },
+      { marketplace: "UK", result: uk },
+      { marketplace: "DE", result: de },
+      { marketplace: "FR" },
+      { marketplace: "AU" }
+    ]);
+  });
+
+  it("shows a store that is both finished and still listed as running once, with its result", () => {
+    expect(checkChips([ca, uk], [{ marketplace: "UK", phase: "READ" }], order)).toEqual([
+      { marketplace: "CA", result: ca },
+      { marketplace: "UK", result: uk }
+    ]);
   });
 });
 
