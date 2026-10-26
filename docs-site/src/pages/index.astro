@@ -72,17 +72,19 @@ import breakdownShot from "../assets/screenshots/sheet.png";
             the country in the “Deliver to” box of the page you started from, and leaves it that way.
           </p>
           <p>
-            Each store’s pages open briefly in background tabs that never take focus. The pages it opens are ordinary
-            visits: they appear in Chrome’s history and, if you are signed in to Amazon, may appear in your Amazon
-            browsing and search history.
+            From version 0.2.0, each store’s pages are downloaded in the background, three stores at a time, and read
+            without opening a tab. A page that cannot be read that way, and every page in earlier versions, opens
+            briefly in a background tab that never takes focus. A page opened in a tab appears in Chrome’s history,
+            and, if you are signed in to Amazon, the pages it reads may appear in your Amazon browsing and search
+            history.
           </p>
         </li>
         <li class="step">
           <h3 id="read-the-verdict-and-the-ranked-list">Read the verdict and the ranked list</h3>
           <p>
-            A check takes about 3 seconds per store. The card names the store with the cheapest delivered total and
-            what you save against the page you are on. Below it, every store that quoted a price is ranked, cheapest
-            first.
+            A check of the nine other stores takes about 9 seconds. The card names the store with the cheapest
+            delivered total and what you save against the page you are on. Below it, every store that quoted a price is
+            ranked, cheapest first.
           </p>
           <p>
             When a store shows no import fees for your destination, the result says so, because duties may still be
@@ -120,8 +122,9 @@ import breakdownShot from "../assets/screenshots/sheet.png";
             alt="Running popup with a progress dial at 3 of 9, Searching France +2, chips for Canada, Mexico and the United Kingdom, and Germany, France and Italy in progress"
             width={400}
           >
-            <strong>Running.</strong> The dial counts the stores checked so far. Each chip shows a store’s delivered
-            total, or “—” when it could not be compared.
+            <strong>Running.</strong> The dial counts the stores checked so far. Each finished store’s chip shows its
+            delivered total, or “—” when it could not be compared; a blue “…” chip marks each store still being
+            checked.
           </Shot>
         </li>
         <li>
@@ -178,8 +181,9 @@ import breakdownShot from "../assets/screenshots/sheet.png";
         <h2 id="never-title" class="section-title">What it never does</h2>
         <p class="lede">
           It reads prices and shows you where to buy. What it changes: each other store’s delivery location,
-          explained under <a href="/how-it-works/#delivery-location">how it works</a>, and the pages it visits, which
-          appear in your browsing history. You buy on Amazon’s own product page, yourself.
+          explained under <a href="/how-it-works/#delivery-location">how it works</a>, and your history: the pages it
+          opens in background tabs appear in Chrome’s history, and, if you are signed in to Amazon, the pages it reads
+          may appear in your Amazon browsing and search history. You buy on Amazon’s own product page, yourself.
         </p>
       </div>
       <ul class="never-list" role="list">
