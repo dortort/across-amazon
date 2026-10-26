@@ -55,8 +55,8 @@ const tocItems = Object.entries(sections).map(([id, heading]) => ({ href: `#${id
             The status <span class="nowrap">“Delivered total not quotable”</span> most often means neither the store
             nor any seller it lists under <span class="nowrap">“See All Buying Options”</span> delivers the item new to
             your country. <span class="nowrap">“Could not set delivery location”</span> means
-            the store would not switch to your country, or does not offer it. A store that shows a robot check may
-            report <span class="nowrap">“No confident match”</span> or <span class="nowrap">“Could not read the page”</span>.
+            the store would not switch to your country, or does not offer it. A store that showed a robot check is listed
+            as <span class="nowrap">“Could not read the page”</span>, with a note that says so.
           </p>
           <p><a href="/faq/#stores-that-dont-ship">Why some stores can’t be compared</a></p>
         </li>
@@ -88,7 +88,8 @@ const tocItems = Object.entries(sections).map(([id, heading]) => ({ href: `#${id
           </p>
           <p>
             Within 30 minutes of a check, <span class="nowrap">“Check again”</span> returns the same result from
-            the local cache and opens no tabs. After that, a fresh check runs.
+            the local cache and opens no tabs. After that, a fresh check runs. A check in which Amazon showed a robot
+            check is not stored, so <span class="nowrap">“Check again”</span> checks every store again.
           </p>
           <p><a href="/faq/#cache">Why <span class="nowrap">“Check again”</span> can be instant</a></p>
         </li>
