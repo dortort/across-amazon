@@ -66,7 +66,7 @@ export function SettingsView({ settings, source, onChange }: SettingsViewProps):
             })}
           </div>
           <p className="dB-hint is-left">
-            Fewer marketplaces means a faster check. Each one opens briefly in a background tab.
+            Fewer marketplaces means a faster check. Three are checked at a time.
           </p>
         </div>
       </div>

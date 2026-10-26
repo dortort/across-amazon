@@ -157,7 +157,7 @@ test.describe("a full comparison", () => {
     await expect(runButton(page)).toBeEnabled();
     await expect(
       page.getByText(
-        "Takes about 27 seconds. Each Amazon opens briefly in a background tab so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
+        "Takes about 9 seconds. Each Amazon’s pages are downloaded in the background, so we can read its real delivered price to United States. Its delivery location may be set to United States and is left that way after the check."
       )
     ).toBeVisible();
     await expect(page.getByText("ECB daily rates")).toBeVisible();
@@ -620,7 +620,7 @@ test.describe("stopping a run", () => {
     await expect(runButton(page)).toHaveText("Check 9 other Amazons");
     await expect(page.getByRole("heading", { level: 3, name: source.title })).toBeVisible();
     await expect(page.getByRole("button", { name: "Stop checking" })).toHaveCount(0);
-    await expectToastShown(page, "Stopped. No background tabs left open.");
+    await expectToastShown(page, "Stopped.");
 
     await emitProgress(page, progressStep(scn, "FR", "OPEN"));
     await emitResult(page, resultPayload(scenario({ results: step.results ?? [], error: CANCELLED })));
@@ -810,7 +810,7 @@ test.describe("settings", () => {
     await page.getByRole("button", { name: "Close settings" }).click();
 
     await expect(runButton(page)).toHaveText("Check 8 other Amazons");
-    await expect(page.getByText(/^Takes about 24 seconds\./)).toBeVisible();
+    await expect(page.getByText(/^Takes about 9 seconds\./)).toBeVisible();
 
     await startRun(page);
     await expect(dial(page).count).toHaveText("0/8");

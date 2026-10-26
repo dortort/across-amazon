@@ -73,8 +73,8 @@ export function IdleView({
       </button>
       {source ? (
         <p className="dB-hint">
-          Takes about {estimatedSeconds(targetCount)} seconds. Each Amazon opens briefly in a background tab so we can
-          read its real delivered price to {destination}.
+          Takes about {estimatedSeconds(targetCount)} seconds. Each Amazon’s pages are downloaded in the background, so
+          we can read its real delivered price to {destination}.
           {destinationKnown ? ` Its delivery location may be set to ${destination} and is left that way after the check.` : null}
         </p>
       ) : null}
