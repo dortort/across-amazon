@@ -372,7 +372,7 @@ describe("issues accordion", () => {
   });
 
   it("never shows the backend's internal notes", async () => {
-    const timedOut = { ...es, notes: ["Timed out waiting for tab 123 to complete"] };
+    const timedOut = { ...es, notes: ["Timed out waiting for tab 123 to load"] };
     const app = await renderDone(resultPayload({ results: [de, timedOut] }));
 
     await app.user.click(screen.getByRole("button", { name: "1 marketplace could not be compared" }));
