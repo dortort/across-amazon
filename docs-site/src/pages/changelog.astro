@@ -13,6 +13,38 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
   <PageIntro title="Changelog" lede="One entry per version. Version numbers follow the extension’s manifest." />
   <div class="container page-body">
     <article class="prose">
+      <section class="release" aria-labelledby="v0-1-1">
+        <header class="release-head">
+          <div class="release-title">
+            <h2 id="v0-1-1">0.1.1</h2>
+            <p class="release-label">Faster checks</p>
+          </div>
+          <p class="release-status">
+            Prepared for the Chrome Web Store, not published yet. Until it is, the store offers 0.1.0.
+          </p>
+        </header>
+
+        <h3 id="v0-1-1-what-changed">What changed</h3>
+        <ul>
+          <li>
+            <strong>Faster reads.</strong> Each store’s page is read as soon as its content has arrived, without waiting
+            for Amazon’s images and ads to finish loading. Search pages gain the most.
+          </li>
+          <li>
+            <strong>No false “not found” on a slow page.</strong> A page that took more than 15 seconds to finish
+            loading, as the first page of a check sometimes did, was taken for a store that does not list the product,
+            which cost a search and another page. A page now has 20 seconds, and it is read as soon as its content is
+            there.
+          </li>
+          <li>
+            <strong>Robot checks reported as such.</strong> When Amazon shows a robot check instead of a page, the store
+            is listed as <span class="nowrap">“Could not read the page”</span> with a note that names it, instead of
+            being read as an unavailable listing or a search without results. The check opens no other page on that
+            store and is not stored, so <span class="nowrap">“Check again”</span> checks every store again.
+          </li>
+        </ul>
+      </section>
+
       <section class="release" aria-labelledby="v0-1-0">
         <header class="release-head">
           <div class="release-title">
@@ -108,6 +140,10 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
 </Base>
 
 <style>
+  .release + .release {
+    margin-top: 3em;
+  }
+
   .release-head {
     padding-bottom: 20px;
     border-bottom: 1px solid var(--color-hairline);
