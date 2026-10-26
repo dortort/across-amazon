@@ -135,7 +135,11 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
             </tr>
             <tr>
               <th scope="row">Could not read the page</th>
-              <td>The product page could not be read, or the tab failed to load in time.</td>
+              <td>
+                The product page could not be read, or it did not load within 20 seconds. When Amazon showed a robot
+                check instead of a page, the note names the store, for example: “Amazon showed a robot check on
+                amazon.co.uk instead of the page.” See <a href="#robot-check">what happens on a robot check</a>.
+              </td>
             </tr>
             <tr>
               <th scope="row">Could not set delivery location</th>
@@ -240,7 +244,7 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
       <p>
         If you press <span class="nowrap">“Check again”</span> within those 30 minutes, for the same product, variant,
         destination, “Deliver to” text and set of stores, you get the stored result back at once, and no tabs open.
-        After 30 minutes a fresh check runs.
+        After 30 minutes a fresh check runs. A check in which Amazon showed a robot check is not stored.
       </p>
       <p>
         A stored result includes the “Deliver to” text and the address of the product page. To remove it sooner,
@@ -318,10 +322,15 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
 
       <h2 id="robot-check">{questions["robot-check"]}</h2>
       <p>
-        A store that shows a robot check may report “No confident match” or “Could not read the page”. It is then listed
-        with the <a href="#stores-that-dont-ship">stores that could not be compared</a> and is not ranked. If
-        you <a href="/support/#report">report a problem</a>, say whether that store shows a robot check when you open
-        it yourself.
+        The store is listed as <span class="nowrap">“Could not read the page”</span> with
+        the <a href="#stores-that-dont-ship">stores that could not be compared</a>, and the note names it, for example:
+        “Amazon showed a robot check on amazon.co.uk instead of the page.” It is not ranked, and the check opens no other
+        page on that store. The other stores are still checked.
+      </p>
+      <p>
+        A check in which Amazon showed a robot check is not stored, so <span class="nowrap">“Check again”</span> checks
+        every store again. If you <a href="/support/#report">report a problem</a>, say whether that store shows a robot
+        check when you open it yourself.
       </p>
 
       <h2 id="stay-here">{questions["stay-here"]}</h2>

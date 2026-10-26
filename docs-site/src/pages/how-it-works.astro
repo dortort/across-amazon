@@ -99,15 +99,16 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
       </Shot>
       <p>
         <span class="nowrap">“Stop checking”</span> cancels the run and closes any background tabs it opened. Closing
-        the popup does not stop a check: it finishes in the background and its result is stored. Reopen the popup on
-        the same tab to follow its progress.
+        the popup does not stop a check: it finishes in the background and its result is stored, unless Amazon showed
+        a robot check. Reopen the popup on the same tab to follow its progress.
       </p>
       <p>
         When the last store is done, the popup ranks every store that quoted a delivered total, cheapest first,
         including the page you are on. The card at the top names the cheapest. Stores that could not be compared are
         listed under “N marketplaces could not be compared”, each with the reason. Press{" "}
         <span class="nowrap">“Check again”</span> within 30 minutes and the same result comes back at once from
-        storage, with no tabs opened.
+        storage, with no tabs opened. A check in which Amazon showed a robot check is not stored, so{" "}
+        <span class="nowrap">“Check again”</span> checks every store again.
       </p>
       <p>
         The pages it opens are ordinary visits: they appear in Chrome’s history and, if you are signed in to Amazon,
@@ -235,8 +236,9 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
             <tr>
               <th scope="row">Check results</th>
               <td>
-                A finished check is reused for 30 minutes. An older result is deleted only when exactly the same check
-                runs again; otherwise it stays until you remove the extension or clear its storage.
+                A finished check is reused for 30 minutes, unless Amazon showed a robot check during it. An older
+                result is deleted only when exactly the same check runs again; otherwise it stays until you remove the
+                extension or clear its storage.
               </td>
             </tr>
             <tr>
