@@ -107,7 +107,7 @@ The script starts the Vite dev server on a free port, loads `tests/e2e/harness.t
 | File | State |
 | --- | --- |
 | `idle.png` | Product loaded, ready to check |
-| `running.png` | 4 of 9 marketplaces checked, France being searched |
+| `running.png` | 3 of 9 marketplaces checked, Germany, France and Italy in progress, France being searched |
 | `done.png` | Save verdict |
 | `done-list.png` | Results scrolled to the ranked list |
 | `issues-open.png` | Issues expanded, scrolled to the bottom |
@@ -116,6 +116,6 @@ The script starts the Vite dev server on a free port, loads `tests/e2e/harness.t
 | `settings.png` | Settings |
 | `not-on-amazon.png` | A page that is not on Amazon |
 
-Each state is checked before it is captured (for example the verdict must read "Save $50.94" and the dial "4/9"), and the capture fails if anything other than the popup's content area has scrolled. Re-running the script on the same machine produces identical files, so a diff in `docs/screenshots` means the popup changed. Fonts come from the operating system, so captures from different platforms differ slightly.
+Each state is checked before it is captured (for example the verdict must read "Save $50.94" and the dial "3/9"), and the capture fails if anything other than the popup's content area has scrolled. Re-running the script on the same machine produces identical files, so a diff in `docs/screenshots` means the popup changed. Fonts come from the operating system, so captures from different platforms differ slightly.
 
 Run it after a change to the popup's appearance or copy and commit the updated PNGs with that change. It needs Playwright's Chromium (`pnpm exec playwright install chromium`) and a supported Node.js version that runs TypeScript natively: 22.18 or later on the 22 line, 24, or 26 and later. It is not part of CI.
