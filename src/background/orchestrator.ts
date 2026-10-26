@@ -26,6 +26,9 @@ import type {
   Marketplace,
   MatchScore,
   OfferQuote,
+  PageJobFallback,
+  PageJobPage,
+  PageJobRead,
   ProductExtractionRequest,
   ProductExtractionResult,
   RunComparisonProgressPayload,
@@ -36,6 +39,7 @@ import type {
   SourceExtractionResult
 } from "../shared/types";
 import { getDailyFxTable } from "./fx-service";
+import { canUseOffscreen, cancelOffscreenRun, closeOffscreenDocument, runPageJob } from "./offscreen-client";
 
 const COMPARISON_TTL_MS = 30 * 60 * 1000;
 const CANCELLED_ERROR = "Comparison cancelled by user";
@@ -51,11 +55,15 @@ const MAX_RETRY_DELAY_MS = 1_000;
 const NO_TAB_ERROR = "No tab with id";
 const NO_HOST_ACCESS_ERROR = "Cannot access contents of the page";
 const FRAME_REMOVED_ERROR = "Frame with ID 0 was removed";
+const MAX_PAGE_JOBS = 2;
 
 class RobotCheckError extends Error {}
 
 interface RunToken {
+  key: string;
   cancelled: boolean;
+  controller: AbortController;
+  usedOffscreen: boolean;
   tempTabIds: Set<number>;
   locations: Map<Marketplace, LocationResult>;
 }
@@ -70,7 +78,10 @@ async function closeTempTabs(token: RunToken): Promise<void> {
 
 function cancelRun(token: RunToken): Promise<void> {
   token.cancelled = true;
-  return closeTempTabs(token);
+  token.controller.abort();
+  return Promise.all([token.usedOffscreen ? cancelOffscreenRun(token.key) : undefined, closeTempTabs(token)]).then(
+    () => undefined
+  );
 }
 
 function startRun(activeTabId: number): RunToken {
@@ -80,7 +91,10 @@ function startRun(activeTabId: number): RunToken {
   }
 
   const token: RunToken = {
+    key: crypto.randomUUID(),
     cancelled: false,
+    controller: new AbortController(),
+    usedOffscreen: false,
     tempTabIds: new Set(),
     locations: new Map()
   };
@@ -92,6 +106,9 @@ async function finishRun(activeTabId: number, token: RunToken): Promise<void> {
   await closeTempTabs(token);
   if (RUN_TOKENS.get(activeTabId) === token) {
     RUN_TOKENS.delete(activeTabId);
+  }
+  if (RUN_TOKENS.size === 0) {
+    await closeOffscreenDocument();
   }
 }
 
@@ -407,18 +424,34 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
+function locationRequestFor(source: SourceContext, targetMarket: Marketplace, token: RunToken): LocationRequest | undefined {
+  const countryCode = source.destinationCountryCode;
+  return countryCode && !token.locations.has(targetMarket) ? { marketplace: targetMarket, countryCode } : undefined;
+}
+
+function expectedDestinationFor(source: SourceContext, targetMarket: Marketplace, token: RunToken): string | undefined {
+  const status = token.locations.get(targetMarket)?.status;
+  return status === "SET" || status === "ALREADY_SET" ? source.destinationCountryCode : undefined;
+}
+
+function recordLocation(token: RunToken, targetMarket: Marketplace, location?: LocationResult): void {
+  if (location && location.status !== "NO_WIDGET") {
+    token.locations.set(targetMarket, location);
+  }
+}
+
 async function ensureDeliveryLocation(
   tabId: number,
   source: SourceContext,
   targetMarket: Marketplace,
   token: RunToken
 ): Promise<LocationResult | undefined> {
-  const countryCode = source.destinationCountryCode;
-  if (!countryCode || token.locations.has(targetMarket)) {
+  const request = locationRequestFor(source, targetMarket, token);
+  if (!request) {
     return undefined;
   }
 
-  await writeWindowValue<LocationRequest>(tabId, LOCATION_REQUEST_KEY, { marketplace: targetMarket, countryCode });
+  await writeWindowValue<LocationRequest>(tabId, LOCATION_REQUEST_KEY, request);
   await runScriptFile(tabId, "content/location-setter.js");
 
   let result: LocationResult;
@@ -434,9 +467,7 @@ async function ensureDeliveryLocation(
   }
 
   assertNotCancelled(token);
-  if (result.status !== "NO_WIDGET") {
-    token.locations.set(targetMarket, result);
-  }
+  recordLocation(token, targetMarket, result);
   return result;
 }
 
@@ -456,9 +487,65 @@ async function readTargetTab<T>(
 
 interface PageSpec<T> {
   inTab: (tabId: number) => Promise<T>;
+  job: PageJobPage;
+  fromJob: (read: PageJobRead) => T;
 }
 
-function readPage<T>(
+function once(callback?: () => void): () => void {
+  let called = false;
+  return () => {
+    if (!called) {
+      called = true;
+      callback?.();
+    }
+  };
+}
+
+function requestedFailure(result: PageJobRead | PageJobFallback): LocationResult | undefined {
+  return result.location?.status === "FAILED" && result.locationRequested === true ? result.location : undefined;
+}
+
+async function redoLocationInTab(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  url: string,
+  token: RunToken,
+  failed: LocationResult
+): Promise<LocationResult | undefined> {
+  try {
+    await readTempTab(url, targetMarket, token, (tabId) => ensureDeliveryLocation(tabId, source, targetMarket, token));
+  } catch (error) {
+    assertNotCancelled(token);
+    if (error instanceof RobotCheckError) {
+      throw error;
+    }
+  }
+  if (!token.locations.has(targetMarket)) {
+    token.locations.set(targetMarket, failed);
+  }
+  return token.locations.get(targetMarket);
+}
+
+async function readFallbackTab<T>(
+  token: RunToken,
+  targetMarket: Marketplace,
+  result: PageJobFallback,
+  inTab: () => Promise<T>
+): Promise<T> {
+  const failed = requestedFailure(result);
+  if (!failed) {
+    recordLocation(token, targetMarket, result.location);
+  }
+  try {
+    return await inTab();
+  } finally {
+    if (failed && !token.cancelled && !token.locations.has(targetMarket)) {
+      token.locations.set(targetMarket, failed);
+    }
+  }
+}
+
+async function readPage<T>(
   source: SourceContext,
   targetMarket: Marketplace,
   url: string,
@@ -466,10 +553,57 @@ function readPage<T>(
   spec: PageSpec<T>,
   onRead?: () => void
 ): Promise<T> {
-  return readTargetTab(source, targetMarket, url, token, (tabId) => {
-    onRead?.();
-    return spec.inTab(tabId);
-  });
+  const read = once(onRead);
+  const inTab = (): Promise<T> =>
+    readTargetTab(source, targetMarket, url, token, (tabId) => {
+      read();
+      return spec.inTab(tabId);
+    });
+  if (!canUseOffscreen()) {
+    return inTab();
+  }
+
+  read();
+  for (let attempt = 0; attempt < MAX_PAGE_JOBS; attempt += 1) {
+    token.usedOffscreen = true;
+    const result = await runPageJob(
+      {
+        runKey: token.key,
+        url,
+        page: spec.job,
+        location: locationRequestFor(source, targetMarket, token),
+        expectDestination: expectedDestinationFor(source, targetMarket, token)
+      },
+      token.controller.signal
+    );
+    assertNotCancelled(token);
+    switch (result.outcome) {
+      case "cancelled":
+        throw new Error(CANCELLED_ERROR);
+      case "not-found":
+        return spec.fromJob({ outcome: "read", finalUrl: result.finalUrl });
+      case "robot-check":
+        return inTab();
+      case "fallback":
+        return readFallbackTab(token, targetMarket, result, inTab);
+      case "location-set":
+        recordLocation(token, targetMarket, result.location);
+        break;
+      case "read": {
+        const failed = requestedFailure(result);
+        if (!failed) {
+          recordLocation(token, targetMarket, result.location);
+          return spec.fromJob(result);
+        }
+        const redone = await redoLocationInTab(source, targetMarket, url, token, failed);
+        if (redone?.status !== "SET" && redone?.status !== "ALREADY_SET") {
+          return spec.fromJob(result);
+        }
+        break;
+      }
+    }
+  }
+  return inTab();
 }
 
 function readProductPage(
@@ -485,7 +619,18 @@ function readProductPage(
     sourceDeliverTo: source.deliverTo,
     readOtherOffers: true
   };
-  return readPage(source, targetMarket, url, token, { inTab: (tabId) => extractProductData(tabId, request) }, onRead);
+  return readPage(
+    source,
+    targetMarket,
+    url,
+    token,
+    {
+      inTab: (tabId) => extractProductData(tabId, request),
+      job: { kind: "product", request },
+      fromJob: (read) => read.product
+    },
+    onRead
+  );
 }
 
 type AsinLookup = { status: "MATCHED"; productData: ProductExtractionResult } | { status: "DEAD" | "MISSED" };
@@ -639,7 +784,11 @@ async function searchForMatch(
       targetMarket,
       buildSearchUrl(targetMarket, query),
       token,
-      { inTab: (tabId) => extractSearchCandidates(tabId, request) },
+      {
+        inTab: (tabId) => extractSearchCandidates(tabId, request),
+        job: { kind: "search", request },
+        fromJob: (read) => read.candidates ?? []
+      },
       () => enterPhase("SEARCH")
     );
 

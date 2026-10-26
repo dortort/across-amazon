@@ -11,6 +11,7 @@ import {
   CANCEL_COMPARISON,
   LOAD_SOURCE,
   OFFSCREEN_CANCEL_RUN,
+  OFFSCREEN_PAGE_JOB,
   OFFSCREEN_TARGET,
   RUN_COMPARISON,
   RUN_COMPARISON_PROGRESS,
@@ -25,6 +26,7 @@ import type {
   LoadSourcePayload,
   LocationRequest,
   Marketplace,
+  PageJob,
   ProductExtractionRequest,
   RunComparisonProgressPayload,
   RunComparisonResultPayload,
@@ -46,6 +48,7 @@ import {
 } from "./amazon-pages";
 
 const ACTIVE_TAB_ID = 1;
+const SECOND_TAB_ID = 2;
 const SOURCE_URL = "https://www.amazon.com/dp/B000000001";
 const FIXTURE_ROOT = join(process.cwd(), "tests", "fixtures");
 const POPUP_CLOSED_ERROR = "Could not establish connection. Receiving end does not exist.";
@@ -71,6 +74,9 @@ const CHECKPOINT_PATH = "/checkpoint/continue?token=TEST-CHECKPOINT-TOKEN";
 const CHECKPOINT_HTML =
   "<!doctype html><html><head><title>Amazon.com</title></head><body><p>Checking your browser</p></body></html>";
 const UNPARSED_DOCUMENT_HTML = "<!doctype html><html><head></head><body></body></html>";
+const SHAPELESS_HTML = "<!doctype html><html><head><title>Amazon</title></head><body><div><p>Something went wrong</p></div></body></html>";
+const CHANNEL_CLOSED_ERROR =
+  "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received";
 
 const ECB_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
@@ -207,8 +213,30 @@ interface ServedPage {
   finalUrl: string;
 }
 
+interface PageFetch {
+  label: string;
+  url: string;
+  status: number;
+}
+
 interface HarnessOptions {
   offscreen?: boolean;
+  offscreenCreateFails?: string;
+  offscreenSilent?: boolean;
+  offscreenOpenAtStart?: boolean;
+  closeOffscreenOn?: string[];
+  holdCreate?: Promise<void>;
+  secondActiveUrl?: string;
+  captchaOn?: string[];
+  failFetchOn?: string[];
+  holdFetchOn?: string[];
+  holdFetch?: Promise<void>;
+  shapelessOn?: string[];
+  redirectOn?: Record<string, string>;
+  rejectLocationFetchOn?: Marketplace[];
+  offersStatusOn?: Partial<Record<Marketplace, number>>;
+  fetchKeepsLocationOn?: string[];
+  fetchShowsLocationOn?: Record<string, string>;
   enabledMarketplaces?: Marketplace[];
   comparisonCurrency?: string;
   activeUrl?: string;
@@ -242,6 +270,9 @@ interface Harness {
   eventMarkets: Array<Marketplace | undefined>;
   messages: ExtensionMessage[];
   offscreenMessages: ExtensionMessage[];
+  pageFetches: PageFetch[];
+  pageFetchUrls: () => string[];
+  locationOf: (market: Marketplace) => string | undefined;
   tabsCreate: ReturnType<typeof vi.fn>;
   tabsRemove: ReturnType<typeof vi.fn>;
   executeScript: ReturnType<typeof vi.fn>;
@@ -427,7 +458,9 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
   const eventMarkets: Array<Marketplace | undefined> = [];
   const messages: ExtensionMessage[] = [];
   const offscreenMessages: ExtensionMessage[] = [];
-  let offscreenOpen = false;
+  const pageFetches: PageFetch[] = [];
+  const refusedOffers = new Set<Marketplace>();
+  let offscreenOpen = options.offscreenOpenAtStart === true;
   const listeners: MessageListener[] = [];
   const updatedListeners = new Set<TabUpdatedListener>();
   const removedListeners = new Set<TabRemovedListener>();
@@ -440,8 +473,12 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     eventMarkets.push(market);
   }
 
-  function fixtureDom(group: FixtureGroup, market: Marketplace, url: string): JSDOM {
-    return loadFixtureDom(group, market, url, locations.get(market) ?? "US", options.prepare);
+  function initialLocation(market: Marketplace): string {
+    return options.locations?.[market] ?? "US";
+  }
+
+  function fixtureDom(group: FixtureGroup, market: Marketplace, url: string, location?: string): JSDOM {
+    return loadFixtureDom(group, market, url, location ?? locations.get(market) ?? "US", options.prepare);
   }
 
   function requireTab(tabId: number): FakeTab {
@@ -452,19 +489,23 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     return tab;
   }
 
-  function registerActiveTab(): void {
-    const url = options.activeUrl ?? SOURCE_URL;
+  function registerActiveTab(tabId: number, url: string): void {
     const market = getMarketplaceByDomain(new URL(url).hostname);
     const dom =
       options.activeHtml !== undefined || !market
         ? new JSDOM(options.activeHtml ?? "<!doctype html><html><body></body></html>", { url })
         : fixtureDom("source", market, url);
     const label = market && options.activeHtml === undefined ? `source/${market}` : "active";
-    tabs.set(ACTIVE_TAB_ID, { ...newTab(ACTIVE_TAB_ID, url, label, dom), served: true });
+    tabs.set(tabId, { ...newTab(tabId, url, label, dom), served: true });
   }
 
-  function loadProductPage(market: Marketplace, url: string, requestedAsin?: string): { group: FixtureGroup; dom: JSDOM } {
-    const dom = fixtureDom("product", market, url);
+  function loadProductPage(
+    market: Marketplace,
+    url: string,
+    requestedAsin?: string,
+    location?: string
+  ): { group: FixtureGroup; dom: JSDOM } {
+    const dom = fixtureDom("product", market, url, location);
     const pageAsin = dom.window.document.querySelector<HTMLInputElement>("#ASIN")?.value;
     if (requestedAsin === pageAsin || options.redirectAsinOn?.includes(market)) {
       return { group: "product", dom };
@@ -477,10 +518,10 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
       setPageAsin(dom.window.document, requestedAsin);
       return { group: "product", dom };
     }
-    return { group: "missing", dom: fixtureDom("missing", market, url) };
+    return { group: "missing", dom: fixtureDom("missing", market, url, location) };
   }
 
-  function servePage(market: Marketplace, url: string): ServedPage {
+  function servePage(market: Marketplace, url: string, location?: string): ServedPage {
     const parsed = new URL(url);
     if (parsed.pathname === "/s" && options.checkpointOn?.includes(market)) {
       const checkpointUrl = new URL(CHECKPOINT_PATH, url).href;
@@ -489,8 +530,8 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     const requestedAsin = /\/dp\/([A-Z0-9]{10})/i.exec(parsed.pathname)?.[1]?.toUpperCase();
     const { group, dom } =
       parsed.pathname === "/s"
-        ? { group: "search" as const, dom: fixtureDom("search", market, url) }
-        : loadProductPage(market, url, requestedAsin);
+        ? { group: "search" as const, dom: fixtureDom("search", market, url, location) }
+        : loadProductPage(market, url, requestedAsin, location);
     const label = `${group}/${market}`;
     if (options.robotCheckOn?.includes(label) || options.robotCheckOn?.includes(url)) {
       return { label: `robot-check/${market}`, dom: new JSDOM(ROBOT_CHECK_HTML, { url }), finalUrl: url };
@@ -661,15 +702,22 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
       url: url.href,
       text: async () => body
     });
+    const refusesLocation = via !== "" && options.rejectLocationFetchOn?.includes(market) === true;
     if (url.pathname === LOCATION_FORM_PATH) {
       log(`${via}location form ${url.hostname}`, market);
       await options.holdLocation;
+      if (refusesLocation) {
+        return answer(403, "");
+      }
       const form = options.notOfferedOn?.includes(market) ? "AU-modal.html" : locationFormFile(market);
       return answer(200, readLocationFixture(headers["anti-csrftoken-a2z"] === PAGE_TOKEN ? form : "degraded-modal.html"));
     }
     if (url.pathname === ADDRESS_CHANGE_PATH && init.method === "POST") {
       const countryCode = (JSON.parse(String(init.body)) as { countryCode: string }).countryCode;
       log(`${via}location change ${url.hostname} ${countryCode}`, market);
+      if (refusesLocation) {
+        return answer(403, "");
+      }
       const accepted =
         headers["anti-csrftoken-a2z"] === POST_TOKEN &&
         headers["Content-Type"] === "application/json" &&
@@ -684,16 +732,49 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     if (url.pathname === OFFERS_PATH) {
       log(`${via}offers ${url.hostname}`, market);
       await options.holdOffers;
+      const refusal = options.offersStatusOn?.[market];
+      if (via !== "" && refusal !== undefined && !refusedOffers.has(market)) {
+        refusedOffers.add(market);
+        return answer(refusal, "");
+      }
+      if (via !== "" && options.captchaOn?.includes(`offers/${market}`)) {
+        return answer(200, ROBOT_CHECK_HTML);
+      }
       const file = options.offersOn?.[market];
       return file ? answer(200, readOffersFixture(file)) : answer(404, "");
     }
     return answer(404, "");
   }
 
+  function listed(labels: string[] | undefined, label: string, url: string): boolean {
+    return labels?.includes(label) === true || labels?.includes(url) === true;
+  }
+
   async function answerPage(market: Marketplace, url: URL): Promise<FetchAnswer> {
-    const page = servePage(market, url.href);
+    const served = servePage(market, url.href);
+    const shown = listed(options.fetchKeepsLocationOn, served.label, url.href)
+      ? initialLocation(market)
+      : options.fetchShowsLocationOn?.[served.label];
+    const page = shown ? servePage(market, url.href, shown) : served;
+    if (listed(options.captchaOn, page.label, url.href)) {
+      log(`fetch robot-check/${market}`, market);
+      pageFetches.push({ label: `robot-check/${market}`, url: url.href, status: 200 });
+      return pageResponse(ROBOT_CHECK_HTML, url.href, 200);
+    }
+    const status = page.status ?? 200;
     log(`fetch ${page.label}`, market);
-    return pageResponse(page.dom.serialize(), page.finalUrl, page.status ?? 200);
+    pageFetches.push({ label: page.label, url: url.href, status });
+    if (listed(options.failFetchOn, page.label, url.href)) {
+      throw new TypeError("Failed to fetch");
+    }
+    if (listed(options.holdFetchOn, page.label, url.href)) {
+      await (options.holdFetch ?? new Promise<never>(() => undefined));
+    }
+    if (listed(options.shapelessOn, page.label, url.href)) {
+      return pageResponse(SHAPELESS_HTML, url.href, 200);
+    }
+    const finalUrl = options.redirectOn?.[page.label] ?? options.redirectOn?.[url.href] ?? page.finalUrl;
+    return pageResponse(page.dom.serialize(), finalUrl, status);
   }
 
   const fetchMock = vi.fn(async (input: string, init: RequestInit = {}): Promise<FetchAnswer> => {
@@ -724,6 +805,18 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     if (!offscreenOpen) {
       throw new Error(POPUP_CLOSED_ERROR);
     }
+    if (copy.type === OFFSCREEN_PAGE_JOB) {
+      const { url } = copy.payload as PageJob;
+      const market = getMarketplaceByDomain(new URL(url).hostname);
+      if (options.offscreenSilent) {
+        return new Promise<never>(() => undefined);
+      }
+      if (market && listed(options.closeOffscreenOn, servePage(market, url).label, url)) {
+        offscreenOpen = false;
+        log("offscreen crash");
+        throw new Error(CHANNEL_CLOSED_ERROR);
+      }
+    }
     return new Promise((resolve) => {
       let answered = false;
       const keepsChannel = offscreenListener(copy, WORKER_SENDER, (response) => {
@@ -738,6 +831,10 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
 
   const offscreenMock = {
     createDocument: vi.fn(async () => {
+      await options.holdCreate;
+      if (options.offscreenCreateFails) {
+        throw new Error(options.offscreenCreateFails);
+      }
       if (offscreenOpen) {
         throw new Error(SINGLE_DOCUMENT_ERROR);
       }
@@ -823,7 +920,11 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     tabsCreate,
     tabsRemove,
     executeScript,
-    openTempTabs: () => [...tabs.values()].filter((tab) => tab.id !== ACTIVE_TAB_ID).map((tab) => tab.label),
+    pageFetches,
+    pageFetchUrls: () => pageFetches.map((fetched) => fetched.url),
+    locationOf: (market) => locations.get(market),
+    openTempTabs: () =>
+      [...tabs.values()].filter((tab) => tab.id !== ACTIVE_TAB_ID && tab.id !== SECOND_TAB_ID).map((tab) => tab.label),
     tabListenerCount: () => updatedListeners.size + removedListeners.size,
     documentIdle,
     silentRemove,
@@ -838,7 +939,10 @@ function createHarness(options: HarnessOptions, offscreenListener: OffscreenList
     }
   };
 
-  registerActiveTab();
+  registerActiveTab(ACTIVE_TAB_ID, options.activeUrl ?? SOURCE_URL);
+  if (options.secondActiveUrl) {
+    registerActiveTab(SECOND_TAB_ID, options.secondActiveUrl);
+  }
   return harness;
 }
 
@@ -856,18 +960,18 @@ async function loadSourceViaWorker(harness: Harness): Promise<LoadSourcePayload>
   return (await harness.dispatch({ type: LOAD_SOURCE, payload: { activeTabId: ACTIVE_TAB_ID } })) as LoadSourcePayload;
 }
 
-async function runViaWorker(harness: Harness, runId = "run-1"): Promise<RunComparisonResultPayload> {
-  const response = await harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId } });
+async function runViaWorker(harness: Harness, runId = "run-1", activeTabId = ACTIVE_TAB_ID): Promise<RunComparisonResultPayload> {
+  const response = await harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId, runId } });
   expect(response).toEqual({ ok: true });
   return resultPayloads(harness, runId).at(-1) as RunComparisonResultPayload;
 }
 
-function startRunViaWorker(harness: Harness, runId: string): Promise<unknown> {
-  return harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID, runId } });
+function startRunViaWorker(harness: Harness, runId: string, activeTabId = ACTIVE_TAB_ID): Promise<unknown> {
+  return harness.dispatch({ type: RUN_COMPARISON, payload: { activeTabId, runId } });
 }
 
-function cancelViaWorker(harness: Harness): Promise<unknown> {
-  return harness.dispatch({ type: CANCEL_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } });
+function cancelViaWorker(harness: Harness, activeTabId = ACTIVE_TAB_ID): Promise<unknown> {
+  return harness.dispatch({ type: CANCEL_COMPARISON, payload: { activeTabId } });
 }
 
 function progressPayloads(harness: Harness, runId?: string): RunComparisonProgressPayload[] {
@@ -957,6 +1061,26 @@ function marketEvents(harness: Harness, market: Marketplace): string[] {
   return harness.events.filter((_event, index) => harness.eventMarkets[index] === market);
 }
 
+function openedOn(harness: Harness, market: Marketplace): string[] {
+  return marketEvents(harness, market)
+    .filter((event) => event.startsWith("open "))
+    .map((event) => event.slice("open ".length));
+}
+
+function fetchedOn(harness: Harness, market: Marketplace): string[] {
+  return harness.pageFetches.filter((fetched) => fetched.label.endsWith(`/${market}`)).map((fetched) => fetched.label);
+}
+
+function pageJobs(harness: Harness): PageJob[] {
+  return harness.offscreenMessages
+    .filter((message) => message.type === OFFSCREEN_PAGE_JOB)
+    .map((message) => message.payload as PageJob);
+}
+
+function countOf(harness: Harness, event: string): number {
+  return harness.events.filter((logged) => logged === event).length;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -1039,14 +1163,16 @@ describe("background orchestrator", () => {
         notes: ["Matched by search", "Match confidence: HIGH"]
       });
 
-      const opened = (market: Marketplace) =>
-        marketEvents(harness, market).filter((event) => event.startsWith("open ")).map((event) => event.slice("open ".length));
-      expect(opened("UK")).toEqual(["product/UK"]);
-      expect(opened("DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
-      expect(opened("FR")).toEqual(["missing/FR", "search/FR"]);
-      expect(opened("IT")).toEqual(["missing/IT", "search/IT", "product/IT"]);
-      expect(opened("ES")).toEqual(["product/ES", "search/ES", "product/ES"]);
-      expect(opened("JP")).toEqual(["product/JP"]);
+      expect(fetchedOn(harness, "UK")).toEqual(["product/UK"]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
+      expect(fetchedOn(harness, "FR")).toEqual(["missing/FR", "search/FR"]);
+      expect(fetchedOn(harness, "IT")).toEqual(["missing/IT", "search/IT", "product/IT"]);
+      expect(fetchedOn(harness, "ES")).toEqual(["product/ES", "search/ES", "product/ES"]);
+      expect(fetchedOn(harness, "JP")).toEqual(["product/JP"]);
+      expect(openedOn(harness, "JP")).toEqual(["product/JP"]);
+      for (const market of ["UK", "DE", "FR", "IT", "ES"] as const) {
+        expect(openedOn(harness, market)).toEqual([]);
+      }
       expect(harness.openTempTabs()).toEqual([]);
 
       const jpOpen = progressPayloads(harness).find(
@@ -1071,15 +1197,15 @@ describe("background orchestrator", () => {
       });
     });
 
-    it("loads FX rates before opening any marketplace tab", async () => {
+    it("loads FX rates before fetching any marketplace page", async () => {
       const harness = await bootServiceWorker(fullRunOptions);
 
       await runViaWorker(harness);
 
       const fxIndex = harness.events.indexOf("fx www.ecb.europa.eu");
-      const firstOpenIndex = harness.events.findIndex((event) => event.startsWith("open "));
+      const firstFetchIndex = harness.events.findIndex((event) => event.startsWith("fetch "));
       expect(fxIndex).toBeGreaterThan(-1);
-      expect(fxIndex).toBeLessThan(firstOpenIndex);
+      expect(fxIndex).toBeLessThan(firstFetchIndex);
     });
   });
 
@@ -1188,6 +1314,26 @@ describe("background orchestrator", () => {
         "progress DONE"
       ]);
     });
+
+    it("emits each phase at the right point of the fetch path", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+
+      await runViaWorker(harness);
+
+      expect(eventsAfterStartup(harness)).toEqual([
+        "progress OPEN DE",
+        "offscreen create",
+        "fetch missing/DE",
+        "progress SEARCH DE",
+        "fetch search/DE",
+        "progress MATCH DE",
+        "progress READ DE",
+        "fetch product/DE",
+        "progress DONE",
+        "offscreen close"
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
   });
 
   describe("parallel reads", () => {
@@ -1278,26 +1424,23 @@ describe("background orchestrator", () => {
       notes: ["Matched by ASIN"]
     };
 
-    it("reads a marketplace that carries the source ASIN straight from its product page, in one tab", async () => {
+    it("reads a marketplace that carries the source ASIN straight from its product page, in one page read", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], sourceAsinOn: ["DE"] });
 
       const payload = await runViaWorker(harness);
 
       expect(payload.error).toBeUndefined();
       expect(payload.results).toEqual([ASIN_DE_RESULT]);
-      expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
-      expect(harness.tabsCreate).toHaveBeenCalledWith({ url: "https://www.amazon.de/dp/B000000001", active: false });
+      expect(harness.pageFetchUrls()).toEqual(["https://www.amazon.de/dp/B000000001"]);
       expect(eventsAfterStartup(harness)).toEqual([
         "progress OPEN DE",
-        "open product/DE",
-        "ready product/DE",
-        "inject content/location-setter.js product/DE",
-        "inject content/product-extractor.js product/DE",
-        "close product/DE",
+        "offscreen create",
+        "fetch product/DE",
         "progress READ DE",
-        "progress DONE"
+        "progress DONE",
+        "offscreen close"
       ]);
-      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
     it("reports OPEN then READ for a marketplace matched by ASIN and the full search phases for the others", async () => {
@@ -1322,7 +1465,7 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+      expect(harness.pageFetchUrls()).toEqual([
         "https://www.amazon.de/dp/B000000001",
         "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20Model%20X100%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue",
         "https://www.amazon.de/dp/B000000005"
@@ -1341,7 +1484,7 @@ describe("background orchestrator", () => {
 
       const payload = await runViaWorker(harness);
 
-      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+      expect(harness.pageFetchUrls()).toEqual([
         "https://www.amazon.de/dp/B000000001",
         "https://www.amazon.de/s?k=Acme%20AW-2400X",
         "https://www.amazon.de/dp/B000000005"
@@ -1365,7 +1508,7 @@ describe("background orchestrator", () => {
 
       const payload = await runViaWorker(harness);
 
-      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+      expect(harness.pageFetchUrls()).toEqual([
         "https://www.amazon.de/dp/B000000001",
         modelQueryUrl,
         "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20AW-2400X%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue",
@@ -1390,11 +1533,8 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-      expect(marketEvents(harness, "DE").filter((event) => event.startsWith("open "))).toEqual([
-        "open product/DE",
-        "open search/DE",
-        "open product/DE"
-      ]);
+      expect(fetchedOn(harness, "DE")).toEqual(["product/DE", "search/DE", "product/DE"]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
     it("does not trust the source ASIN on a page whose title has nothing in common with the source", async () => {
@@ -1412,7 +1552,7 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-      expect(harness.events).toContain("open search/DE");
+      expect(harness.events).toContain("fetch search/DE");
     });
 
     it("reports a page for the source ASIN that shows no price as unavailable, with Amazon's reason, instead of searching", async () => {
@@ -1455,8 +1595,9 @@ describe("background orchestrator", () => {
           ]
         }
       ]);
-      expect(harness.events).not.toContain("open search/DE");
-      expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+      expect(harness.events).not.toContain("fetch search/DE");
+      expect(harness.pageFetchUrls()).toHaveLength(1);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
       expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual(["OPEN", "READ", undefined]);
     });
 
@@ -1484,7 +1625,7 @@ describe("background orchestrator", () => {
 
         expect(payload.error).toBeUndefined();
         expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-        expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+        expect(harness.pageFetchUrls()).toEqual([
           SOURCE_ASIN_URL,
           TITLE_QUERY_URL,
           "https://www.amazon.de/dp/B000000005"
@@ -1525,14 +1666,14 @@ describe("background orchestrator", () => {
         const payload = await runViaWorker(harness);
 
         expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-        expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+        expect(harness.pageFetchUrls()).toEqual([
           SOURCE_ASIN_URL,
           TITLE_QUERY_URL,
           "https://www.amazon.de/dp/B000000005"
         ]);
       });
 
-      it("quotes a page for the source ASIN that cannot be dispatched to the address in one tab, without searching", async () => {
+      it("quotes a page for the source ASIN that cannot be dispatched to the address in one page read, without searching", async () => {
         const harness = await bootServiceWorker({
           enabledMarketplaces: ["US", "DE"],
           sourceAsinOn: ["DE"],
@@ -1556,7 +1697,8 @@ describe("background orchestrator", () => {
             ]
           }
         ]);
-        expect(harness.tabsCreate).toHaveBeenCalledTimes(1);
+        expect(harness.pageFetchUrls()).toEqual([SOURCE_ASIN_URL]);
+        expect(harness.tabsCreate).not.toHaveBeenCalled();
         expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual(["OPEN", "READ", undefined]);
         expect(harness.openTempTabs()).toEqual([]);
       });
@@ -1621,6 +1763,30 @@ describe("background orchestrator", () => {
       expect(harness.openTempTabs()).toEqual([]);
       expect(harness.tabListenerCount()).toBe(0);
     });
+
+    it("stops without searching when Stop arrives while the page for the source ASIN downloads", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        sourceAsinOn: ["DE"],
+        holdFetchOn: ["product/DE"]
+      });
+
+      const run = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("fetch product/DE"));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      await run;
+
+      expect(resultPayloads(harness, "run-1")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
+      ]);
+      expect(marketEvents(harness, "DE")).toEqual(["progress OPEN DE", "fetch product/DE"]);
+      expect(harness.events.slice(harness.events.indexOf("fetch product/DE"))).toEqual([
+        "fetch product/DE",
+        "offscreen cancel",
+        "offscreen close"
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
   });
 
   describe("delivery address", () => {
@@ -1637,26 +1803,25 @@ describe("background orchestrator", () => {
       expect(payload.results).toEqual([
         { ...EXPECTED_DE_RESULT, notes: ["Matched by search", "Match confidence: HIGH", "Delivery location set to Switzerland"] }
       ]);
-      expect(marketEvents(harness, "DE").slice(0, 10)).toEqual([
+      expect(marketEvents(harness, "DE")).toEqual([
         "progress OPEN DE",
-        "open missing/DE",
-        "ready missing/DE",
-        "inject content/location-setter.js missing/DE",
-        "location form www.amazon.de",
-        "location change www.amazon.de CH",
-        "close missing/DE",
-        "open missing/DE",
-        "ready missing/DE",
-        "inject content/product-extractor.js missing/DE"
+        "fetch missing/DE",
+        "progress SEARCH DE",
+        "fetch search/DE",
+        "fetch location form www.amazon.de",
+        "fetch location change www.amazon.de CH",
+        "fetch search/DE",
+        "progress MATCH DE",
+        "progress READ DE",
+        "fetch product/DE"
       ]);
-      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url)).toEqual([
+      expect(harness.pageFetchUrls()).toEqual([
         "https://www.amazon.de/dp/B000000001",
-        "https://www.amazon.de/dp/B000000001",
+        SEARCH_URL,
         SEARCH_URL,
         "https://www.amazon.de/dp/B000000005"
       ]);
-      expect(harness.events.filter((event) => event.startsWith("inject content/location-setter.js"))).toHaveLength(1);
-      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
     it("reports a market whose location could not be set and whose page still quotes its own country", async () => {
@@ -1679,13 +1844,16 @@ describe("background orchestrator", () => {
           ]
         }
       ]);
-      expect(harness.events).toContain("location change www.amazon.de CH");
-      expect(marketEvents(harness, "DE").filter((event) => event.startsWith("open "))).toEqual([
-        "open missing/DE",
-        "open search/DE",
-        "open product/DE"
+      expect(harness.events.filter((event) => event.includes("location change "))).toEqual([
+        "fetch location change www.amazon.de CH",
+        "location change www.amazon.de CH"
       ]);
-      expect(harness.events.filter((event) => event.startsWith("inject content/location-setter.js"))).toHaveLength(1);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+      expect(harness.events.filter((event) => event.startsWith("inject content/location-setter.js"))).toEqual([
+        "inject content/location-setter.js search/DE"
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
     });
 
     it("compares a market whose page shows the same town and postcode as the source page", async () => {
@@ -1710,7 +1878,12 @@ describe("background orchestrator", () => {
     const SET_NOTE = "Delivery location set to Switzerland";
 
     function locationEvents(harness: Harness): string[] {
-      return harness.events.filter((event) => event.startsWith("location ") || event.startsWith("inject content/location-setter.js"));
+      return harness.events.filter(
+        (event) =>
+          event.startsWith("location ") ||
+          event.startsWith("fetch location ") ||
+          event.startsWith("inject content/location-setter.js")
+      );
     }
 
     it("leaves a store that already delivers to the destination untouched", async () => {
@@ -1724,20 +1897,20 @@ describe("background orchestrator", () => {
         ["DE", "OK"]
       ]);
       expect(payload.results.flatMap((result) => result.notes ?? []).filter((note) => note.startsWith("Delivery location"))).toEqual([]);
-      expect(harness.events.filter((event) => event.startsWith("location "))).toEqual([]);
-      expect(harness.events.filter((event) => event.startsWith("inject content/location-setter.js"))).toEqual([
-        "inject content/location-setter.js missing/UK",
-        "inject content/location-setter.js missing/DE"
+      expect(harness.events.filter((event) => event.includes("location "))).toEqual([]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+      expect(harness.fetch.mock.calls.map(([url]) => url as string).filter((url) => !harness.pageFetchUrls().includes(url))).toEqual([
+        "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
       ]);
-      expect(harness.fetch.mock.calls.map(([url]) => new URL(url as string).hostname)).toEqual(["www.ecb.europa.eu"]);
     });
 
-    it("sets each store once per run, on the first of its tabs that has the location widget, and reopens that tab", async () => {
+    it("sets each store once per run, on the first of its pages that has the location widget, and reads that page again", async () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE"],
         locations: { US: "CH" },
+        redirectAsinOn: ["DE"],
         prepare: (group, _market, document) => {
-          if (group === "missing") {
+          if (group === "product" && document.URL === "https://www.amazon.de/dp/B000000001") {
             removeLocationFields(document);
           }
         }
@@ -1750,30 +1923,138 @@ describe("background orchestrator", () => {
       ]);
       expect(marketEvents(harness, "DE")).toEqual([
         "progress OPEN DE",
-        "open missing/DE",
-        "ready missing/DE",
-        "inject content/location-setter.js missing/DE",
-        "inject content/product-extractor.js missing/DE",
-        "close missing/DE",
-        "open search/DE",
-        "ready search/DE",
+        "fetch product/DE",
+        "progress SEARCH DE",
+        "fetch search/DE",
+        "fetch location form www.amazon.de",
+        "fetch location change www.amazon.de CH",
+        "fetch search/DE",
+        "progress MATCH DE",
+        "progress READ DE",
+        "fetch product/DE"
+      ]);
+      expect(pageJobs(harness).map((job) => [job.location?.countryCode, job.expectDestination])).toEqual([
+        ["CH", undefined],
+        ["CH", undefined],
+        [undefined, "CH"],
+        [undefined, "CH"]
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("sets the location from a tab when the store refuses the extension's request, then downloads the page again", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], locations: { US: "CH" }, rejectLocationFetchOn: ["DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        { ...EXPECTED_DE_RESULT, notes: ["Matched by search", "Match confidence: HIGH", SET_NOTE] }
+      ]);
+      expect(locationEvents(harness)).toEqual([
+        "fetch location form www.amazon.de",
         "inject content/location-setter.js search/DE",
         "location form www.amazon.de",
-        "location change www.amazon.de CH",
-        "close search/DE",
-        "open search/DE",
-        "ready search/DE",
-        "progress SEARCH DE",
-        "inject content/search-extractor.js search/DE",
-        "close search/DE",
-        "progress MATCH DE",
-        "open product/DE",
-        "ready product/DE",
-        "progress READ DE",
-        "inject content/product-extractor.js product/DE",
-        "close product/DE"
+        "location change www.amazon.de CH"
+      ]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "search/DE", "product/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("keeps the refused location step on record when the tab that should redo it cannot be scripted, so later pages do not ask again", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        rejectLocationFetchOn: ["DE"],
+        onTabCreated: (tab) => {
+          if (tab.label === "search/DE") {
+            tab.document = "no-access";
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "DESTINATION_MISMATCH",
+          confidence: 0.9,
+          productUrl: "https://www.amazon.de/dp/B000000005",
+          notes: [
+            "Matched by search",
+            "Match confidence: HIGH",
+            "Delivery location not set: Amazon answered HTTP 403",
+            "Destination mismatch detected (US)",
+            "Destination on product page does not match source destination"
+          ]
+        }
+      ]);
+      expect(locationEvents(harness)).toEqual(["fetch location form www.amazon.de"]);
+      expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+      expect(harness.events).toContain("no access search/DE");
+      expect(pageJobs(harness).map((job) => [job.url, job.location?.countryCode])).toEqual([
+        ["https://www.amazon.de/dp/B000000001", "CH"],
+        [expect.stringContaining("https://www.amazon.de/s?k="), "CH"],
+        ["https://www.amazon.de/dp/B000000005", undefined]
       ]);
       expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reads a page in a tab when its download still shows another destination after the location was set", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        fetchKeepsLocationOn: ["search/DE"]
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        { ...EXPECTED_DE_RESULT, notes: ["Matched by search", "Match confidence: HIGH", SET_NOTE] }
+      ]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "search/DE", "product/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+      expect(harness.events).not.toContain("inject content/location-setter.js search/DE");
+    });
+
+    it("expects the set destination on every later page of the store and reads one that shows another in a tab", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        fetchKeepsLocationOn: ["product/DE"]
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        { ...EXPECTED_DE_RESULT, notes: ["Matched by search", "Match confidence: HIGH", SET_NOTE] }
+      ]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "search/DE", "product/DE"]);
+      expect(pageJobs(harness).at(-1)).toMatchObject({ url: "https://www.amazon.de/dp/B000000005", expectDestination: "CH" });
+      expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+      expect(harness.events).not.toContain("inject content/location-setter.js product/DE");
+    });
+
+    it("expects the destination a store already delivers to on its later pages and reads one that shows another in a tab", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH", DE: "CH" },
+        fetchShowsLocationOn: { "product/DE": "FR" }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
+      expect(pageJobs(harness).map((job) => [job.location?.countryCode, job.expectDestination])).toEqual([
+        ["CH", undefined],
+        ["CH", undefined],
+        [undefined, "CH"]
+      ]);
+      expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+      expect(locationEvents(harness)).toEqual([]);
     });
 
     it("does not post a destination the store does not offer", async () => {
@@ -1785,7 +2066,7 @@ describe("background orchestrator", () => {
 
       const payload = await runViaWorker(harness);
 
-      expect(locationEvents(harness)).toEqual(["inject content/location-setter.js missing/AU", "location form www.amazon.com.au"]);
+      expect(locationEvents(harness)).toEqual(["fetch location form www.amazon.com.au"]);
       expect(payload.results).toHaveLength(1);
       expect(payload.results[0]).toMatchObject({ marketplace: "AU", status: "DESTINATION_MISMATCH" });
       expect(payload.results[0].notes).toEqual(
@@ -1798,7 +2079,7 @@ describe("background orchestrator", () => {
 
       const payload = await runViaWorker(harness);
 
-      expect(locationEvents(harness)).toEqual(["inject content/location-setter.js missing/DE"]);
+      expect(locationEvents(harness)).toEqual([]);
       expect(payload.results[0]).toMatchObject({ marketplace: "DE", status: "DESTINATION_MISMATCH" });
       expect(payload.results[0].notes).toEqual([
         "Matched by search",
@@ -1831,10 +2112,57 @@ describe("background orchestrator", () => {
         NOT_ACCEPTED_NOTE,
         "Destination on product page does not match source destination"
       ]);
+      expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
     });
 
     it("stops when the run is cancelled during a location change", async () => {
       const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        locations: { US: "CH" },
+        holdLocation: deferred().promise
+      });
+
+      const run = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("fetch location form www.amazon.de"));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      await run;
+
+      expect(resultPayloads(harness, "run-1")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
+      ]);
+      expect(harness.events.slice(harness.events.indexOf("fetch location form www.amazon.de"))).toEqual([
+        "fetch location form www.amazon.de",
+        "offscreen cancel",
+        "offscreen close"
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("sends no address change when the location form answers after Stop", async () => {
+      const form = deferred();
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        holdLocation: form.promise
+      });
+
+      const run = startRunViaWorker(harness, "run-1");
+      await vi.waitFor(() => expect(harness.events).toContain("fetch location form www.amazon.de"));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      await run;
+      form.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(resultPayloads(harness, "run-1")).toEqual([
+        expect.objectContaining({ error: CANCELLED_ERROR, results: [], runId: "run-1" })
+      ]);
+      expect(locationEvents(harness)).toEqual(["fetch location form www.amazon.de"]);
+      expect(harness.locationOf("DE")).toBe("US");
+    });
+
+    it("stops when the run is cancelled during a location change in a tab", async () => {
+      const harness = await bootServiceWorker({
+        ...TAB_PATH,
         enabledMarketplaces: ["US", "DE", "UK"],
         locations: { US: "CH" },
         holdLocation: deferred().promise
@@ -1856,10 +2184,55 @@ describe("background orchestrator", () => {
       expect(harness.tabListenerCount()).toBe(0);
     });
 
-    it("times out a location change that never answers and reads the page as it is", async () => {
+    it("times out a location change that never answers, tries it once in a tab and reads the page as it is", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       try {
         const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          locations: { US: "CH" },
+          holdLocation: deferred().promise
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("fetch location form www.amazon.de"));
+        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.waitFor(() => expect(harness.events).toContain("location form www.amazon.de"));
+        await vi.advanceTimersByTimeAsync(20_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toEqual([
+          {
+            marketplace: "DE",
+            status: "DESTINATION_MISMATCH",
+            confidence: 0.9,
+            productUrl: "https://www.amazon.de/dp/B000000005",
+            notes: [
+              "Matched by search",
+              "Match confidence: HIGH",
+              "Delivery location not set: timed out after 20 seconds",
+              "Destination mismatch detected (US)",
+              "Destination on product page does not match source destination"
+            ]
+          }
+        ]);
+        expect(locationEvents(harness)).toEqual([
+          "fetch location form www.amazon.de",
+          "inject content/location-setter.js search/DE",
+          "location form www.amazon.de"
+        ]);
+        expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+        expect(harness.openTempTabs()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("times out a location change in a tab that never answers and reads the page as it is", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const harness = await bootServiceWorker({
+          ...TAB_PATH,
           enabledMarketplaces: ["US", "DE"],
           locations: { US: "CH" },
           holdLocation: deferred().promise
@@ -1898,11 +2271,11 @@ describe("background orchestrator", () => {
 
       await runViaWorker(harness);
 
-      expect(harness.events.filter((event) => event.startsWith("location change "))).toEqual([
-        "location change www.amazon.co.uk CH",
-        "location change www.amazon.de CH"
+      expect(harness.events.filter((event) => event.includes("location change "))).toEqual([
+        "fetch location change www.amazon.co.uk CH",
+        "fetch location change www.amazon.de CH"
       ]);
-      expect(harness.events.filter((event) => event.includes("www.amazon.com ") || event.endsWith("www.amazon.com"))).toEqual([]);
+      expect(harness.events.filter((event) => event.split(" ").some((word) => word === "www.amazon.com"))).toEqual([]);
       expect(harness.events.filter((event) => event.includes("source/US"))).toEqual([
         "inject content/source-extractor.js source/US",
         "inject content/product-extractor.js source/US"
@@ -2061,11 +2434,39 @@ describe("background orchestrator", () => {
       ]);
       expect(harness.fetch).toHaveBeenCalledWith(
         offersUrl("https://www.amazon.de", "B000000001"),
-        expect.objectContaining({ credentials: "same-origin" })
+        expect.objectContaining({ credentials: "include" })
       );
-      expect(harness.events.filter((event) => event.startsWith("offers "))).toEqual(["offers www.amazon.de"]);
-      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.events.filter((event) => event.includes("offers "))).toEqual(["fetch offers www.amazon.de"]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
+
+    it.each([
+      ["answers the extension's first request with HTTP 403", { offersStatusOn: { DE: 403 } }],
+      ["answers the extension's first request with a robot check", { captchaOn: ["offers/DE"] }]
+    ] as Array<[string, HarnessOptions]>)(
+      "reads the offers from the product page in a tab when the store %s, without setting its location again",
+      async (_case, refusal) => {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          sourceAsinOn: ["DE"],
+          locations: { US: "CH", DE: "CH" },
+          offersOn: { DE: "DE-four-new-offers.html" },
+          prepare: onlyOtherSellersOn("DE"),
+          ...refusal
+        });
+
+        const payload = await runViaWorker(harness);
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toMatchObject([
+          { marketplace: "DE", status: "OK", otherSeller: STAR_BRICK_CITY, normalizedTotal: { amount: 763.03, currency: "USD" } }
+        ]);
+        expect(harness.events.filter((event) => event.includes("offers "))).toEqual(["fetch offers www.amazon.de", "offers www.amazon.de"]);
+        expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+        expect(harness.events).not.toContain("inject content/location-setter.js product/DE");
+        expect(harness.openTempTabs()).toEqual([]);
+      }
+    );
 
     it("quotes the amazon.co.uk offer that is cheapest delivered in the comparison currency, not Amazon's first", async () => {
       const harness = await bootServiceWorker({
@@ -2153,6 +2554,102 @@ describe("background orchestrator", () => {
         }
       ]);
       expect(payload.results[0]).not.toHaveProperty("otherSeller");
+      expect(harness.events.filter((event) => event.includes("offers "))).toEqual(["fetch offers www.amazon.de", "offers www.amazon.de"]);
+      expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+    });
+
+    it("sets the location in the offers tab when the extension's location request on that page was refused too", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        locations: { US: "CH" },
+        rejectLocationFetchOn: ["DE"],
+        offersStatusOn: { DE: 403 },
+        offersOn: { DE: "DE-four-new-offers.html" },
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "DE") {
+            offerOnlyOtherSellers(document);
+            removeElement(document, "#countryCode");
+            removeElement(document, "#glow-ingress-line2");
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toMatchObject([
+        {
+          marketplace: "DE",
+          status: "OK",
+          otherSeller: STAR_BRICK_CITY,
+          notes: ["Matched by ASIN", "Delivery location set to Switzerland", "Quoted another seller's offer", "Import fees not displayed for destination"]
+        }
+      ]);
+      expect(harness.events.filter((event) => event.includes("location ") || event.includes("offers "))).toEqual([
+        "fetch location form www.amazon.de",
+        "fetch offers www.amazon.de",
+        "location form www.amazon.de",
+        "location change www.amazon.de CH",
+        "offers www.amazon.de"
+      ]);
+      expect(openedOn(harness, "DE")).toEqual(["product/DE", "product/DE"]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("keeps the refused location step on record when the tab that should redo it fails, so later pages do not ask again", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        locations: { US: "CH" },
+        rejectLocationFetchOn: ["DE"],
+        offersStatusOn: { DE: 403 },
+        offersOn: { DE: "DE-four-new-offers.html" },
+        failScriptOn: "product/DE",
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "DE") {
+            offerOnlyOtherSellers(document);
+            removeElement(document, "#countryCode");
+            removeElement(document, "#glow-ingress-line2");
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toMatchObject([{ marketplace: "DE", status: "DESTINATION_MISMATCH" }]);
+      expect(payload.results[0].notes).toContain("Delivery location not set: Amazon answered HTTP 403");
+      expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+      expect(pageJobs(harness).map((job) => [job.url, job.location?.countryCode])).toEqual([
+        ["https://www.amazon.de/dp/B000000001", "CH"],
+        [expect.stringContaining("https://www.amazon.de/s?k="), undefined],
+        ["https://www.amazon.de/dp/B000000005", undefined]
+      ]);
+      expect(harness.events.filter((event) => event.includes("location "))).toEqual(["fetch location form www.amazon.de"]);
+    });
+
+    it("times out an offers request that never answers after 15 seconds and reports the store unavailable", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          holdOffers: deferred().promise,
+          prepare: onlyOtherSellersOn("DE")
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("fetch offers www.amazon.de"));
+        await vi.advanceTimersByTimeAsync(15_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toMatchObject([{ marketplace: "DE", status: "UNAVAILABLE" }]);
+        expect(payload.results[0].notes).toContain("Other offers could not be read: timed out after 15 seconds");
+        expect(harness.tabsCreate).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("times out a product read that never answers, as it does the location step, and closes the tab", async () => {
@@ -2293,11 +2790,8 @@ describe("background orchestrator", () => {
           notes: ["Matched by search", "Match confidence: HIGH", "Switched to the Blue variant"]
         }
       ]);
-      expect(harness.tabsCreate.mock.calls.map(([options]) => (options as { url: string }).url).slice(-2)).toEqual([
-        RED_LISTING_URL,
-        `https://www.amazon.de/dp/${BLUE_VARIANT_ASIN}`
-      ]);
-      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.pageFetchUrls().slice(-2)).toEqual([RED_LISTING_URL, `https://www.amazon.de/dp/${BLUE_VARIANT_ASIN}`]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
     it("reports no confident match when the listing's twister does not offer the source colour", async () => {
@@ -2319,11 +2813,38 @@ describe("background orchestrator", () => {
           notes: ["Matched by search", "Closest listing is another variant: Red"]
         }
       ]);
-      expect(marketEvents(harness, "DE").filter((event) => event.startsWith("open "))).toEqual([
-        "open missing/DE",
-        "open search/DE",
-        "open product/DE"
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("reports no confident match, as a tab would, when the page for the source colour answers HTTP 404", async () => {
+      const variantOptions: HarnessOptions = {
+        enabledMarketplaces: ["US", "DE"],
+        prepare: colourPages((url) => (url === RED_LISTING_URL ? "Red" : "Blue"), [
+          ["B000000005", "Red"],
+          [BLUE_VARIANT_ASIN, "Blue"]
+        ])
+      };
+      const inTabs = await runViaWorker(await bootServiceWorker({ ...TAB_PATH, ...variantOptions }));
+      const harness = await bootServiceWorker(variantOptions);
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "NO_CONFIDENT_MATCH",
+          confidence: 0,
+          notes: ["Matched by search", "Closest listing is another variant: Red"]
+        }
       ]);
+      expect(payload.results).toEqual(inTabs.results);
+      expect(harness.pageFetches.at(-1)).toEqual({
+        label: "missing/DE",
+        url: `https://www.amazon.de/dp/${BLUE_VARIANT_ASIN}`,
+        status: 404
+      });
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
     it("reports no confident match when the page for the source colour shows another colour too", async () => {
@@ -2444,7 +2965,7 @@ describe("background orchestrator", () => {
   });
 
   describe("cache", () => {
-    it("answers a repeat run from the cache with the baseline and FX table and opens no tabs", async () => {
+    it("answers a repeat run from the cache with the baseline and FX table, fetches no page and opens no tabs", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"] });
       const first = await runViaWorker(harness);
 
@@ -2465,6 +2986,7 @@ describe("background orchestrator", () => {
         "content/source-extractor.js"
       ]);
       expect(progressPayloads(harness)).toHaveLength(progressBefore);
+      expect(countOf(harness, "offscreen create")).toBe(1);
     });
 
     it.each([
@@ -2490,7 +3012,7 @@ describe("background orchestrator", () => {
 
       expect(staleKey).not.toBe(cacheKeyFor(["DE"]));
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-      expect(harness.tabsCreate).toHaveBeenCalled();
+      expect(harness.pageFetchUrls()).not.toEqual([]);
       expect(harness.storage[cacheKeyFor(["DE"])]).toMatchObject({ results: [EXPECTED_DE_RESULT] });
     });
 
@@ -2507,7 +3029,7 @@ describe("background orchestrator", () => {
 
       expect(otherAddress).not.toBe(cacheKeyFor(["DE"]));
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
-      expect(harness.tabsCreate).toHaveBeenCalled();
+      expect(harness.pageFetchUrls()).not.toEqual([]);
     });
 
     it("tolerates cache records written before baseline and FX were stored", async () => {
@@ -2532,6 +3054,7 @@ describe("background orchestrator", () => {
       expect(payload.baseline).toBeUndefined();
       expect(payload.fxTable).toBeUndefined();
       expect(harness.tabsCreate).not.toHaveBeenCalled();
+      expect(harness.pageFetchUrls()).toEqual([]);
     });
   });
 
@@ -2671,6 +3194,223 @@ describe("background orchestrator", () => {
       expect(resultPayloads(harness, "run-1")).toEqual([expect.objectContaining({ error: CANCELLED_ERROR, runId: "run-1" })]);
       expect(second.error).toBeUndefined();
       expect(second.results.map((result) => result.marketplace)).toEqual(["UK", "DE"]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+  });
+
+  describe("cancellation of downloads", () => {
+    it("aborts the download in progress, tells the offscreen document once and opens no tab", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE", "UK"], holdFetchOn: ["missing/DE"] });
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.events).toContain("fetch missing/DE"));
+      const download = harness.fetch.mock.results.at(-1)?.value as Promise<unknown>;
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      const payload = await run;
+
+      await expect(download).rejects.toMatchObject({ name: "AbortError" });
+      expect(payload.error).toBe(CANCELLED_ERROR);
+      expect(payload.results).toEqual([]);
+      expect(harness.offscreenMessages.filter((message) => message.type === OFFSCREEN_CANCEL_RUN)).toEqual([
+        { target: OFFSCREEN_TARGET, type: OFFSCREEN_CANCEL_RUN, payload: { runKey: pageJobs(harness)[0].runKey } }
+      ]);
+      expect(harness.events.slice(harness.events.indexOf("fetch missing/DE"))).toEqual([
+        "fetch missing/DE",
+        "offscreen cancel",
+        "offscreen close"
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("closes a tab opened for a page whose download showed a robot check", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE", "UK"],
+        captchaOn: ["missing/DE"],
+        onTabCreated: (tab) => holdLoading(tab)
+      });
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.events).toContain("loading missing/DE"));
+      await expect(cancelViaWorker(harness)).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      const payload = await run;
+
+      expect(payload.error).toBe(CANCELLED_ERROR);
+      expect(marketEvents(harness, "DE")).toEqual([
+        "progress OPEN DE",
+        "fetch robot-check/DE",
+        "open missing/DE",
+        "loading missing/DE",
+        "close missing/DE"
+      ]);
+      expect(harness.openTempTabs()).toEqual([]);
+      expect(harness.tabListenerCount()).toBe(0);
+    });
+
+    it("refuses a page job of a stopped run that reaches the document later, while another tab's run goes on", async () => {
+      const release = deferred();
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        secondActiveUrl: SOURCE_URL,
+        holdFetchOn: ["missing/DE"],
+        holdFetch: release.promise
+      });
+
+      const stopped = runViaWorker(harness, "run-1");
+      const going = runViaWorker(harness, "run-2", SECOND_TAB_ID);
+      await vi.waitFor(() => expect(countOf(harness, "fetch missing/DE")).toBe(2));
+      const [stoppedJob] = pageJobs(harness);
+      await cancelViaWorker(harness);
+      expect((await stopped).error).toBe(CANCELLED_ERROR);
+
+      const pagesBefore = harness.pageFetches.length;
+      const late = await harness.chrome.runtime.sendMessage({ target: OFFSCREEN_TARGET, type: OFFSCREEN_PAGE_JOB, payload: stoppedJob });
+      expect(late).toEqual({ outcome: "cancelled" });
+      expect(harness.pageFetches).toHaveLength(pagesBefore);
+
+      release.resolve();
+      const payload = await going;
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+    });
+
+    it("sends no page job when Stop arrives while the first offscreen document is still being created", async () => {
+      const create = deferred();
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        sourceAsinOn: ["DE"],
+        holdCreate: create.promise
+      });
+
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.chrome.offscreen.createDocument).toHaveBeenCalled());
+      const cancel = cancelViaWorker(harness);
+      create.resolve();
+      await expect(cancel).resolves.toEqual({ ok: true, type: CANCEL_COMPARISON });
+      const payload = await run;
+
+      expect(payload.error).toBe(CANCELLED_ERROR);
+      expect(pageJobs(harness)).toEqual([]);
+      expect(harness.events.filter((event) => event.startsWith("offscreen "))).toEqual([
+        "offscreen create",
+        "offscreen cancel",
+        "offscreen close"
+      ]);
+      expect(harness.pageFetchUrls()).toEqual([]);
+      expect(harness.events.filter((event) => event.includes("location "))).toEqual([]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("offscreen document", () => {
+    it("creates one document on the first page and closes it once after the run", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"] });
+
+      await runViaWorker(harness);
+
+      expect(harness.chrome.offscreen.createDocument).toHaveBeenCalledTimes(1);
+      expect(harness.chrome.offscreen.createDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ url: "offscreen.html", reasons: ["DOM_PARSER"] })
+      );
+      expect(harness.events.filter((event) => event.startsWith("offscreen "))).toEqual(["offscreen create", "offscreen close"]);
+      expect(harness.events.indexOf("offscreen create")).toBeLessThan(harness.events.findIndex((event) => event.startsWith("fetch ")));
+      expect(harness.events.at(-1)).toBe("offscreen close");
+    });
+
+    it("closes a document an earlier worker left open when it starts, then opens its own for the run", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], offscreenOpenAtStart: true });
+      await vi.waitFor(() => expect(harness.events).toEqual(["offscreen close"]));
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.events.filter((event) => event.startsWith("offscreen "))).toEqual([
+        "offscreen close",
+        "offscreen create",
+        "offscreen close"
+      ]);
+    });
+
+    it("opens no document for a run answered from the cache", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
+      await runViaWorker(harness);
+
+      await runViaWorker(harness, "run-2");
+
+      expect(countOf(harness, "offscreen create")).toBe(1);
+      expect(countOf(harness, "offscreen close")).toBe(1);
+    });
+
+    it("shares one document between runs on two tabs and closes it only after the second ends", async () => {
+      const release = deferred();
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        secondActiveUrl: "https://www.amazon.de/dp/B000000005",
+        holdFetchOn: ["missing/US"],
+        holdFetch: release.promise
+      });
+
+      const usSource = runViaWorker(harness, "run-1");
+      const deSource = runViaWorker(harness, "run-2", SECOND_TAB_ID);
+      expect((await usSource).results.map((result) => result.marketplace)).toEqual(["DE"]);
+      expect(countOf(harness, "offscreen close")).toBe(0);
+      release.resolve();
+      expect((await deSource).results.map((result) => result.marketplace)).toEqual(["US"]);
+
+      expect(harness.events.filter((event) => event.startsWith("offscreen "))).toEqual(["offscreen create", "offscreen close"]);
+      expect(harness.events.at(-1)).toBe("offscreen close");
+    });
+
+    it("sends every Amazon page, location and offers request of a run with the user's cookies", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        locations: { US: "CH" },
+        offersOn: { DE: "DE-four-new-offers.html" },
+        prepare: (group, market, document) => {
+          if (group === "product" && market === "DE") {
+            offerOnlyOtherSellers(document);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toMatchObject([{ marketplace: "DE", status: "OK", otherSeller: { seller: "Star Brick City" } }]);
+      const amazonRequests = harness.fetch.mock.calls
+        .map(([url, init]) => [new URL(url as string), init as RequestInit] as const)
+        .filter(([url]) => getMarketplaceByDomain(url.hostname) !== undefined);
+      expect(amazonRequests.map(([url]) => url.pathname)).toEqual([
+        "/dp/B000000001",
+        LOCATION_FORM_PATH,
+        ADDRESS_CHANGE_PATH,
+        "/dp/B000000001",
+        OFFERS_PATH
+      ]);
+      for (const [, init] of amazonRequests) {
+        expect(init.credentials).toBe("include");
+        expect(init.signal).toBeInstanceOf(AbortSignal);
+      }
+    });
+
+    it("reads a search result that links its product over plain HTTP in a tab, without downloading it", async () => {
+      const insecure = "http://www.amazon.de/dp/B000000005";
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        prepare: (group, market, document) => {
+          if (group === "search" && market === "DE") {
+            document.querySelector("a[href='/dp/B000000005']")?.setAttribute("href", insecure);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(pageJobs(harness).map((job) => job.url)).toContain(insecure);
+      expect(harness.pageFetchUrls()).not.toContain(insecure);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
       expect(harness.openTempTabs()).toEqual([]);
     });
   });
@@ -3101,12 +3841,6 @@ describe("background orchestrator", () => {
       notes: ["Amazon showed a robot check on amazon.de"]
     };
 
-    function openedOn(harness: Harness, market: Marketplace): string[] {
-      return marketEvents(harness, market)
-        .filter((event) => event.startsWith("open "))
-        .map((event) => event.slice("open ".length));
-    }
-
     function hasCachedComparison(harness: Harness): boolean {
       return Object.keys(harness.storage).some((key) => key.startsWith("cmp:"));
     }
@@ -3124,11 +3858,13 @@ describe("background orchestrator", () => {
       expect(payload.results[1]).toEqual(DE_ROBOT_CHECK);
       expect(marketEvents(harness, "DE")).toEqual([
         "progress OPEN DE",
+        "fetch robot-check/DE",
         "open robot-check/DE",
         "ready robot-check/DE",
         "close robot-check/DE"
       ]);
-      expect(openedOn(harness, "UK")).toEqual(["missing/UK", "search/UK", "product/UK"]);
+      expect(fetchedOn(harness, "UK")).toEqual(["missing/UK", "search/UK", "product/UK"]);
+      expect(openedOn(harness, "UK")).toEqual([]);
       expect(harness.openTempTabs()).toEqual([]);
     });
 
@@ -3140,11 +3876,9 @@ describe("background orchestrator", () => {
       expect(payload.results).toEqual([DE_ROBOT_CHECK]);
       expect(marketEvents(harness, "DE")).toEqual([
         "progress OPEN DE",
-        "open missing/DE",
-        "ready missing/DE",
-        "inject content/location-setter.js missing/DE",
-        "inject content/product-extractor.js missing/DE",
-        "close missing/DE",
+        "fetch missing/DE",
+        "progress SEARCH DE",
+        "fetch robot-check/DE",
         "open robot-check/DE",
         "ready robot-check/DE",
         "close robot-check/DE"
@@ -3163,7 +3897,8 @@ describe("background orchestrator", () => {
       expect(payload.results).toEqual([
         { marketplace: "US", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.com"] }
       ]);
-      expect(openedOn(harness, "US")).toEqual(["missing/US", "checkpoint/US"]);
+      expect(fetchedOn(harness, "US")).toEqual(["missing/US", "checkpoint/US"]);
+      expect(openedOn(harness, "US")).toEqual(["checkpoint/US"]);
       expect(harness.events).not.toContain("inject content/search-extractor.js checkpoint/US");
     });
 
@@ -3173,7 +3908,8 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.results).toEqual([DE_ROBOT_CHECK]);
-      expect(openedOn(harness, "DE")).toEqual(["missing/DE", "http-503/DE"]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "http-503/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["http-503/DE"]);
       expect(harness.events).not.toContain("inject content/search-extractor.js http-503/DE");
       expect(hasCachedComparison(harness)).toBe(false);
     });
@@ -3186,6 +3922,7 @@ describe("background orchestrator", () => {
       expect(payload.results).toEqual([DE_ROBOT_CHECK]);
       expect(marketEvents(harness, "DE")).toEqual([
         "progress OPEN DE",
+        "fetch http-503/DE",
         "open http-503/DE",
         "ready http-503/DE",
         "close http-503/DE"
@@ -3211,7 +3948,29 @@ describe("background orchestrator", () => {
       const payload = await runViaWorker(harness);
 
       expect(payload.results).toEqual([DE_ROBOT_CHECK]);
-      expect(openedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE", "robot-check/DE"]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE", "robot-check/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["robot-check/DE"]);
+    });
+
+    it("reports a store as a robot check without downloading another of its pages when the tab that sets its location shows one", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        rejectLocationFetchOn: ["DE"],
+        onTabCreated: (tab) => {
+          tab.dom = new JSDOM(ROBOT_CHECK_HTML, { url: tab.url });
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([DE_ROBOT_CHECK]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE"]);
+      expect(marketEvents(harness, "DE").slice(-3)).toEqual(["open search/DE", "ready search/DE", "close search/DE"]);
+      expect(harness.events).not.toContain("inject content/location-setter.js search/DE");
+      expect(hasCachedComparison(harness)).toBe(false);
+      expect(harness.openTempTabs()).toEqual([]);
     });
 
     it("leaves a run with a robot check out of the cache, so the next run checks again", async () => {
@@ -3220,10 +3979,10 @@ describe("background orchestrator", () => {
       await runViaWorker(harness);
       expect(hasCachedComparison(harness)).toBe(false);
 
-      harness.tabsCreate.mockClear();
+      const pagesBefore = harness.pageFetches.length;
       await runViaWorker(harness, "run-2");
 
-      expect(harness.tabsCreate).toHaveBeenCalled();
+      expect(harness.pageFetches.length).toBeGreaterThan(pagesBefore);
       expect(hasCachedComparison(harness)).toBe(false);
     });
 
@@ -3240,10 +3999,13 @@ describe("background orchestrator", () => {
         DE_ROBOT_CHECK,
         { marketplace: "UK", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.co.uk"] }
       ]);
-      expect(openedOn(harness, "UK")).toEqual(["robot-check/UK"]);
-      expect(openedOn(harness, "DE")).toEqual(["robot-check/DE"]);
+      for (const market of ["UK", "DE"] as const) {
+        expect(fetchedOn(harness, market)).toEqual([`robot-check/${market}`]);
+        expect(openedOn(harness, market)).toEqual([`robot-check/${market}`]);
+      }
       for (const market of ["FR", "IT"] as const) {
-        expect(openedOn(harness, market)).toEqual([`missing/${market}`, `search/${market}`, `product/${market}`]);
+        expect(fetchedOn(harness, market)).toEqual([`missing/${market}`, `search/${market}`, `product/${market}`]);
+        expect(openedOn(harness, market)).toEqual([]);
       }
       expect(hasCachedComparison(harness)).toBe(false);
       expect(harness.openTempTabs()).toEqual([]);
@@ -3266,9 +4028,11 @@ describe("background orchestrator", () => {
         { marketplace: "FR", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.fr"] },
         { marketplace: "UK", status: "PARSE_FAILED", confidence: 0, notes: ["Amazon showed a robot check on amazon.co.uk"] }
       ]);
-      expect(openedOn(harness, "DE")).toEqual(["missing/DE", "http-503/DE"]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "http-503/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["http-503/DE"]);
       expect(openedOn(harness, "FR")).toEqual(["http-503/FR"]);
-      expect(openedOn(harness, "IT")).toEqual(["missing/IT", "search/IT", "product/IT"]);
+      expect(fetchedOn(harness, "IT")).toEqual(["missing/IT", "search/IT", "product/IT"]);
+      expect(openedOn(harness, "IT")).toEqual([]);
       expect(hasCachedComparison(harness)).toBe(false);
     });
 
@@ -3323,23 +4087,18 @@ describe("background orchestrator", () => {
     });
 
     it("searches every store that answers with Amazon's not-found page, its HTTP 404 and its automated access notice", async () => {
-      const notFoundStatuses: number[] = [];
-      const harness = await bootServiceWorker({
-        enabledMarketplaces: ["US", "UK", "DE", "FR", "IT"],
-        onTabCreated: (tab) => {
-          if (tab.label.startsWith("missing/")) {
-            notFoundStatuses.push(tab.responseStatus);
-          }
-        }
-      });
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE", "FR", "IT"] });
 
       const payload = await runViaWorker(harness);
 
-      expect(notFoundStatuses).toEqual([404, 404, 404, 404]);
+      expect(harness.pageFetches.filter((fetched) => fetched.label.startsWith("missing/")).map((fetched) => fetched.status)).toEqual([
+        404, 404, 404, 404
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
       expect(readFileSync(join(FIXTURE_ROOT, "product", "not-found.html"), "utf8")).toContain("api-services-support@amazon.com");
       expect(payload.results.map((result) => result.status)).not.toContain("PARSE_FAILED");
       for (const market of ["UK", "DE", "FR", "IT"] as const) {
-        expect(openedOn(harness, market).slice(0, 2)).toEqual([`missing/${market}`, `search/${market}`]);
+        expect(fetchedOn(harness, market).slice(0, 2)).toEqual([`missing/${market}`, `search/${market}`]);
       }
       expect(hasCachedComparison(harness)).toBe(true);
     });
@@ -3348,22 +4107,36 @@ describe("background orchestrator", () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE", "UK"],
         robotCheckOn: ["missing/DE"],
-        onTabCreated: (tab, self) => {
-          if (tab.label === "missing/UK") {
-            void self.dispatch({ type: CANCEL_COMPARISON, payload: { activeTabId: ACTIVE_TAB_ID } });
-          }
-        }
+        holdFetchOn: ["missing/UK"]
       });
 
-      const payload = await runViaWorker(harness);
+      const run = runViaWorker(harness);
+      await vi.waitFor(() => expect(harness.events).toContain("fetch missing/UK"));
+      await cancelViaWorker(harness);
+      const payload = await run;
 
       expect(payload.error).toBe(CANCELLED_ERROR);
       expect(payload.results).toEqual([DE_ROBOT_CHECK]);
-      expect(harness.events.slice(harness.events.indexOf("open missing/UK"))).toEqual([
-        "open missing/UK",
-        "close missing/UK"
+      expect(harness.events.slice(harness.events.indexOf("fetch missing/UK"))).toEqual([
+        "fetch missing/UK",
+        "offscreen cancel",
+        "offscreen close"
       ]);
+      expect(openedOn(harness, "UK")).toEqual([]);
       expect(hasCachedComparison(harness)).toBe(false);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reads a page in a tab when only its download shows a robot check, then checks the store as usual and caches the run", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], captchaOn: ["missing/DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(fetchedOn(harness, "DE")).toEqual(["robot-check/DE", "search/DE", "product/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["missing/DE"]);
+      expect(hasCachedComparison(harness)).toBe(true);
       expect(harness.openTempTabs()).toEqual([]);
     });
 
@@ -3381,7 +4154,7 @@ describe("background orchestrator", () => {
   });
 
   describe("failures", () => {
-    it("fails before opening any tab when FX rates cannot be loaded", async () => {
+    it("fails before reading any store when FX rates cannot be loaded", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "UK", "DE"], fxAvailable: false });
 
       const payload = await runViaWorker(harness);
@@ -3395,8 +4168,174 @@ describe("background orchestrator", () => {
       expect(payload.baseline).not.toHaveProperty("normalizedTotal");
       expect(payload.fxTable).toBeUndefined();
       expect(harness.fetch).toHaveBeenCalledTimes(2);
+      expect(harness.pageFetchUrls()).toEqual([]);
+      expect(harness.events).not.toContain("offscreen create");
       expect(harness.tabsCreate).not.toHaveBeenCalled();
       expect(progressPayloads(harness)).toEqual([]);
+    });
+
+    it.each([
+      ["fails to download", { failFetchOn: ["search/DE"] }],
+      ["is not a page it knows", { shapelessOn: ["search/DE"] }]
+    ] as Array<[string, HarnessOptions]>)("reads a search page that %s in one tab, with the same result", async (_case, fault) => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], ...fault });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
+      expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+      expect(progressPayloads(harness).map((progress) => progress.latest?.phase)).toEqual(["OPEN", "SEARCH", "MATCH", "READ", undefined]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reads every page in a tab when the offscreen document cannot be created", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], offscreenCreateFails: "Offscreen is not available" });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.chrome.offscreen.createDocument).toHaveBeenCalledTimes(3);
+      expect(harness.pageFetchUrls()).toEqual([]);
+      expect(openedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("reads a page in a tab, and creates the document again for the next page, when the document goes away during a job", async () => {
+      const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], closeOffscreenOn: ["missing/DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.error).toBeUndefined();
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(openedOn(harness, "DE")).toEqual(["missing/DE"]);
+      expect(fetchedOn(harness, "DE")).toEqual(["search/DE", "product/DE"]);
+      expect(harness.events.filter((event) => event.startsWith("offscreen "))).toEqual([
+        "offscreen create",
+        "offscreen crash",
+        "offscreen create",
+        "offscreen close"
+      ]);
+    });
+
+    describe("with fake timers", () => {
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("reads a search page whose download has not answered after 15 seconds in one tab, with the same result", async () => {
+        const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], holdFetchOn: ["search/DE"] });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("fetch search/DE"));
+        await vi.advanceTimersByTimeAsync(14_000);
+        expect(harness.tabsCreate).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+        expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
+
+      it("reads a search page that is redirected to another store in a tab, which lands there too and gives up after 20 seconds", async () => {
+        const redirected = "https://www.amazon.co.uk/s?k=Acme";
+        const harness = await bootServiceWorker({
+          enabledMarketplaces: ["US", "DE"],
+          redirectOn: { "search/DE": redirected },
+          onTabCreated: (tab) => {
+            if (tab.label === "search/DE") {
+              tab.dom = new JSDOM(tab.dom.serialize(), { url: redirected });
+            }
+          }
+        });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.events).toContain("ready search/DE"));
+        await vi.advanceTimersByTimeAsync(19_000);
+        expect(harness.openTempTabs()).toEqual(["search/DE"]);
+        await vi.advanceTimersByTimeAsync(1_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toEqual([
+          { marketplace: "DE", status: "PARSE_FAILED", confidence: 0, notes: ["Timed out waiting for tab 100 to load"] }
+        ]);
+        expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE"]);
+        expect(openedOn(harness, "DE")).toEqual(["search/DE"]);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
+
+      it("reads a page in a tab when the offscreen document has not answered after 27 seconds", async () => {
+        const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], sourceAsinOn: ["DE"], offscreenSilent: true });
+
+        const run = runViaWorker(harness);
+        await vi.waitFor(() => expect(pageJobs(harness)).toHaveLength(1));
+        await vi.advanceTimersByTimeAsync(26_000);
+        expect(harness.tabsCreate).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1_000);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toMatchObject([{ marketplace: "DE", status: "OK", notes: ["Matched by ASIN"] }]);
+        expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
+
+      const neverCreated: HarnessOptions = {
+        enabledMarketplaces: ["US", "DE"],
+        sourceAsinOn: ["DE"],
+        holdCreate: new Promise<void>(() => undefined)
+      };
+
+      it("reads a page in a tab and answers the run when the offscreen document's creation never settles", async () => {
+        const harness = await bootServiceWorker(neverCreated);
+
+        const run = runViaWorker(harness);
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(resultPayloads(harness)).toHaveLength(1);
+        const payload = await run;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toMatchObject([{ marketplace: "DE", status: "OK", notes: ["Matched by ASIN"] }]);
+        expect(pageJobs(harness)).toEqual([]);
+        expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+        expect(harness.chrome.offscreen.createDocument).toHaveBeenCalledTimes(1);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
+
+      it("answers Stop while the offscreen document's creation never settles, and creates the document again for the next run", async () => {
+        const harness = await bootServiceWorker(neverCreated);
+
+        const stopped = runViaWorker(harness);
+        await vi.waitFor(() => expect(harness.chrome.offscreen.createDocument).toHaveBeenCalledTimes(1));
+        const cancelAnswers: unknown[] = [];
+        void cancelViaWorker(harness).then((answer) => cancelAnswers.push(answer));
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(cancelAnswers).toEqual([{ ok: true, type: CANCEL_COMPARISON }]);
+        expect(resultPayloads(harness, "run-1")).toHaveLength(1);
+        expect((await stopped).error).toBe(CANCELLED_ERROR);
+        expect(harness.offscreenMessages.filter((message) => message.type === OFFSCREEN_CANCEL_RUN)).toHaveLength(1);
+
+        const next = runViaWorker(harness, "run-2");
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(resultPayloads(harness, "run-2")).toHaveLength(1);
+        const payload = await next;
+
+        expect(payload.error).toBeUndefined();
+        expect(payload.results).toMatchObject([{ marketplace: "DE", status: "OK", notes: ["Matched by ASIN"] }]);
+        expect(harness.chrome.offscreen.createDocument).toHaveBeenCalledTimes(2);
+        expect(pageJobs(harness)).toEqual([]);
+        expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+        expect(harness.openTempTabs()).toEqual([]);
+      });
     });
 
     it.each([
@@ -3596,6 +4535,7 @@ describe("background orchestrator", () => {
 
       expect(response).toEqual({ error: "Unsupported marketplace hostname: www.example.com" });
       expect(harness.tabsCreate).not.toHaveBeenCalled();
+      expect(harness.events).not.toContain("offscreen create");
     });
 
     it("reports missing product metadata on an Amazon page that is not a product page", async () => {
@@ -3607,6 +4547,7 @@ describe("background orchestrator", () => {
       const response = await loadSourceViaWorker(harness);
 
       expect(response).toEqual({ error: "Unable to extract required source product metadata" });
+      expect(harness.events).not.toContain("offscreen create");
     });
 
     it("reports the scripting error on a page the extension cannot access", async () => {
@@ -3615,6 +4556,7 @@ describe("background orchestrator", () => {
       const response = await loadSourceViaWorker(harness);
 
       expect(response).toEqual({ error: "Cannot access a chrome:// URL" });
+      expect(harness.events).not.toContain("offscreen create");
     });
 
     it("returns an error result without opening tabs when a run starts on a non-Amazon page", async () => {
@@ -3631,6 +4573,7 @@ describe("background orchestrator", () => {
       expect(payload.results).toEqual([]);
       expect(payload.source).toBeUndefined();
       expect(harness.tabsCreate).not.toHaveBeenCalled();
+      expect(harness.events).not.toContain("offscreen create");
     });
 
     it("rejects unsupported messages", async () => {

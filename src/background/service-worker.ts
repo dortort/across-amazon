@@ -6,6 +6,7 @@ import {
   isRunComparisonRequest
 } from "../shared/messages";
 import type { RunComparisonResult } from "../shared/messages";
+import { closeOffscreenDocument } from "./offscreen-client";
 import { cancelComparison, loadSource, runComparison } from "./orchestrator";
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
@@ -55,3 +56,5 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   sendResponse({ ok: false, error: "Unsupported message" });
   return false;
 });
+
+void closeOffscreenDocument();
