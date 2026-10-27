@@ -1441,9 +1441,9 @@ describe("product extractor other sellers' offers", () => {
       container.querySelectorAll("#aod-offer").forEach((offer) => offer.remove());
       for (const { seller, item, delivery, noPrice } of listed) {
         const offer = template.cloneNode(true) as Element;
-        const price = offer.querySelector("#aod-offer-price .apex-pricetopay-value .a-offscreen");
-        const sellerName = offer.querySelector("#aod-offer-soldBy .a-col-right > a");
-        const message = offer.querySelector("#mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE");
+        const price = offer.querySelector("[id='aod-offer-price'] .apex-pricetopay-value .a-offscreen");
+        const sellerName = offer.querySelector("[id='aod-offer-soldBy'] .a-col-right > a");
+        const message = offer.querySelector("[id='mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE']");
         if (!price || !sellerName || !message) {
           throw new Error("The amazon.de offer lost its price, seller or delivery message");
         }
@@ -1451,7 +1451,7 @@ describe("product extractor other sellers' offers", () => {
         sellerName.textContent = seller;
         message.textContent = delivery ?? "€55.26 delivery";
         if (noPrice) {
-          offer.querySelector("#aod-offer-price")?.remove();
+          offer.querySelector("[id='aod-offer-price']")?.remove();
         }
         container.append(offer);
       }

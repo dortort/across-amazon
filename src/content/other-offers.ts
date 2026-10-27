@@ -15,13 +15,19 @@ const OFFERS_QUERY = ["asin", "m", "qid", "smid", "sourcecustomerorglistid", "so
 const NEW_OFFERS_FILTER = encodeURIComponent(JSON.stringify({ all: true, new: true }));
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
-const PRICE_TO_PAY = "#aod-offer-price .apex-pricetopay-value";
-const ANY_PRICE = "#aod-offer-price .a-price:not(.a-text-price)";
-const OFFER_PRICE_LABEL = "#aod-offer-price .apex-pricetopay-accessibility-label";
-const DELIVERY_MESSAGES =
-  "[id^='mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE'], #mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE";
-const SELLER = "#aod-offer-soldBy .a-col-right > a, #aod-offer-soldBy .a-col-right > span";
-const DISPATCHER = "#aod-offer-shipsFrom .a-col-right > span";
+// Amazon repeats these ids on every offer. jsdom resolves a descendant
+// selector that starts with #id to the first element in the document, so each
+// offer is read with an attribute selector.
+function repeatedId(id: string): string {
+  return `[id='${id}']`;
+}
+
+const PRICE_TO_PAY = `${repeatedId("aod-offer-price")} .apex-pricetopay-value`;
+const ANY_PRICE = `${repeatedId("aod-offer-price")} .a-price:not(.a-text-price)`;
+const OFFER_PRICE_LABEL = `${repeatedId("aod-offer-price")} .apex-pricetopay-accessibility-label`;
+const DELIVERY_MESSAGES = `[id^='mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE'], ${repeatedId("mir-layout-DELIVERY_BLOCK-slot-NO_PROMISE_UPSELL_MESSAGE")}`;
+const SELLER = `${repeatedId("aod-offer-soldBy")} .a-col-right > a, ${repeatedId("aod-offer-soldBy")} .a-col-right > span`;
+const DISPATCHER = `${repeatedId("aod-offer-shipsFrom")} .a-col-right > span`;
 
 const NEW_CONDITIONS = new Set(["new", "neu", "nuevo", "neuf", "nuovo", "新品"]);
 const CONDITION_CODE = /:amzn1\.bot\.([A-Z_]+)$/;
@@ -97,7 +103,7 @@ function readShipping(offer: Element, item: ParsedMoney | undefined, marketCurre
 }
 
 function readOffer(offer: Element, index: number, marketCurrency: string): OtherOffer {
-  const condition = collapseText(offer.querySelector("#aod-offer-heading")) ?? "";
+  const condition = collapseText(offer.querySelector(repeatedId("aod-offer-heading"))) ?? "";
   const item = readItemPrice(offer, marketCurrency);
   const dispatcher = collapseText(offer.querySelector(DISPATCHER));
   return {
@@ -109,7 +115,7 @@ function readOffer(offer: Element, index: number, marketCurrency: string): Other
     seller: collapseText(offer.querySelector(SELLER)),
     dispatcher,
     fulfilledByAmazon: dispatcher !== undefined && AMAZON_DISPATCHER.test(dispatcher),
-    undeliverable: isUndeliverableNotice(offer.querySelector("#mir-layout-DELIVERY_BLOCK")?.textContent ?? "")
+    undeliverable: isUndeliverableNotice(offer.querySelector(repeatedId("mir-layout-DELIVERY_BLOCK"))?.textContent ?? "")
   };
 }
 
@@ -130,7 +136,7 @@ export function parseOtherOffers(panel: ParentNode, marketCurrency: string): Oth
     return undefined;
   }
 
-  const offers = Array.from(list.querySelectorAll("#aod-offer"), (offer, index) => readOffer(offer, index, marketCurrency));
+  const offers = Array.from(list.querySelectorAll(repeatedId("aod-offer")), (offer, index) => readOffer(offer, index, marketCurrency));
   return { offers, total: readTotal(list), listEnded: readListEnded(panel) };
 }
 
