@@ -444,6 +444,41 @@ function readDocumentAsin(documentRef: Document, canonicalHref?: string): string
   return canonicalHref?.match(PRODUCT_PATH_ASIN)?.[1]?.toUpperCase();
 }
 
+const BRAND_LABELS = new Set(["brand", "brand name", "marke", "marque", "marca", "marchio", "ブランド"]);
+
+function cleanBrand(rawBrand?: string): string | undefined {
+  if (!rawBrand) {
+    return undefined;
+  }
+
+  const cleaned = rawBrand
+    .replace(/\s+/g, " ")
+    .replace(/^(?:brand|marke|marque|marca|marchio)\s*[:：]\s*/i, "")
+    .replace(/^visit the\s+/i, "")
+    .replace(/^visita la tienda de\s+/i, "")
+    .replace(/\s+store$/i, "")
+    .trim();
+
+  return cleaned && !BRAND_LABELS.has(cleaned.toLowerCase()) ? cleaned : undefined;
+}
+
+function readBrandRowValue(documentRef: Document): string | undefined {
+  const row = documentRef.querySelector("tr.po-brand");
+  if (!row) {
+    return undefined;
+  }
+
+  const cells = Array.from(row.querySelectorAll("td"));
+  const valueCell = row.querySelector("td.a-span9") ?? (cells.length > 1 ? cells[cells.length - 1] : undefined);
+  return valueCell?.textContent ?? undefined;
+}
+
+function readBrand(documentRef: Document): string | undefined {
+  return [readBrandRowValue(documentRef), documentRef.querySelector("#bylineInfo")?.textContent ?? undefined]
+    .map(cleanBrand)
+    .find(Boolean);
+}
+
 const SELECTED_VARIANT_SELECTORS = [
   '[id^="inline-twister-expanded-dimension-text-"]',
   "#variation_color_name .selection",
@@ -540,6 +575,7 @@ export function extractProductData(
     marketplace: request.marketplace,
     asin: readDocumentAsin(documentRef, canonicalHref),
     title: collapseText(documentRef.querySelector("#productTitle")),
+    brand: readBrand(documentRef),
     selectedVariants: readSelectedVariants(documentRef),
     variantOptions: readVariantOptions(documentRef),
     canonicalUrl,
