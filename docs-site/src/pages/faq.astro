@@ -77,20 +77,21 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
       <h2 id="check-match">{questions["check-match"]}</h2>
       <p>
         <span class="nowrap">“Check match”</span> is a pill on a row in the ranked list, and on the verdict card when
-        that row is the cheapest. It means the listing was found by searching and the extension is less than 90% sure it
-        is the same product.
+        that row is the cheapest. It means the listing was scored, because it was found by searching or served by the
+        store in place of your product’s ASIN, and the extension is less than 90% sure it is the same product.
       </p>
       <p>
         A listing found under your product’s ASIN, Amazon’s own product identifier, is the same product. It counts as an
-        exact match and never shows the pill. A listing found by searching is scored, not certain. Its confidence
+        exact match and never shows the pill. A listing found by searching is scored, not certain, and so is a listing
+        a store serves when it is asked for your product’s ASIN, as amazon.ca does for some products. Its confidence
         combines how closely the listing’s title, brand and variant match your product with how cleanly its product page
         could be read. A listing from your product’s brand with the same model number counts as a close title match even
         when the store words the title differently, but it usually still scores below 90% and so carries the pill.
       </p>
       <p>
-        Before a listing found by searching is ranked, its page is checked for your colour, pack and size. When the page
-        shows another variant but offers yours, the extension opens your variant’s page and reads that instead; when the
-        page does not offer your variant, the store is reported as “No confident match”. Open the listing and check the
+        Before a scored listing is ranked, its page is checked for your colour, pack and size. When the page shows
+        another variant but offers yours, the extension opens your variant’s page and reads that instead; when the page
+        does not offer your variant, the store is reported as “No confident match”. Open the listing and check the
         variant before you buy.
       </p>
       <p>
@@ -117,9 +118,9 @@ const tocItems = Object.entries(questions).map(([id, question]) => ({ href: `#${
             <tr>
               <th scope="row">No confident match</th>
               <td>
-                The store does not list your product’s ASIN and no search result scored above the matching threshold.
-                Or the closest listing is another variant, and its page does not offer yours. Nothing is compared rather
-                than risking the wrong product.
+                The store does not list your product’s ASIN, and neither the listing it served in its place nor any
+                search result scored above the matching threshold. Or the closest listing is another variant, and its
+                page does not offer yours. Nothing is compared rather than risking the wrong product.
               </td>
             </tr>
             <tr>
