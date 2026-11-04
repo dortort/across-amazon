@@ -2,7 +2,7 @@
 
 Everything the Chrome Web Store developer dashboard asks for, drafted from the code. Paste each block into the field it names. Each claim comes from the code, with a pointer where it matters, so check the pointers again when the code changes.
 
-Version 0.1.0 was submitted on 2026-10-20 and published on 2026-10-22. The listing is at https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc. Version 0.2.0 (tag `v0.2.0`, `release/across-amazon-0.2.0.zip`, SHA-256 `ed1b95dfb66be95cdd1ad39a4a550b891e8458c6678336ba11141e3591e504ce`) was submitted on 2026-10-26 with "Publish automatically after it has passed review" ticked; until it passes review, the store offers 0.1.0.
+Version 0.1.0 was submitted on 2026-10-20 and published on 2026-10-22. The listing is at https://chromewebstore.google.com/detail/across-amazon/jipkoghidlgfmgoihpaecdnaapiniglc. Version 0.2.0 (tag `v0.2.0`, `release/across-amazon-0.2.0.zip`, SHA-256 `ed1b95dfb66be95cdd1ad39a4a550b891e8458c6678336ba11141e3591e504ce`) was submitted on 2026-10-26 with "Publish automatically after it has passed review" ticked and published on 2026-10-27.
 
 ## Store listing
 
