@@ -8,7 +8,7 @@ It is a static [Astro](https://astro.build) site with no cookies, no analytics a
 
 ## Run it locally
 
-Run these from this `docs-site/` folder. The site needs Node 22.22 or newer and the pnpm version pinned in `package.json` (`packageManager`).
+Run these from this `docs-site/` folder. The site needs Node 22.23.4 or newer and the pnpm version pinned in `package.json` (`packageManager`).
 
 | Command | What it does |
 | --- | --- |
