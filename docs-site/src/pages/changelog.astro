@@ -13,6 +13,30 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
   <PageIntro title="Changelog" lede="One entry per version. Version numbers follow the extension’s manifest." />
   <div class="container page-body">
     <article class="prose">
+      <section class="release" aria-labelledby="v0-2-1">
+        <header class="release-head">
+          <div class="release-title">
+            <h2 id="v0-2-1">0.2.1</h2>
+            <p class="release-label">No repeated location change</p>
+          </div>
+          <p class="release-status">
+            Prepared for the Chrome Web Store, not published yet. Until it is, the store offers 0.2.0.
+          </p>
+        </header>
+
+        <h3 id="v0-2-1-what-changed">What changed</h3>
+        <ul>
+          <li>
+            <strong>No location change from a search page that does not show it.</strong> When a store does not list
+            your product, the check searches it. Some stores’ search pages, amazon.it’s among them, do not say which
+            country they deliver to, so every such check set the store’s delivery location again, although it was
+            already set, and the store’s result carried <span class="nowrap">“Delivery location set to …”</span> each
+            time. The check now leaves the location alone on such a page and reads it on the product page it opens
+            after the search, which sets it only when the store delivers elsewhere.
+          </li>
+        </ul>
+      </section>
+
       <section class="release" aria-labelledby="v0-2-0">
         <header class="release-head">
           <div class="release-title">
