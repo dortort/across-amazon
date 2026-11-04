@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it, vi } from "vitest";
 import { readDestinationIso, setDeliveryLocation } from "../../src/content/location-setter";
-import type { LocationRequest, Marketplace } from "../../src/shared/types";
+import type { LocationRequest, Marketplace, PageKind } from "../../src/shared/types";
 import { destinationFields } from "./destination-fields";
 
-const LOCATION_FIXTURES = join(process.cwd(), "tests", "fixtures", "location");
+const FIXTURE_ROOT = join(process.cwd(), "tests", "fixtures");
+const LOCATION_FIXTURES = join(FIXTURE_ROOT, "location");
 const FORM_PATH = "/portal-migration/hz/glow/get-rendered-address-selections";
 const ADDRESS_CHANGE_URL = "https://www.amazon.de/portal-migration/hz/glow/address-change?actionSource=glow";
 const SUCCESS = readFileSync(join(LOCATION_FIXTURES, "address-change-CH.json"), "utf8");
@@ -19,6 +20,12 @@ interface Answer {
 
 function fixture(file: string): string {
   return readFileSync(join(LOCATION_FIXTURES, file), "utf8");
+}
+
+function capturedPage(file: string): JSDOM {
+  const html = readFileSync(join(FIXTURE_ROOT, file), "utf8");
+  const url = /<meta name="source-url" content="([^"]+)">/.exec(html)?.[1];
+  return new JSDOM(html, { url });
 }
 
 function pageWith(body: string, url = "https://www.amazon.de/dp/B09LCMVB3F"): JSDOM {
@@ -58,8 +65,8 @@ function headersOf(init?: RequestInit): Record<string, string> {
   return (init?.headers ?? {}) as Record<string, string>;
 }
 
-function request(countryCode: string, marketplace: Marketplace = "DE"): LocationRequest {
-  return { marketplace, countryCode };
+function request(countryCode: string, marketplace: Marketplace = "DE", page: PageKind = "product"): LocationRequest {
+  return { marketplace, countryCode, page };
 }
 
 function run(dom: JSDOM, locationRequest: LocationRequest, fetchMock: ReturnType<typeof fetchAnswering>) {
@@ -112,6 +119,43 @@ describe("setDeliveryLocation", () => {
     });
     await expect(run(pageWith("<p>Page not found</p>"), request("CH"), fetchMock)).resolves.toEqual({ status: "NO_WIDGET" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("on amazon.it set to Switzerland", () => {
+    it.each([
+      ["product page", "location-live/IT-product.html", "CH"],
+      ["not-found page", "not-found-live/IT.html", undefined],
+      ["search page", "location-live/IT-search.html", undefined]
+    ] as const)("reads the destination of its %s", (_label, file, expected) => {
+      expect(readDestinationIso(capturedPage(file).window.document)).toBe(expected);
+    });
+
+    it.each([
+      ["product page", "location-live/IT-product.html", "product", { status: "ALREADY_SET", countryCode: "CH" }],
+      ["not-found page", "not-found-live/IT.html", "product", { status: "NO_WIDGET" }],
+      ["search page", "location-live/IT-search.html", "search", { status: "NOT_SHOWN" }]
+    ] as const)("sends no request from its %s", async (_label, file, page, expected) => {
+      const fetchMock = fetchAnswering();
+
+      await expect(run(capturedPage(file), request("CH", "IT", page), fetchMock)).resolves.toEqual(expected);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("changes the location from a search page that shows another destination", async () => {
+    const fetchMock = fetchAnswering({ body: fixture("DE-modal.html") }, { body: SUCCESS });
+
+    await expect(run(navSwitzerlandWith("US"), request("CH", "DE", "search"), fetchMock)).resolves.toEqual({ status: "SET", countryCode: "CH" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("still changes the location from a product page that shows no destination", async () => {
+    const dom = navSwitzerlandWith("US");
+    dom.window.document.querySelector("#countryCode")?.remove();
+    const fetchMock = fetchAnswering({ body: fixture("DE-modal.html") }, { body: SUCCESS });
+
+    await expect(run(dom, request("CH"), fetchMock)).resolves.toEqual({ status: "SET", countryCode: "CH" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("reads the form with the page token and posts the seven fields with the form's own token", async () => {

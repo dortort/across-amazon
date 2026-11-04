@@ -1967,6 +1967,58 @@ describe("background orchestrator", () => {
       expect(harness.tabsCreate).not.toHaveBeenCalled();
     });
 
+    function withoutCountryInputOnSearchPages(group: FixtureGroup, _market: Marketplace, document: Document): void {
+      if (group === "search") {
+        removeElement(document, "#countryCode");
+      }
+    }
+
+    it("sends no address change from a search page that shows no destination when the store already delivers there", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH", DE: "CH" },
+        prepare: withoutCountryInputOnSearchPages
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(locationEvents(harness)).toEqual([]);
+      expect(pageJobs(harness).map((job) => [job.page.kind, job.location?.page, job.expectDestination])).toEqual([
+        ["product", "product", undefined],
+        ["search", "search", undefined],
+        ["product", "product", undefined]
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("leaves the location of a store to the first product page after a search page that shows no destination", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        locations: { US: "CH" },
+        prepare: withoutCountryInputOnSearchPages
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        { ...EXPECTED_DE_RESULT, notes: ["Matched by search", "Match confidence: HIGH", SET_NOTE] }
+      ]);
+      expect(marketEvents(harness, "DE")).toEqual([
+        "progress OPEN DE",
+        "fetch missing/DE",
+        "progress SEARCH DE",
+        "fetch search/DE",
+        "progress MATCH DE",
+        "progress READ DE",
+        "fetch product/DE",
+        "fetch location form www.amazon.de",
+        "fetch location change www.amazon.de CH",
+        "fetch product/DE"
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
     it("sets the location from a tab when the store refuses the extension's request, then downloads the page again", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], locations: { US: "CH" }, rejectLocationFetchOn: ["DE"] });
 

@@ -80,7 +80,7 @@ const CONTENT_SCRIPTS: ContentScriptCase[] = [
     fixture: "location/nav-switzerland.html",
     url: "https://www.amazon.de/dp/B09LCMVB3F",
     requestKey: "__ACROSS_AMAZON_LOCATION_REQUEST__",
-    request: { marketplace: "DE", countryCode: "CH" },
+    request: { marketplace: "DE", countryCode: "CH", page: "product" },
     resultKey: "__ACROSS_AMAZON_LOCATION_RESULT__",
     expected: { status: "ALREADY_SET", countryCode: "CH" }
   }
