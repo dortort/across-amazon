@@ -12,6 +12,7 @@ import {
   extractVariationTokens,
   normalizeText,
   pickBestCandidate,
+  scoreServedListing,
   sharesSourceAsin,
   tokenizeTitle,
   variantConflicts
@@ -429,6 +430,42 @@ describe("variant check", () => {
   it("finds nothing when no variant carries the source colour", () => {
     expect(findSourceVariant(BLACK_SONY, UK_TWISTER.filter((option) => option.label !== "Black"))).toBeUndefined();
     expect(findSourceVariant({ ...BLACK_SONY, title: "Sony WH-1000XM5", variationTokens: [] }, UK_TWISTER)).toBeUndefined();
+  });
+});
+
+describe("listing Amazon served for the source ASIN", () => {
+  const served = (overrides: Partial<Parameters<typeof scoreServedListing>[1]>) => ({
+    marketplace: "DE" as const,
+    asin: "B0SERVED01",
+    title: "Acme Ultra Widget Model X100",
+    brand: "Acme",
+    ...overrides
+  });
+
+  it("scores the variants a served page has selected with the attributes of its title", () => {
+    const withoutVariants = computeMatchScore(ACME_SOURCE, served({}));
+    const sourceVariants = computeMatchScore(ACME_SOURCE, served({ variants: ["Blue", "2 Pack"] }));
+    const otherVariants = computeMatchScore(ACME_SOURCE, served({ variants: ["Red", "1 Pack"] }));
+
+    expect(withoutVariants).toMatchObject({ variationScore: 0, total: 0.8163 });
+    expect(sourceVariants).toMatchObject({ variationScore: 1, total: 0.8714 });
+    expect(otherVariants).toMatchObject({ variationScore: 0, total: 0.5714 });
+  });
+
+  it("accepts a served listing that scores at least 0.78, with its score", () => {
+    const listing = served({ variants: ["Blue", "2 Pack"] });
+
+    expect(scoreServedListing(ACME_SOURCE, listing)).toEqual(computeMatchScore(ACME_SOURCE, listing));
+  });
+
+  it.each([
+    ["another product", served({ title: "Acme Basic Widget Model Z10 1 Pack" })],
+    ["the same product in another colour and pack", served({ variants: ["Red", "1 Pack"] })],
+    ["the source ASIN, which the ASIN lookup decides", served({ asin: " b000000001 " })],
+    ["no ASIN", served({ asin: undefined })],
+    ["no title", served({ title: "" })]
+  ])("rejects a served listing with %s", (_case, listing) => {
+    expect(scoreServedListing(ACME_SOURCE, listing)).toBeUndefined();
   });
 });
 

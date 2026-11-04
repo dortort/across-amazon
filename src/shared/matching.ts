@@ -6,6 +6,14 @@ const VARIATION_WEIGHT = 0.3;
 
 export const MATCH_THRESHOLD = 0.78;
 
+export interface ScoredListing {
+  marketplace: Marketplace;
+  asin?: string;
+  title: string;
+  brand?: string;
+  variants?: string[];
+}
+
 const STOPWORDS: Record<Marketplace, string[]> = {
   US: ["the", "for", "and", "with", "by", "from"],
   CA: ["the", "for", "and", "with", "by", "from"],
@@ -216,7 +224,7 @@ function sharesDistinctiveModel(sourceTitle: string, candidateTitle: string): bo
   );
 }
 
-function isSameBrandAndModel(source: SourceContext, candidate: SearchCandidate): boolean {
+function isSameBrandAndModel(source: SourceContext, candidate: ScoredListing): boolean {
   const brand = normalizeBrand(source.brand);
   return (
     brand !== "" &&
@@ -289,11 +297,11 @@ export function sharesSourceAsin(
   return jaccardSimilarity(sourceTitleTokens, listingTitleTokens) > 0;
 }
 
-export function computeMatchScore(source: SourceContext, candidate: SearchCandidate): MatchScore {
+export function computeMatchScore(source: SourceContext, candidate: ScoredListing): MatchScore {
   const sourceTitleTokens = tokenizeTitle(source.title, source.marketplace);
   const candidateTitleTokens = tokenizeTitle(candidate.title, candidate.marketplace);
   const sourceAttributes = sourceAttributeTokens(source);
-  const candidateAttributes = extractAttributeTokens(candidate.title);
+  const candidateAttributes = [...new Set([candidate.title, ...(candidate.variants ?? [])].flatMap(extractAttributeTokens))];
 
   const titleSimilarity = jaccardSimilarity(sourceTitleTokens, candidateTitleTokens);
   const titleScore =
@@ -322,6 +330,15 @@ export function computeMatchScore(source: SourceContext, candidate: SearchCandid
     variationScore,
     confidenceLabel: confidenceLabel(total)
   };
+}
+
+export function scoreServedListing(source: SourceContext, listing: ScoredListing): MatchScore | undefined {
+  if (!normalizeAsin(listing.asin) || normalizeAsin(listing.asin) === normalizeAsin(source.asin) || !listing.title) {
+    return undefined;
+  }
+
+  const score = computeMatchScore(source, listing);
+  return score.total >= MATCH_THRESHOLD ? score : undefined;
 }
 
 export function pickBestCandidate(
