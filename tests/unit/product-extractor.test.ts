@@ -1431,8 +1431,10 @@ describe("product extractor other sellers' offers", () => {
       return Array.from({ length: count }, (_, index) => ({ seller: `Seller ${from + index}`, item: `€${700 + from + index}.00`, delivery }));
     }
 
+    const AMAZON_DE_PANEL = new JSDOM(readFileSync(join(OFFERS_FIXTURES, "DE-four-new-offers.html"), "utf8")).window.document;
+
     function pagedPanel(total: number | undefined, listed: SyntheticOffer[], { moreToShow = false } = {}): string {
-      const document = new JSDOM(readFileSync(join(OFFERS_FIXTURES, "DE-four-new-offers.html"), "utf8")).window.document;
+      const document = AMAZON_DE_PANEL.cloneNode(true) as Document;
       const template = document.querySelector("#aod-offer-list #aod-offer");
       const container = template?.parentElement;
       if (!template || !container) {
