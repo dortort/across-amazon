@@ -14,6 +14,7 @@ const ORDINARY_FOLDERS = [
   "source",
   "offers-live",
   "location",
+  "location-live",
   "not-found-live"
 ];
 const CAPTURED_URL = "https://www.amazon.co.uk/dp/B09XS7JWHH";
@@ -70,6 +71,7 @@ describe("robot check", () => {
     expect(notFoundPages.map((entry) => entry.name)).toEqual([
       "product/not-found.html",
       "not-found-live/DE.html",
+      "not-found-live/IT.html",
       "not-found-live/JP.html",
       "not-found-live/MX.html",
       "not-found-live/UK.html"
