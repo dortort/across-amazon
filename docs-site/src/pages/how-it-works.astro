@@ -49,7 +49,10 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
         <li>
           <strong>Looks up your product by its ASIN.</strong> It downloads the store’s page for your product’s ASIN,
           Amazon’s own product identifier. If that page shows your product and it can be bought, that is an exact
-          match. When the store does not list the ASIN, or its listing is unavailable, it searches.
+          match. Some stores answer the ASIN with the page of another listing, as amazon.ca does for some products.
+          That listing is scored the way a search result is. When it passes the matching threshold, the store is
+          compared on it without a search, after the same check of your colour, pack and size. When the store does
+          not list the ASIN, or its listing is unavailable, it searches.
         </li>
         <li>
           <strong>Sets the delivery location, if needed.</strong> On the first page of the store that shows which
@@ -59,7 +62,8 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
           store is left that way afterwards: see <a href="#delivery-location">what it changes on other Amazon stores</a>.
         </li>
         <li>
-          <strong>Searches, if the store does not list the ASIN or its listing is unavailable.</strong> It searches the
+          <strong>Searches, if the store does not list the ASIN or its listing is unavailable.</strong> It also
+          searches when the listing the store served in place of the ASIN does not pass the threshold. It searches the
           store, first for the brand and model number when the title has one, then for the title, brand and selected
           variant. Each result is scored on how closely its title, brand and variant match your product. The best
           result must pass the matching threshold. Its page is then checked for your colour, pack and size. When it
