@@ -7,6 +7,7 @@ import {
   findSourceVariant,
   normalizeAsin,
   pickBestCandidate,
+  scoreServedListing,
   sharesSourceAsin,
   variantConflicts
 } from "../shared/matching";
@@ -643,7 +644,25 @@ function readProductPage(
   );
 }
 
-type AsinLookup = { status: "MATCHED"; productData: ProductExtractionResult } | { status: "DEAD" | "MISSED" };
+const SERVED_LISTING_NOTE = "Matched the listing Amazon served for the ASIN";
+
+type AsinLookup =
+  | { status: "MATCHED"; productData: ProductExtractionResult }
+  | { status: "SERVED"; productData: ProductExtractionResult; score: MatchScore }
+  | { status: "DEAD" | "MISSED" };
+
+function scoreServedProduct(source: SourceContext, productData: ProductExtractionResult): MatchScore | undefined {
+  if (productData.availability === "unavailable") {
+    return undefined;
+  }
+  return scoreServedListing(source, {
+    marketplace: productData.marketplace,
+    asin: productData.asin,
+    title: productData.title ?? "",
+    brand: productData.brand,
+    variants: productData.selectedVariants
+  });
+}
 
 async function lookUpSourceAsin(source: SourceContext, targetMarket: Marketplace, token: RunToken): Promise<AsinLookup> {
   let productData: ProductExtractionResult | undefined;
@@ -657,8 +676,13 @@ async function lookUpSourceAsin(source: SourceContext, targetMarket: Marketplace
     return { status: "MISSED" };
   }
 
-  if (!productData || !sharesSourceAsin(source, { marketplace: targetMarket, asin: productData.asin, title: productData.title })) {
+  if (!productData) {
     return { status: "MISSED" };
+  }
+
+  if (!sharesSourceAsin(source, { marketplace: targetMarket, asin: productData.asin, title: productData.title })) {
+    const score = scoreServedProduct(source, productData);
+    return score ? { status: "SERVED", productData, score } : { status: "MISSED" };
   }
 
   return productData.availability === "unavailable" ? { status: "DEAD" } : { status: "MATCHED", productData };
@@ -680,9 +704,10 @@ async function resolveSourceVariant(
     return { productData, notes: [] };
   }
 
+  const sourceAsin = normalizeAsin(source.asin);
   const option = findSourceVariant(
     source,
-    productData.variantOptions.filter((candidate) => candidate.asin !== productData.asin)
+    productData.variantOptions.filter((candidate) => candidate.asin !== productData.asin && candidate.asin !== sourceAsin)
   );
   if (!option) {
     return undefined;
@@ -712,12 +737,12 @@ async function resolveSourceVariant(
   return { productData: variantData, asin: option.asin, notes: [`Switched to the ${option.label} variant`] };
 }
 
-function buildVariantMismatchResult(marketplace: Marketplace, selectedVariants: string[]): ComparisonResult {
+function buildVariantMismatchResult(marketplace: Marketplace, matchNote: string, selectedVariants: string[]): ComparisonResult {
   return {
     marketplace,
     status: "NO_CONFIDENT_MATCH",
     confidence: 0,
-    notes: ["Matched by search", `Closest listing is another variant: ${selectedVariants.join(", ")}`]
+    notes: [matchNote, `Closest listing is another variant: ${selectedVariants.join(", ")}`]
   };
 }
 
@@ -779,6 +804,32 @@ function buildProductResult(
   };
 }
 
+async function quoteMatchedListing(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  productData: ProductExtractionResult,
+  score: MatchScore,
+  matchNote: string,
+  listingAsin: string | undefined,
+  token: RunToken
+): Promise<ComparisonResult> {
+  const variant = await resolveSourceVariant(source, targetMarket, productData, token);
+  if (!variant) {
+    return buildVariantMismatchResult(targetMarket, matchNote, productData.selectedVariants);
+  }
+
+  const asin = variant.asin ?? listingAsin;
+  const productUrl = asin ? buildProductUrl(targetMarket, asin) : variant.productData.canonicalUrl;
+  return buildProductResult(
+    targetMarket,
+    variant.productData,
+    score,
+    [matchNote, `Match confidence: ${score.confidenceLabel}`, ...variant.notes],
+    productUrl,
+    token.locations.get(targetMarket)
+  );
+}
+
 async function searchForMatch(
   source: SourceContext,
   targetMarket: Marketplace,
@@ -830,8 +881,7 @@ async function compareMarket(
     const match = computeMatchScore(source, {
       marketplace: targetMarket,
       asin: lookup.productData.asin,
-      title: lookup.productData.title ?? "",
-      url: productUrl
+      title: lookup.productData.title ?? ""
     });
     return buildProductResult(
       targetMarket,
@@ -840,6 +890,19 @@ async function compareMarket(
       ["Matched by ASIN"],
       productUrl,
       token.locations.get(targetMarket)
+    );
+  }
+
+  if (lookup.status === "SERVED") {
+    enterPhase("READ");
+    return quoteMatchedListing(
+      source,
+      targetMarket,
+      lookup.productData,
+      lookup.score,
+      SERVED_LISTING_NOTE,
+      lookup.productData.asin,
+      token
     );
   }
 
@@ -854,21 +917,7 @@ async function compareMarket(
     return buildFailedResult(targetMarket, "No product extraction data returned");
   }
 
-  const variant = await resolveSourceVariant(source, targetMarket, productData, token);
-  if (!variant) {
-    return buildVariantMismatchResult(targetMarket, productData.selectedVariants);
-  }
-
-  const asin = variant.asin ?? best.candidate.asin;
-  const productUrl = asin ? buildProductUrl(targetMarket, asin) : variant.productData.canonicalUrl;
-  return buildProductResult(
-    targetMarket,
-    variant.productData,
-    best.score,
-    ["Matched by search", `Match confidence: ${best.score.confidenceLabel}`, ...variant.notes],
-    productUrl,
-    token.locations.get(targetMarket)
-  );
+  return quoteMatchedListing(source, targetMarket, productData, best.score, "Matched by search", best.candidate.asin, token);
 }
 
 async function runPool<T>(items: T[], size: number, work: (item: T) => Promise<void>, stop: () => boolean): Promise<void> {
