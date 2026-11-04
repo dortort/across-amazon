@@ -99,6 +99,7 @@ export interface ProductExtractionResult {
   marketplace: Marketplace;
   asin?: string;
   title?: string;
+  brand?: string;
   selectedVariants: string[];
   variantOptions: VariantOption[];
   canonicalUrl: string;

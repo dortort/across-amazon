@@ -680,6 +680,7 @@ describe("product extractor on live pages of one cable for a delivery address in
     const result = extractLive("CA-domestic-address.html", "CA", "US");
 
     expect(result.asin).toBe("B09LCD851Z");
+    expect(result.brand).toBe("Anker");
     expect(result.breakdown).toEqual({ item: { amount: 16.99, currency: "CAD" }, shipping: { amount: 0, currency: "CAD" } });
     expect(deliveredTotal(result.breakdown)).toEqual({ amount: 16.99, currency: "CAD" });
     expect(result).toMatchObject({
