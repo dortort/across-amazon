@@ -458,6 +458,27 @@ describe("listing Amazon served for the source ASIN", () => {
     expect(scoreServedListing(ACME_SOURCE, listing)).toEqual(computeMatchScore(ACME_SOURCE, listing));
   });
 
+  it("keeps the 2-pack amazon.ca serves for the Anker 3-pack below the threshold", () => {
+    const anker: SourceContext = {
+      marketplace: "US",
+      asin: "B09LCMVB3F",
+      title: "Anker USB C to USB C Cable, 100W Fast Charging Cable(100W, 3.3FT+6FT+10FT)",
+      brand: "Anker",
+      variationTokens: [],
+      sourceUrl: "https://www.amazon.com/dp/B09LCMVB3F"
+    };
+    const twoPack = {
+      marketplace: "CA" as const,
+      asin: "B09LCD851Z",
+      title: "Anker USB-C to USB-C Cable, 100W Type-C Fast Charging",
+      brand: "Anker",
+      variants: ["3.3ft", "Black", "2"]
+    };
+
+    expect(computeMatchScore(anker, twoPack).total).toBe(0.7662);
+    expect(scoreServedListing(anker, twoPack)).toBeUndefined();
+  });
+
   it.each([
     ["another product", served({ title: "Acme Basic Widget Model Z10 1 Pack" })],
     ["the same product in another colour and pack", served({ variants: ["Red", "1 Pack"] })],
