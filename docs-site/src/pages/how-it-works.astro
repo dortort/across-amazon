@@ -52,8 +52,9 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
           match. When the store does not list the ASIN, or its listing is unavailable, it searches.
         </li>
         <li>
-          <strong>Sets the delivery location, if needed.</strong> On the first page it reads on the store, it reads
-          which country the store delivers to. If the store delivers elsewhere, it sets the store’s delivery location to
+          <strong>Sets the delivery location, if needed.</strong> On the first page of the store that shows which
+          country the store delivers to, it reads that country. Some stores’ search pages do not show it, so it waits
+          for the product page after the search. If the store delivers elsewhere, it sets the store’s delivery location to
           your destination country and reads the page again, so the price it reads is quoted for your destination. The
           store is left that way afterwards: see <a href="#delivery-location">what it changes on other Amazon stores</a>.
         </li>
@@ -307,8 +308,9 @@ const amazonHosts = stores.map((store) => `www.${store.domain}`);
       </p>
       <ul>
         <li>
-          <strong>How.</strong> On the first page it reads on a store, the extension reads which country the store
-          delivers to. If that is already your destination country, nothing is sent. Otherwise it makes the same two
+          <strong>How.</strong> On the first page of a store that shows which country the store delivers to, the
+          extension reads that country; a search page that does not show it leaves the store to the product page read
+          after it. If that is already your destination country, nothing is sent. Otherwise it makes the same two
           requests the store’s own <span class="nowrap">“Choose your location”</span> box makes, in your own browser
           session: it loads the location form, taking only its security token and list of countries, then submits your
           country. From version 0.2.0 the requests go from the extension in the background, and again from the store’s
