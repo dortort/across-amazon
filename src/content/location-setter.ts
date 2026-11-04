@@ -127,6 +127,9 @@ export async function setDeliveryLocation(
   if (current === target) {
     return { status: "ALREADY_SET", countryCode: current };
   }
+  if (current === undefined && request.page === "search") {
+    return { status: "NOT_SHOWN" };
+  }
 
   const action = readModalAction(documentRef, origin);
   if (!action) {

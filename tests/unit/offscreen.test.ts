@@ -48,7 +48,7 @@ const SEARCH_REQUEST: SearchExtractionRequest = { marketplace: "DE", limit: 8 };
 const PRODUCT_PAGE = { kind: "product", request: PRODUCT_REQUEST } as const;
 const SHOWN_US_PRODUCT_PAGE = { kind: "product", request: { ...PRODUCT_REQUEST, sourceDestinationCountryCode: "US" } } as const;
 const SEARCH_PAGE = { kind: "search", request: SEARCH_REQUEST } as const;
-const TO_SWITZERLAND: LocationRequest = { marketplace: "DE", countryCode: "CH" };
+const TO_SWITZERLAND: LocationRequest = { marketplace: "DE", countryCode: "CH", page: "product" };
 const SHAPELESS_HTML =
   "<!doctype html><html><head><title>Amazon.co.uk</title></head><body><div><p>Something went wrong</p></div></body></html>";
 const SHIFT_JIS_TITLE = [0x90, 0x56, 0x95, 0x69];
@@ -514,6 +514,26 @@ describe("offscreen page job", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("reads a search page that shows no destination without changing the location", async () => {
+      const url = "https://www.amazon.it/s?k=Sony+WH-1000XM5";
+      const fetchMock = serve(store({ page: htmlAnswer(fixture("location-live/IT-search.html"), { url }) }));
+
+      await expect(
+        runJob({
+          url,
+          page: { kind: "search", request: { marketplace: "IT", limit: 8 } },
+          location: { marketplace: "IT", countryCode: "CH", page: "search" }
+        })
+      ).resolves.toEqual({
+        outcome: "read",
+        finalUrl: url,
+        candidates: [],
+        location: { status: "NOT_SHOWN" },
+        locationRequested: false
+      });
+      expect(requestedPaths(fetchMock)).toEqual(["/s"]);
+    });
+
     it("answers that the location was set without reading the page it set it from", async () => {
       const fetchMock = serve(store({ page: htmlAnswer(onlyOtherSellers("US")), offers: [textAnswer(offersPanel())] }));
 
@@ -545,7 +565,7 @@ describe("offscreen page job", () => {
       const fetchMock = serve(store({ page: htmlAnswer(productHtml((document) => applyLocation(document, "US"))) }));
 
       await expect(
-        runJob({ url: PRODUCT_URL, page: PRODUCT_PAGE, location: { marketplace: "DE", countryCode: "DE" } })
+        runJob({ url: PRODUCT_URL, page: PRODUCT_PAGE, location: { marketplace: "DE", countryCode: "DE", page: "product" } })
       ).resolves.toMatchObject({
         outcome: "read",
         location: { status: "FAILED", reason: "a postcode is needed for an address in the store's own country" },
@@ -657,7 +677,7 @@ describe("offscreen page job", () => {
       useFakeTimers();
       serve(store({ page: later(htmlAnswer(onlyOtherSellers("US")), 14_000), offers: [HELD] }));
       const job = settling(
-        runJob({ url: PRODUCT_URL, page: SHOWN_US_PRODUCT_PAGE, location: { marketplace: "DE", countryCode: "DE" } })
+        runJob({ url: PRODUCT_URL, page: SHOWN_US_PRODUCT_PAGE, location: { marketplace: "DE", countryCode: "DE", page: "product" } })
       );
 
       await vi.advanceTimersByTimeAsync(25_000);

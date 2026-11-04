@@ -30,6 +30,7 @@ import type {
   PageJobFallback,
   PageJobPage,
   PageJobRead,
+  PageKind,
   ProductExtractionRequest,
   ProductExtractionResult,
   RunComparisonProgressPayload,
@@ -425,9 +426,14 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
-function locationRequestFor(source: SourceContext, targetMarket: Marketplace, token: RunToken): LocationRequest | undefined {
+function locationRequestFor(
+  source: SourceContext,
+  targetMarket: Marketplace,
+  token: RunToken,
+  page: PageKind
+): LocationRequest | undefined {
   const countryCode = source.destinationCountryCode;
-  return countryCode && !token.locations.has(targetMarket) ? { marketplace: targetMarket, countryCode } : undefined;
+  return countryCode && !token.locations.has(targetMarket) ? { marketplace: targetMarket, countryCode, page } : undefined;
 }
 
 function expectedDestinationFor(source: SourceContext, targetMarket: Marketplace, token: RunToken): string | undefined {
@@ -436,7 +442,7 @@ function expectedDestinationFor(source: SourceContext, targetMarket: Marketplace
 }
 
 function recordLocation(token: RunToken, targetMarket: Marketplace, location?: LocationResult): void {
-  if (location && location.status !== "NO_WIDGET") {
+  if (location && location.status !== "NO_WIDGET" && location.status !== "NOT_SHOWN") {
     token.locations.set(targetMarket, location);
   }
 }
@@ -445,9 +451,10 @@ async function ensureDeliveryLocation(
   tabId: number,
   source: SourceContext,
   targetMarket: Marketplace,
-  token: RunToken
+  token: RunToken,
+  page: PageKind
 ): Promise<LocationResult | undefined> {
-  const request = locationRequestFor(source, targetMarket, token);
+  const request = locationRequestFor(source, targetMarket, token, page);
   if (!request) {
     return undefined;
   }
@@ -477,10 +484,11 @@ async function readTargetTab<T>(
   targetMarket: Marketplace,
   url: string,
   token: RunToken,
+  page: PageKind,
   read: (tabId: number) => Promise<T>
 ): Promise<T> {
   const first = await readTempTab(url, targetMarket, token, async (tabId) => {
-    const location = await ensureDeliveryLocation(tabId, source, targetMarket, token);
+    const location = await ensureDeliveryLocation(tabId, source, targetMarket, token, page);
     return location?.status === "SET" ? { reopen: true as const } : { reopen: false as const, value: await read(tabId) };
   });
   return first.reopen ? readTempTab(url, targetMarket, token, read) : first.value;
@@ -511,10 +519,11 @@ async function redoLocationInTab(
   targetMarket: Marketplace,
   url: string,
   token: RunToken,
+  page: PageKind,
   failed: LocationResult
 ): Promise<LocationResult | undefined> {
   try {
-    await readTempTab(url, targetMarket, token, (tabId) => ensureDeliveryLocation(tabId, source, targetMarket, token));
+    await readTempTab(url, targetMarket, token, (tabId) => ensureDeliveryLocation(tabId, source, targetMarket, token, page));
   } catch (error) {
     assertNotCancelled(token);
     if (error instanceof RobotCheckError) {
@@ -556,7 +565,7 @@ async function readPage<T>(
 ): Promise<T> {
   const read = once(onRead);
   const inTab = (): Promise<T> =>
-    readTargetTab(source, targetMarket, url, token, (tabId) => {
+    readTargetTab(source, targetMarket, url, token, spec.job.kind, (tabId) => {
       read();
       return spec.inTab(tabId);
     });
@@ -572,7 +581,7 @@ async function readPage<T>(
         runKey: token.key,
         url,
         page: spec.job,
-        location: locationRequestFor(source, targetMarket, token),
+        location: locationRequestFor(source, targetMarket, token, spec.job.kind),
         expectDestination: expectedDestinationFor(source, targetMarket, token)
       },
       token.controller.signal
@@ -596,7 +605,7 @@ async function readPage<T>(
           recordLocation(token, targetMarket, result.location);
           return spec.fromJob(result);
         }
-        const redone = await redoLocationInTab(source, targetMarket, url, token, failed);
+        const redone = await redoLocationInTab(source, targetMarket, url, token, spec.job.kind, failed);
         if (redone?.status !== "SET" && redone?.status !== "ALREADY_SET") {
           return spec.fromJob(result);
         }

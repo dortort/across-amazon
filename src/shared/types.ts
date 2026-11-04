@@ -135,9 +135,10 @@ export interface ProductExtractionRequest {
 export interface LocationRequest {
   marketplace: Marketplace;
   countryCode: string;
+  page: PageKind;
 }
 
-export type LocationStatus = "ALREADY_SET" | "SET" | "NO_WIDGET" | "NOT_OFFERED" | "FAILED";
+export type LocationStatus = "ALREADY_SET" | "SET" | "NOT_SHOWN" | "NO_WIDGET" | "NOT_OFFERED" | "FAILED";
 
 export interface LocationResult {
   status: LocationStatus;
