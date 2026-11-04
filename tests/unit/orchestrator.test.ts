@@ -68,6 +68,9 @@ const NO_HOST_ACCESS_ERROR =
   "Cannot access contents of the page. Extension manifest must request permission to access the respective host.";
 const ERROR_PAGE_ERROR = "Frame with ID 0 is showing error page";
 const NOT_ACCEPTED_NOTE = "Delivery location not set: Amazon did not accept the change";
+const SERVED_NOTE = "Matched the listing Amazon served for the ASIN";
+const SOURCE_ASIN_URL_DE = "https://www.amazon.de/dp/B000000001";
+const UNRELATED_TITLE = "Acme Basic Widget Model Z10 1 Pack";
 const ROBOT_CHECK_HTML = readFileSync(join(FIXTURE_ROOT, "robot-check.html"), "utf8");
 const SERVICE_UNAVAILABLE_HTML = readFileSync(join(FIXTURE_ROOT, "service-unavailable.html"), "utf8");
 const CHECKPOINT_PATH = "/checkpoint/continue?token=TEST-CHECKPOINT-TOKEN";
@@ -1073,6 +1076,13 @@ function addColourTwister(document: Document, selected: string, options: Array<[
   );
 }
 
+function retitleServedPage(document: Document, title: string): void {
+  const element = document.querySelector("#productTitle");
+  if (document.URL === SOURCE_ASIN_URL_DE && element) {
+    element.textContent = title;
+  }
+}
+
 function replaceOfferWithLiveBlocks(document: Document, file: string, blocks: string[]): void {
   for (const selector of OFFER_SELECTORS) {
     removeElement(document, selector);
@@ -1201,15 +1211,16 @@ describe("background orchestrator", () => {
         ]
       });
       expect(payload.results.find((result) => result.marketplace === "ES")).toMatchObject({
+        confidence: 0.87,
         productUrl: "https://www.amazon.es/dp/B000000008",
-        notes: ["Matched by search", "Match confidence: HIGH"]
+        notes: [SERVED_NOTE, "Match confidence: MEDIUM"]
       });
 
       expect(fetchedOn(harness, "UK")).toEqual(["product/UK"]);
       expect(fetchedOn(harness, "DE")).toEqual(["missing/DE", "search/DE", "product/DE"]);
       expect(fetchedOn(harness, "FR")).toEqual(["missing/FR", "search/FR"]);
       expect(fetchedOn(harness, "IT")).toEqual(["missing/IT", "search/IT", "product/IT"]);
-      expect(fetchedOn(harness, "ES")).toEqual(["product/ES", "search/ES", "product/ES"]);
+      expect(fetchedOn(harness, "ES")).toEqual(["product/ES"]);
       expect(fetchedOn(harness, "JP")).toEqual(["product/JP"]);
       expect(openedOn(harness, "JP")).toEqual(["product/JP"]);
       for (const market of ["UK", "DE", "FR", "IT", "ES"] as const) {
@@ -1555,14 +1566,116 @@ describe("background orchestrator", () => {
       expect(harness.openTempTabs()).toEqual([]);
     });
 
-    it("searches a marketplace whose page for the source ASIN shows another product", async () => {
+    const SERVED_DE_RESULT: ComparisonResult = {
+      ...EXPECTED_DE_RESULT,
+      confidence: 0.87,
+      notes: [SERVED_NOTE, "Match confidence: MEDIUM"]
+    };
+
+    it("quotes the listing a marketplace serves for the source ASIN when it scores as the same product, without searching", async () => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"], redirectAsinOn: ["DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([SERVED_DE_RESULT]);
+      expect(harness.pageFetchUrls()).toEqual([SOURCE_ASIN_URL_DE]);
+      expect(marketEvents(harness, "DE").filter((event) => event.startsWith("progress "))).toEqual([
+        "progress OPEN DE",
+        "progress READ DE"
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("quotes the served listing from the one page a tab reads when the extension reads pages in tabs", async () => {
+      const harness = await bootServiceWorker({ ...TAB_PATH, enabledMarketplaces: ["US", "DE"], redirectAsinOn: ["DE"] });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([SERVED_DE_RESULT]);
+      expect(openedOn(harness, "DE")).toEqual(["product/DE"]);
+      expect(harness.fetch).not.toHaveBeenCalledWith(expect.stringContaining("amazon.de"), expect.anything());
+      expect(harness.openTempTabs()).toEqual([]);
+    });
+
+    it("weighs the served listing's brand line in its score", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        redirectAsinOn: ["DE"],
+        prepare: (group, _market, document) => {
+          if (group === "product" && document.URL === SOURCE_ASIN_URL_DE) {
+            document.body.insertAdjacentHTML("beforeend", '<a id="bylineInfo">Visit the Acme Store</a>');
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([{ ...SERVED_DE_RESULT, confidence: 0.92, notes: [SERVED_NOTE, "Match confidence: HIGH"] }]);
+    });
+
+    it("searches as before when the listing served for the source ASIN does not score as the same product", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        redirectAsinOn: ["DE"],
+        prepare: (_group, _market, document) => retitleServedPage(document, UNRELATED_TITLE)
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
+      expect(harness.pageFetchUrls()).toEqual([
+        SOURCE_ASIN_URL_DE,
+        "https://www.amazon.de/s?k=Acme%20Ultra%20Widget%20Model%20X100%202%20Pack%20Blue%20Acme%202%20pack%2016%20oz%20blue",
+        "https://www.amazon.de/dp/B000000005"
+      ]);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("searches when the listing served for the source ASIN is currently unavailable", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        redirectAsinOn: ["DE"],
+        prepare: (group, _market, document) => {
+          if (group === "product" && document.URL === SOURCE_ASIN_URL_DE) {
+            for (const selector of OFFER_SELECTORS) {
+              removeElement(document, selector);
+            }
+            document.body.insertAdjacentHTML("beforeend", '<div id="availability"><span>Currently unavailable.</span></div>');
+          }
+        }
+      });
 
       const payload = await runViaWorker(harness);
 
       expect(payload.results).toEqual([EXPECTED_DE_RESULT]);
       expect(fetchedOn(harness, "DE")).toEqual(["product/DE", "search/DE", "product/DE"]);
-      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
+    it("reports the served listing's other variant without reading the page for the source ASIN again", async () => {
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "DE"],
+        redirectAsinOn: ["DE"],
+        prepare: (group, _market, document) => {
+          if (group === "product") {
+            addColourTwister(document, "Red", [
+              ["B000000005", "Red"],
+              ["B000000001", "Blue"]
+            ]);
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "DE",
+          status: "NO_CONFIDENT_MATCH",
+          confidence: 0,
+          notes: [SERVED_NOTE, "Closest listing is another variant: Red"]
+        }
+      ]);
+      expect(harness.pageFetchUrls()).toEqual([SOURCE_ASIN_URL_DE]);
     });
 
     it("does not trust the source ASIN on a page whose title has nothing in common with the source", async () => {
@@ -1935,8 +2048,9 @@ describe("background orchestrator", () => {
         locations: { US: "CH" },
         redirectAsinOn: ["DE"],
         prepare: (group, _market, document) => {
-          if (group === "product" && document.URL === "https://www.amazon.de/dp/B000000001") {
+          if (group === "product" && document.URL === SOURCE_ASIN_URL_DE) {
             removeLocationFields(document);
+            retitleServedPage(document, UNRELATED_TITLE);
           }
         }
       });
@@ -3075,7 +3189,8 @@ describe("background orchestrator", () => {
       ["the key of version 4, before dead listings fell back to a search", 4],
       ["the key of version 5, before target stores were set to the destination", 5],
       ["the key of version 6, before other sellers' offers were read", 6],
-      ["the key of version 7, before robot checks were recognised", 7]
+      ["the key of version 7, before robot checks were recognised", 7],
+      ["the key of version 8, before the listing a store serves for the source ASIN was scored", 8]
     ])("ignores a comparison cached under %s", async (_key, version) => {
       const harness = await bootServiceWorker({ enabledMarketplaces: ["US", "DE"] });
       const staleKey = earlierCacheKeyFor(["DE"], version);
