@@ -239,7 +239,7 @@ describe("production build of the manifest icons", () => {
   });
 
   it("ships the 48 px icon the popup header references from the extension root", async () => {
-    expect(await readBuiltFile("popup.js")).toContain('"/icons/icon-48.png"');
+    expect(await readBuiltFile("popup.js")).toMatch(/(["'`])\/icons\/icon-48\.png\1/);
     const png = await readFile(builtPath("icons/icon-48.png"));
 
     expect({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }).toEqual({ width: 48, height: 48 });
