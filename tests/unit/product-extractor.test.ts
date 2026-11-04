@@ -1644,16 +1644,16 @@ describe("product extractor other sellers' offers", () => {
 
     it("reads at most three pages", async () => {
       const fetchRef = fetchPages({
-        1: pagedPanel(40, offers(10, 1)),
-        2: pagedPanel(40, offers(10, 11)),
-        3: pagedPanel(40, offers(10, 21)),
-        4: pagedPanel(40, offers(10, 31))
+        1: pagedPanel(8, offers(2, 1)),
+        2: pagedPanel(8, offers(2, 3)),
+        3: pagedPanel(8, offers(2, 5)),
+        4: pagedPanel(8, offers(2, 7))
       });
 
       const result = await read(legoPage("DE"), "DE", fetchRef);
 
       expect(requestedPages(fetchRef)).toEqual([1, 2, 3]);
-      expect(result.otherOffers).toHaveLength(30);
+      expect(result.otherOffers).toHaveLength(6);
     });
 
     it("keeps the offers already read when a later page cannot be read", async () => {
