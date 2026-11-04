@@ -692,6 +692,22 @@ describe("product extractor on live pages of one cable for a delivery address in
     expect(result.notes).toEqual([NO_IMPORT_FEES_NOTE, "Destination mismatch detected (CA)"]);
   });
 
+  it("reads the page amazon.ca serves at the address of the Anker cable as another, currently unavailable listing", () => {
+    const result = extractLive("CA-served-for-another-asin.html", "CA", "CH");
+
+    expect(result).toMatchObject({
+      asin: "B09LCD851Z",
+      title: "Anker USB-C to USB-C Cable, 100W Type-C Fast Charging",
+      brand: "Anker",
+      selectedVariants: ["3.3ft", "Black", "2"],
+      destinationCountryCode: "CH",
+      destinationMatched: true,
+      availability: "unavailable"
+    });
+    expect(result.breakdown).toBeUndefined();
+    expect(result.variantOptions).toContainEqual({ asin: "B09LCJPZ1P", label: "6ft" });
+  });
+
   it("reads the centre column price of the amazon.ca page, not its per-unit price, when the buy box shows none", () => {
     const result = extractLive("CA-domestic-address.html", "CA", "US", (document) => {
       document.querySelectorAll("#corePrice_feature_div").forEach((element) => element.remove());

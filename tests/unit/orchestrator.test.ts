@@ -1651,6 +1651,37 @@ describe("background orchestrator", () => {
       expect(fetchedOn(harness, "DE")).toEqual(["product/DE", "search/DE", "product/DE"]);
     });
 
+    it("searches amazon.ca as before for the live page it serves for the Anker cable, a currently unavailable 2-pack", async () => {
+      const ankerUrl = "https://www.amazon.ca/dp/B09LCMVB3F";
+      const served = new JSDOM(readFileSync(join(FIXTURE_ROOT, "product-live", "CA-served-for-another-asin.html"), "utf8"));
+      const harness = await bootServiceWorker({
+        enabledMarketplaces: ["US", "CA"],
+        activeUrl: "https://www.amazon.com/dp/B09LCMVB3F",
+        activeHtml: readFileSync(join(FIXTURE_ROOT, "product-live", "US-no-import-charges.html"), "utf8"),
+        redirectAsinOn: ["CA"],
+        prepare: (group, _market, document) => {
+          if (group === "product" && document.URL === ankerUrl) {
+            document.documentElement.innerHTML = served.window.document.documentElement.innerHTML;
+          }
+        }
+      });
+
+      const payload = await runViaWorker(harness);
+
+      expect(payload.results).toEqual([
+        {
+          marketplace: "CA",
+          status: "NO_CONFIDENT_MATCH",
+          confidence: 0,
+          notes: ["No candidate passed conservative confidence threshold"]
+        }
+      ]);
+      expect(harness.pageFetches[0]).toMatchObject({ label: "product/CA", url: ankerUrl });
+      expect(harness.pageFetchUrls().filter((url) => url.includes("/dp/"))).toEqual([ankerUrl]);
+      expect(harness.pageFetchUrls().slice(1).every((url) => url.startsWith("https://www.amazon.ca/s?k="))).toBe(true);
+      expect(harness.tabsCreate).not.toHaveBeenCalled();
+    });
+
     it("reports the served listing's other variant without reading the page for the source ASIN again", async () => {
       const harness = await bootServiceWorker({
         enabledMarketplaces: ["US", "DE"],
