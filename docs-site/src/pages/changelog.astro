@@ -17,7 +17,7 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
         <header class="release-head">
           <div class="release-title">
             <h2 id="v0-2-1">0.2.1</h2>
-            <p class="release-label">No repeated location change</p>
+            <p class="release-label">More stores compared, no repeated location change</p>
           </div>
           <p class="release-status">
             Prepared for the Chrome Web Store, not published yet. Until it is, the store offers 0.2.0.
@@ -26,6 +26,16 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
 
         <h3 id="v0-2-1-what-changed">What changed</h3>
         <ul>
+          <li>
+            <strong>A store that answers with another listing is compared.</strong> Some stores answer your product’s
+            ASIN with the page of another listing, as amazon.ca does for some products. Such a store was taken for one
+            that does not list your product, and the search that followed often found no confident match. That listing
+            is now scored the way a search result is, on its title, brand and selected variant, against the same
+            threshold. When it passes, the store is compared on it without a search, and like a search result it shows
+            <span class="nowrap">“Check match”</span> when the extension is less than 90% sure. Otherwise the store is
+            searched as before. A result stored by 0.2.0 is not reused, so the first check of each product looks at
+            every store again.
+          </li>
           <li>
             <strong>No location change from a search page that does not show it.</strong> When a store does not list
             your product, the check searches it. Some stores’ search pages, amazon.it’s among them, do not say which
