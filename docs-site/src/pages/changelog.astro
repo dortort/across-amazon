@@ -20,8 +20,8 @@ const storeCountries = new Intl.ListFormat("en-GB", { type: "conjunction" }).for
             <p class="release-label">More stores compared, no repeated location change</p>
           </div>
           <p class="release-status">
-            Submitted to the Chrome Web Store on <time datetime="2026-11-07">2026-11-07</time>. Until it is published,
-            the store offers 0.2.0.
+            Published on the {isStoreLive ? <a href={chromeWebStoreUrl}>Chrome Web Store</a> : "Chrome Web Store"} on{" "}
+            <time datetime="2026-11-07">2026-11-07</time>.
           </p>
         </header>
 
