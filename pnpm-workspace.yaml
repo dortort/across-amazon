@@ -1,2 +1,5 @@
 packages:
   - .
+
+overrides:
+  minimatch@^10: ^11.0.5
